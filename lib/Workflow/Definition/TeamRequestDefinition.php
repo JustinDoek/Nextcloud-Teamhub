@@ -3,10 +3,12 @@ declare(strict_types=1);
 
 namespace OCA\TeamHub\Workflow\Definition;
 
+use OCA\TeamHub\MyWork\SourceGroup;
 use OCA\TeamHub\Exception\ValidationException;
 use OCA\TeamHub\Service\ServiceTeam\ServiceTeamService;
 use OCA\TeamHub\Service\Workflow\WorkflowActorResolver;
 use OCA\TeamHub\Workflow\IWorkflowDefinition;
+use OCA\TeamHub\Workflow\IWorkflowDefinitionSource;
 use OCA\TeamHub\Workflow\WorkflowActor;
 use OCA\TeamHub\Workflow\WorkflowDefinitionRegistry;
 use OCA\TeamHub\Workflow\WorkflowStepDefinition;
@@ -57,7 +59,7 @@ use OCP\IL10N;
  * request already with the administrators stays with them, and no
  * transition verb reads the licence — a workflow in flight always finishes.
  */
-class TeamRequestDefinition implements IWorkflowDefinition {
+class TeamRequestDefinition implements IWorkflowDefinition, IWorkflowDefinitionSource {
 
     public const KEY     = 'team_request';
     public const VERSION = 2;
@@ -141,6 +143,14 @@ class TeamRequestDefinition implements IWorkflowDefinition {
         }
         $serviceTeamId = $this->serviceTeams->serviceTeamForDefinition(self::KEY);
         return $serviceTeamId === null ? null : WorkflowActor::serviceAgent($serviceTeamId);
+    }
+
+    /**
+     * v4.11.41 — the My Work source chip these requests appear under.
+     * Asked by a person about a team, so it belongs with the team work.
+     */
+    public function sourceGroup(): string {
+        return SourceGroup::TEAMS;
     }
 
     public function getConcurrency(): string {

@@ -8,6 +8,7 @@ use OCA\TeamHub\Service\DecisionCategoryService;
 use OCA\TeamHub\Service\DecisionExternalLinkService;
 use OCA\TeamHub\Service\DecisionLinkService;
 use OCA\TeamHub\Service\DecisionMeetingService;
+use OCA\TeamHub\Service\DecisionReviewService;
 use OCA\TeamHub\Service\DecisionService;
 use OCA\TeamHub\Service\DecisionTaskService;
 use OCA\TeamHub\Service\DecisionTeamService;
@@ -65,6 +66,8 @@ class DecisionController extends Controller {
         private DecisionLinkService     $linkService,
         private DecisionMeetingService  $meetingService,
         private DecisionExternalLinkService $extLinkService,
+        // v4.11.18 — the review and retirement cycle of an approved decision.
+        private DecisionReviewService   $reviewService,
         private MemberService           $memberService,
         private IUserSession            $userSession,
         private LoggerInterface         $logger,
@@ -119,7 +122,11 @@ class DecisionController extends Controller {
                 }
                 $data['decisions_action_min_level'] = $val;
             }
-            return new JSONResponse($this->decisionTeamService->saveConfig($teamId, $data));
+            // v4.11.18 — the acting admin is recorded as `created_by` on the
+            // categories the service seeds when the module comes on.
+            return new JSONResponse(
+                $this->decisionTeamService->saveConfig($teamId, $data, $this->requireUser()),
+            );
         } catch (\RuntimeException $e) {
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_NOT_FOUND);
         } catch (\InvalidArgumentException $e) {
@@ -540,6 +547,43 @@ class DecisionController extends Controller {
     }
 
     /**
+     * PUT /api/v1/teams/{teamId}/decisions/{decisionId}/public
+     * Body: { public: bool }
+     *
+     * Publish a decision, or take it back into the team (v4.11.12, Justin
+     * 2026-09-30). **Public means readable by every logged-in account on this
+     * instance** — instance-wide, never anonymous: no route serving a
+     * decision is a `#[PublicPage]` and there is no share token.
+     *
+     * Gated on the team's own `decisions_action_min_level`, the same gate as
+     * *Link decision* and *Link task*, so a team that wants publishing to be
+     * an admin's call raises that one setting rather than a second one.
+     * RuntimeException is a 403 here, as it is on the link routes: the only
+     * thing it reports is that gate.
+     */
+    #[NoAdminRequired]
+    public function setPublic(string $teamId, int $decisionId): JSONResponse {
+        try {
+            $uid  = $this->requireUser();
+            $body = $this->request->getParams();
+            if (!array_key_exists('public', $body)) {
+                return new JSONResponse(['error' => 'public is required'], Http::STATUS_BAD_REQUEST);
+            }
+            $public = filter_var($body['public'], FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+            if ($public === null) {
+                return new JSONResponse(['error' => 'public must be a boolean'], Http::STATUS_BAD_REQUEST);
+            }
+            return new JSONResponse($this->decisionService->setPublic($teamId, $decisionId, $public, $uid));
+        } catch (\InvalidArgumentException $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+        } catch (\RuntimeException $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_FORBIDDEN);
+        } catch (\Throwable $e) {
+            return $this->mapError($e, 'setPublic');
+        }
+    }
+
+    /**
      * POST /api/v1/teams/{teamId}/decisions/{decisionId}/approve
      * Body: {} — empty
      *
@@ -614,6 +658,284 @@ class DecisionController extends Controller {
     }
 
     // =========================================================================
+    // Review and retirement — v4.11.18
+    // =========================================================================
+
+    /**
+     * GET /api/v1/teams/{teamId}/decisions/{decisionId}/reviews
+     *
+     * Every review of a decision, newest first. Any team member can read;
+     * the service checks membership and that the id is a decision of this
+     * team.
+     *
+     * No `#[NoCSRFRequired]`: `@nextcloud/axios` sends the token on reads
+     * too, so there is nothing to exempt (CLAUDE.md § PHP standards).
+     */
+    #[NoAdminRequired]
+    public function listReviews(string $teamId, int $decisionId): JSONResponse {
+        try {
+            $this->requireUser();
+            $items = $this->reviewService->listForDecision($teamId, $decisionId);
+            return new JSONResponse(['items' => $items]);
+        } catch (DoesNotExistException) {
+            return new JSONResponse(['error' => 'Decision not found'], Http::STATUS_NOT_FOUND);
+        } catch (\RuntimeException $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_NOT_FOUND);
+        } catch (\Throwable $e) {
+            return $this->mapError($e, 'listReviews');
+        }
+    }
+
+    /**
+     * POST /api/v1/teams/{teamId}/decisions/{decisionId}/reviews
+     * Body: { motivation: string, proposed_question?: string,
+     *         proposed_answer?: string, attachment_file_id?: int,
+     *         attachment_name?: string }
+     *
+     * Any team member may ask the category's approvers to look at an
+     * approved decision again. The motivation is required — the approver is
+     * being asked to spend their attention.
+     *
+     * v4.11.30 — the request may carry the wording it is asking for and one
+     * file. Both optional, and a request with neither is the 4.11.18 shape:
+     * *look at this again*, with nothing proposed. `attachment_file_id` is a
+     * file in the **requester's** own Nextcloud; the server copies it into
+     * the decision's proposal folder, so a 400 here can mean the file could
+     * not be read and a 404 can mean the team has no team folder to put it
+     * in.
+     *
+     * 409 when a review is already open: the client should refresh and show
+     * the one that is running rather than offer the button again.
+     */
+    #[NoAdminRequired]
+    public function requestReview(string $teamId, int $decisionId): JSONResponse {
+        try {
+            $uid        = $this->requireUser();
+            $body       = $this->request->getParams();
+            $motivation = isset($body['motivation']) ? (string)$body['motivation'] : '';
+            // v4.11.30 — what the requester asks the decision to say, and
+            // the file it should say it from. All optional: a request that
+            // only asks for a look is still a review. Null and not '' for
+            // the two wording fields — the service reads null as "nothing
+            // was proposed", which is what decides whether the approver gets
+            // a one-click Approve.
+            $proposedQuestion = isset($body['proposed_question']) ? (string)$body['proposed_question'] : null;
+            $proposedAnswer   = isset($body['proposed_answer']) ? (string)$body['proposed_answer'] : null;
+            $attachmentFileId = isset($body['attachment_file_id']) && $body['attachment_file_id'] !== '' && $body['attachment_file_id'] !== null
+                ? (int)$body['attachment_file_id'] : null;
+            $attachmentName   = isset($body['attachment_name']) ? (string)$body['attachment_name'] : null;
+
+            $out = $this->reviewService->request(
+                $teamId,
+                $decisionId,
+                $motivation,
+                $uid,
+                $proposedQuestion,
+                $proposedAnswer,
+                $attachmentFileId,
+                $attachmentName,
+            );
+            return new JSONResponse($out);
+        } catch (\InvalidArgumentException $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+        } catch (AccessDeniedException $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_FORBIDDEN);
+        } catch (\RuntimeException $e) {
+            // "already open" is a conflict, not a missing resource: the
+            // request was well-formed and the state refused it.
+            if (str_contains($e->getMessage(), 'already open')) {
+                return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_CONFLICT);
+            }
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_NOT_FOUND);
+        } catch (\Throwable $e) {
+            return $this->mapError($e, 'requestReview');
+        }
+    }
+
+    /**
+     * POST /api/v1/teams/{teamId}/decisions/{decisionId}/reviews/complete
+     * Body: { outcome: 'denied'|'accepted'|'kept'|'archived', reason: string,
+     *         question?: string, answer?: string }
+     *
+     * Approver-gated. `denied` and `kept` leave the decision alone and
+     * restart its review clock; `accepted` rewrites its wording in place and
+     * restarts the clock; `archived` retires it into the team's archive
+     * category. Returns the decision, because that is what the client
+     * renders afterwards.
+     *
+     * v4.11.23 — the reason is **required** (`400` without it), as it is for
+     * approve and deny. It was `note?` and optional until then.
+     *
+     * v4.11.26 — `question` and `answer` carry the new wording for
+     * `accepted`, which no longer reopens the decision for redrafting. At
+     * least one of them must be present **and** actually differ, or the call
+     * is a `400`: an accept that alters nothing is a deny with the wrong
+     * label. They are ignored for the other three outcomes rather than
+     * refused — a client that sends them with `kept` is confused, not
+     * dangerous, and the service writes nothing from them.
+     */
+    #[NoAdminRequired]
+    public function completeReview(string $teamId, int $decisionId): JSONResponse {
+        try {
+            $uid      = $this->requireUser();
+            $body     = $this->request->getParams();
+            $outcome  = isset($body['outcome']) ? (string)$body['outcome'] : '';
+            $reason   = isset($body['reason']) ? (string)$body['reason'] : '';
+            // Null, not '' — the service reads null as "leave this field
+            // alone", and an absent key must not blank a decision's wording.
+            $question = isset($body['question']) ? (string)$body['question'] : null;
+            $answer   = isset($body['answer']) ? (string)$body['answer'] : null;
+
+            $out = $this->reviewService->complete(
+                $teamId,
+                $decisionId,
+                $outcome,
+                $reason,
+                $uid,
+                $question,
+                $answer,
+            );
+            return new JSONResponse($out);
+        } catch (\InvalidArgumentException $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+        } catch (AccessDeniedException $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_FORBIDDEN);
+        } catch (\RuntimeException $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_NOT_FOUND);
+        } catch (\Throwable $e) {
+            return $this->mapError($e, 'completeReview');
+        }
+    }
+
+    /**
+     * POST /api/v1/teams/{teamId}/decisions/{decisionId}/archive
+     * Body: { reason: string }
+     *
+     * v4.11.24 — retire an approved decision outright, with no review
+     * behind it: the Actions-menu half of *archive*, where the periodic
+     * review is the other half. Approver-gated, reason required (`400`),
+     * and refused while a review is open (`404` with the reason) — that
+     * review is where this gets decided.
+     */
+    #[NoAdminRequired]
+    public function archive(string $teamId, int $decisionId): JSONResponse {
+        try {
+            $uid    = $this->requireUser();
+            $body   = $this->request->getParams();
+            $reason = isset($body['reason']) ? (string)$body['reason'] : '';
+
+            $out = $this->reviewService->archive($teamId, $decisionId, $reason, $uid);
+            return new JSONResponse($out);
+        } catch (\InvalidArgumentException $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+        } catch (AccessDeniedException $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_FORBIDDEN);
+        } catch (\RuntimeException $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_NOT_FOUND);
+        } catch (\Throwable $e) {
+            return $this->mapError($e, 'archive');
+        }
+    }
+
+    /**
+     * POST /api/v1/teams/{teamId}/decisions/{decisionId}/category
+     * Body: { category: string }
+     *
+     * v4.11.30 — move a decision into the category it should have been
+     * proposed in. Gated on being an approver of the category it is in
+     * **now**, which is the way round the problem comes: the people who find
+     * a decision in their queue that does not belong to them are the ones
+     * who need to push it out.
+     *
+     * 400 for a target that is not one of the team's categories, is the
+     * archive (archiving has its own verb and its own mandatory reason), or
+     * is the category the decision is already in. 404 for a retired decision
+     * and while a review is open — answer the review first. 403 for anyone
+     * who is not an approver of the current category.
+     */
+    #[NoAdminRequired]
+    public function moveCategory(string $teamId, int $decisionId): JSONResponse {
+        try {
+            $uid      = $this->requireUser();
+            $body     = $this->request->getParams();
+            $category = isset($body['category']) ? (string)$body['category'] : '';
+
+            $out = $this->decisionService->moveToCategory($teamId, $decisionId, $category, $uid);
+            return new JSONResponse($out);
+        } catch (\InvalidArgumentException $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+        } catch (AccessDeniedException $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_FORBIDDEN);
+        } catch (\RuntimeException $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_NOT_FOUND);
+        } catch (\Throwable $e) {
+            return $this->mapError($e, 'moveCategory');
+        }
+    }
+
+    /**
+     * POST /api/v1/teams/{teamId}/decisions/{decisionId}/supersede
+     * Body: { supersededById: int }
+     *
+     * Approver-gated. Records that a newer approved decision overrules this
+     * one and retires this one into the archive. The button is on the
+     * decision being retired; the id in the body is the one replacing it.
+     */
+    #[NoAdminRequired]
+    public function supersede(string $teamId, int $decisionId): JSONResponse {
+        try {
+            $uid  = $this->requireUser();
+            $body = $this->request->getParams();
+
+            $replacement = isset($body['supersededById']) ? (int)$body['supersededById'] : 0;
+            if ($replacement <= 0) {
+                return new JSONResponse(
+                    ['error' => 'supersededById is required'],
+                    Http::STATUS_BAD_REQUEST,
+                );
+            }
+
+            $out = $this->reviewService->supersede($teamId, $decisionId, $replacement, $uid);
+            return new JSONResponse($out);
+        } catch (\InvalidArgumentException $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+        } catch (AccessDeniedException $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_FORBIDDEN);
+        } catch (\RuntimeException $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_NOT_FOUND);
+        } catch (\Throwable $e) {
+            return $this->mapError($e, 'supersede');
+        }
+    }
+
+    /**
+     * GET /api/v1/teams/{teamId}/decisions/{decisionId}/supersede-options?q=
+     *
+     * The approved decisions of this team that could replace this one — the
+     * picker behind *Supersede*. Read by any team member; the act itself is
+     * approver-gated.
+     *
+     * v4.11.19 — searchable, and **at most four**. A picker is for
+     * recognising the decision you already have in mind; the same number and
+     * the same reasoning as the service desk's *Link a decision* picker.
+     */
+    #[NoAdminRequired]
+    public function supersedeOptions(string $teamId, int $decisionId): JSONResponse {
+        try {
+            $this->requireUser();
+            $term  = (string)($this->request->getParam('q', '') ?? '');
+            $items = $this->reviewService->supersedeCandidates($teamId, $decisionId, $term);
+            return new JSONResponse(['items' => $items]);
+        } catch (\InvalidArgumentException $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+        } catch (\RuntimeException $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_NOT_FOUND);
+        } catch (\Throwable $e) {
+            return $this->mapError($e, 'supersedeOptions');
+        }
+    }
+
+    // =========================================================================
     // Helpers
     // =========================================================================
 
@@ -678,6 +1000,12 @@ class DecisionController extends Controller {
             $body        = $this->request->getParams();
             $icon        = isset($body['icon'])        ? (string)$body['icon']        : null;
             $description = isset($body['description']) ? (string)$body['description'] : null;
+            // v4.11.18 — months, 0 = no review. Absent means 0, which is what
+            // every category created before this version carries. The range
+            // is checked in the service, so a typo gets a sentence rather
+            // than being clamped into something nobody asked for.
+            $reviewMonths = isset($body['review_period_months'])
+                ? (int)$body['review_period_months'] : 0;
 
             $created = $this->categoryService->createCategory(
                 $teamId,
@@ -686,6 +1014,12 @@ class DecisionController extends Controller {
                 $approvers,
                 $icon,
                 $description,
+                $reviewMonths,
+                // `is_archive` is deliberately not settable over the API: the
+                // archive is created with the module and there is exactly one
+                // per team. A second one would give `archiveCategory()` two
+                // answers.
+                false,
             );
             return new JSONResponse($created, Http::STATUS_CREATED);
         } catch (\InvalidArgumentException $e) {
@@ -706,6 +1040,11 @@ class DecisionController extends Controller {
             $body        = $this->request->getParams();
             $icon        = array_key_exists('icon', $body)        ? ($body['icon'] === '' ? null : (string)$body['icon']) : false;
             $description = array_key_exists('description', $body) ? ($body['description'] === '' ? null : (string)$body['description']) : false;
+            // v4.11.18 — null means "leave it", which is why this is keyed on
+            // presence and not on a falsy check: 0 is a meaningful value here
+            // ("stop reviewing this category's decisions").
+            $reviewMonths = array_key_exists('review_period_months', $body)
+                ? (int)$body['review_period_months'] : null;
 
             $updated = $this->categoryService->updateCategory(
                 $teamId,
@@ -714,6 +1053,7 @@ class DecisionController extends Controller {
                 $approvers,
                 $icon === false ? false : $icon,
                 $description === false ? false : $description,
+                $reviewMonths,
             );
             return new JSONResponse($updated);
         } catch (DoesNotExistException) {

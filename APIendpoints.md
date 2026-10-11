@@ -396,6 +396,7 @@ A **service team** is a team created from the **Service** template that answers 
 | `GET /api/v1/service-teams/catalogue` | Every service any **active** desk offers: `serviceKey`, `definitionKey`, `label`, `description`, `category`, `categoryLabel`, `leadTime`, `serviceTeamId`, `serviceTeamName`. One payload for the whole Services page — A–Z, the grouping by team and the category tiles are all derived from it client-side (v4.10.25, DESIGN §2.147) |
 | `GET /api/v1/service-teams/claim-status` | `{ available, claimed, holderName, availableServices }` — whether this instance has the Nextcloud services and whether a team already holds them. Any signed-in account: it is what the creation wizard's checkbox reads before the team it would belong to exists, and it discloses the holding team's **name** and nothing else |
 | `GET /api/v1/service-teams/{teamId}/queue` | `{ unclaimed, mine, others, withOthers, closed }` — `unclaimed` / `mine` / `others`: the open workflows whose active step is this desk's; **`withOthers`** (v4.10.31): this desk's open workflows whose active step is somebody else's — back with the requester for a planned action or the confirmation, or before the desk's step; `closed`: the desk's part ended in the last 30 days. Eligible agents only (`403` otherwise) |
+| `GET /api/v1/service-teams/{teamId}/requests` *(4.11.7)* | The desk's whole history, filtered: `{ requests, total, truncated, agents, requesters }`. Query: `state` (`open` \| `closed` \| `all`, default `all` — **the desk's** reading, as the queue's Closed tab is: a request whose desk step is done is closed here while the workflow still waits for the requester to confirm), `assignee` (a uid, or `unassigned`), `requester` (a uid), `q` (≤ 200 chars, over the title and the requester's own words), `offset`, `limit` (≤ 100, default 25). Each row is a workflow view plus `desk: { open, assignee, status, closedAt, closedBy }`. No time window — this is what a member reads to find a request they never worked. `agents` and `requesters` are the two pickers' values, computed over everything the grid can see so narrowing one never empties the other. Bounded by `WorkflowEngine::DESK_GRID_MAX` (500, newest first); `truncated` says the oldest were dropped. Eligible agents only (`403` otherwise) |
 
 Four verbs act on one workflow's active step and live under `/workflows/{id}` because that is what they act on. Each returns `{"workflow": …}`, the same view `GET /workflows/{id}` gives.
 
@@ -405,7 +406,21 @@ Four verbs act on one workflow's active step and live under `/workflows/{id}` be
 | `POST /api/v1/workflows/{id}/assign` | `{ uid }` | Hands it to an eligible agent; naming yourself is how you take it over. `400` when the target is not eligible |
 | `POST /api/v1/workflows/{id}/release` | `{ reason? }` | Back to the queue. The assignee or the service owner only (`403` otherwise) |
 | `POST /api/v1/workflows/{id}/internal-note` | `{ note }` | A note only the desk reads. Changes no status and moves no step |
+| `POST /api/v1/workflows/{id}/decisions` | `{ decisionId }` | **v4.11.12.** Post a decision of the **handling service team** into the request's conversation, from its Messages tab. Four rules, all server-side: the decision belongs to that desk (`400` otherwise), is **approved** (`400`; `decided` counts), is **public** (`400` — the requester reads the conversation), and the caller can open it (`403`). The gate is the **message** gate, not the internal-note one: `messageSide() === 'desk'` — the claimant or an admin of the desk, on an open request (`403` for a colleague who did not claim it). Returns `{"decisions": […]}`, not a workflow view. Event `decision_linked` with **`visibility: all`**, carrying `decisionId`, `teamId` and the decision's `question` and `status` **as they were** (a snapshot, like an attachment's `fileName`); audit `decision_linked` with the id and no question. Idempotent: linking the same decision twice leaves one link and writes one event. **The server takes an id, never a URL** — a pasted link is resolved to an id in the client |
 | `POST /api/v1/workflows/{id}/close-request` | `{ note? }` | **v4.10.31.** An **admin of the handling service team** closes the request, at any step (`403` for anybody else, and for a definition that is not closable — the quota request and the team request, whose desk step does something). At the requester's confirmation it completes that step (`outcome: "completed"`); before it, the workflow ends `status: "completed"`, **`outcome: "closed"`**, the active and later steps `skipped`, event `closed` with the note. Written to the desk's activity stream as `service.request_closed` |
+
+**v4.11.12 — the decisions behind a request** (Justin, 2026-09-30). Three more routes, and the flag they rest on:
+
+| Endpoint | Notes |
+|---|---|
+| `GET /api/v1/workflows/{id}/decisions` | `{ decisions: [{ id, teamId, status, isPublic, canOpen, question, addedBy, addedAt }] }`. Every eligible agent of the handling desk, **including on a closed request** — the grid is the desk's whole history. `canOpen` is the answer for *this* caller and **`question` is `''` when it is false**: that a request was decided is the desk's record, the decision's words are the Decisions module's to give out. A link whose decision has been deleted is left out rather than returned as a broken row |
+| `DELETE /api/v1/workflows/{id}/decisions/{decisionId}` | Takes the decision off the request; the decision itself is untouched. Same gate as linking. Event `decision_unlinked`, also `visibility: all` — the conversation said the decision was linked, so it has to be able to say it was taken off; **the entry that announced it stays**, because a conversation is a record and not a current state. Removing a link that is not there is not an error and writes nothing |
+| `GET /api/v1/service-teams/{teamId}/public-decisions?q=` | The desk's own **approved, public** decisions whose question or answer contains `q` (≤ 200 chars), newest first, **at most four** (Justin: a picker is for recognising the decision you already have in mind), in the same row shape. Eligible agents of that desk only (`403`). Both narrowings match what `POST …/decisions` accepts, so the picker cannot offer what the link would refuse |
+| `PUT /api/v1/teams/{teamId}/decisions/{decisionId}/public` | `{ public: bool }` → the serialised decision. Publishes it, or takes it back into the team. **v4.11.31 — gated on being an approver of the decision's category** (`assertApproverFor()`, `403`), in **both** directions. Justin, 2026-10-06: *only a category approver can set a decision in the category as public.* This replaces the team's `decisions_action_min_level`, which gated it from v4.11.12 and put publishing beside *Link decision* and *Link task* — the wrong comparison: attaching a link adds to the team's own record, while publishing moves the record **out of** the team, to every logged-in account on the instance, and that is a statement about what the decision *is*. Default 1 on the old gate meant any member could make it. Unpublish is gated the same way on purpose: publish-restricted and unpublish-open would let an ordinary member withdraw what an approver published. **`400` for any decision in the archive category**, which is team-only and has no publishing at all — its own refusal rather than the approver gate's, because the archive has no approvers and "you are not an approver" would send the reader looking for one who could. Unpublishing *inside* the archive falls back to `decisions_action_min_level` for the same no-approvers reason, so a row left public by an earlier version is never stranded; the `400` above means the fallback cannot put the flag back up. Audited as `published` / `unpublished` — **and until v4.11.31 it was not**: `setPublic()` has written those two since v4.11.12 into a vocabulary (`DecisionAuditService::TRANSITIONS`) that did not list them, and `log()` silently drops an unknown transition, so every one of those rows went into a warning and nowhere else. Any live status may be published |
+
+**The conversation carries them.** `decision_linked` and `decision_unlinked` are part of `CONVERSATION_EVENT_TYPES`, so they arrive in the Messages tab in order with the messages rather than on the timeline; a client renders the linked decision from the event's own payload, never by fetching it again. `GET …/decisions` remains the **live** view (current status, current `canOpen`) and is what the desk's grid column reads.
+
+Every decision payload gains **`isPublic`**. **Public means readable by every logged-in account on this instance** — instance-wide, never anonymous: no route serving a decision is a `#[PublicPage]`, and there is no share token. It widens who may **read**; who may act, approve, withdraw or comment is unchanged and stays the team's. A public decision is also *findable*, which is what the picker above needs and what a link-capability could never give.
 
 **Claiming narrows, it does not replace.** A desk's step is held by every eligible agent; once one has claimed it, only they — or the service owner — may complete or reject it, and any other agent must take it over explicitly. That is `WorkflowEngine::assertHolder()`, so the API and the buttons cannot disagree.
 
@@ -616,6 +631,73 @@ On `mode: team` the proposal is posted as an ordinary chat message and `talkThre
 Editing the text is **not** a My Work action. Queue rows are one-click verbs; a proposal body is rich text with attachments, so `OPEN` takes the proposer to the Decisions tab where that editor lives.
 
 `diagnostics` (v4.5.22) is `[{ label, value }]` and is **admin-only** — it is stripped from the member `/mywork/providers` response. A provider opts in by implementing `getDiagnostics()`; `ProviderRegistry` picks it up via `method_exists` rather than through `IWorkProvider`, so a provider integrating against a schema it can verify need not implement it. `ApprovalWorkProvider` reports which tables and columns it matched, whether the activity table is readable, and the reflected signature of `ApprovalService::approve|reject`. Values are structural only — table and column names, counts, method signatures — never file names, user ids or document content.
+
+---
+
+## Reviewing, superseding and archiving a decision (added 4.11.18)
+
+An approved decision is terminal, and until 4.11.18 that meant nothing could follow it. Three things can now: a review a member asks for, a review the category's clock asks for, and a supersede. All three end in the same two places — the decision stands, or it is retired into the team's archive.
+
+**The rule the API is built on:** a review never rewrites the decision. The row keeps `approved`, keeps its `resolvedBy` and `resolvedAt`, and keeps governing while the review runs. Nothing here can turn an approved decision back into a proposal; a team that wants different wording proposes a new decision and supersedes this one.
+
+### Two new statuses
+
+`status` gains `superseded` and `archived`. Both are **terminal**, so read-only comes from the rule that was already there, and both move the row into the team's `Archive` category while keeping the name it was decided under:
+
+| Field | Meaning |
+|---|---|
+| `isRetired` | `superseded` or `archived`. Sent rather than derived client-side, because three components ask and one of them getting the list wrong is a read-only record rendering its Edit button |
+| `archivedAt` / `archivedBy` | When and by whom |
+| `archivedFromCategory` | The category it was decided under, so the record still answers "what did Marketing decide" |
+| `reviewDueAt` | When it next needs a review; `null` means never — either the category has no review period or the decision never reached `approved` |
+
+`GET /decisions/{id}` additionally returns **`supersededBy`** — `{ id, question, status }`, or `null`. Resolved by looking up `supersedes_id` on the *newer* decision, which is the only link there is: adding a `superseded_by` column would be a second answer to one question, free to disagree with the first. Not on `serialize()`, for the same reason `proposalBody` is not — one extra query, read only by the detail panel.
+
+**v4.11.31 — and the same relationship from the other end: `supersedes`**, `{ id, question, status }` or `null`, the decision **this** one replaced. Justin, 2026-10-06: *when we supersede a decision this is visible on the superseded decision, but not on the decision that supersedes it.* The retired row had `supersededBy` and a banner; the replacement had nothing, so the panel's Links section could not draw the link and its audit trail said the supersede had never happened.
+
+Both fields read the **same** `supersedes_id`, from the two sides — `supersededBy` by looking it up, `supersedes` straight off the row — so there is still one place a supersede is stored and no way for the two directions to disagree. `supersedes` costs the lookup only when the column is set; `supersedesId` itself has been on `serialize()` since v3.64, which is how the client knows synchronously that there is a row to wait for.
+
+### Endpoints
+
+| Endpoint | Notes |
+|---|---|
+| `GET /api/v1/teams/{teamId}/decisions/{decisionId}/reviews` | `{ items: [{ id, decisionId, teamId, kind, requestedBy, requestedByName, motivation, proposedQuestion, proposedAnswer, hasProposedWording, attachmentFileId, attachmentName, status, outcome, completedBy, completedByName, completedAt, createdAt }] }`, newest first. Any team member. `kind` is `requested` (a member asked; `motivation` and `requestedBy` are theirs) or `periodic` (the clock asked; `requestedBy` is `''` and `motivation` `null` — naming the system as a person would be a lie the audit trail then repeats). **v4.11.30** adds the five proposal fields: `proposedQuestion` / `proposedAnswer` are the wording the requester asks for and are `null` on a review that proposed nothing (every row written before 4.11.30, and every periodic review); `hasProposedWording` is sent rather than left to the client to derive from those two, for the reason `isRetired` is sent on a decision — three surfaces ask the question and one of them getting null-versus-empty wrong is an *Approve* button over no words at all; `attachmentFileId` is the id of the **copy** inside `.proposals/{decisionId}/`, never of the requester's original, and `attachmentName` is the name they know it by (the copy's own filename carries a `review-{timestamp}-` prefix so a regeneration of the proposal folder cannot overwrite it) |
+| `POST /api/v1/teams/{teamId}/decisions/{decisionId}/reviews` | `{ motivation, proposed_question?, proposed_answer?, attachment_file_id?, attachment_name? }` → the serialised review. **Any team member**: asking is not deciding, so this is not gated on the category's approver list, and deliberately not on `decisions_action_min_level` either — that gate is for writing *on* a decision, and a review request writes a question *about* one. Motivation required, ≤ 1000 chars (`400`). `approved` only (`404` otherwise). **`409` when a review is already open** — two would be two approvers answering different questions. **v4.11.30 — the request may carry what it is asking for** (DESIGN §2.162): the two wording fields are ≤ 4000 chars each (`400` beyond), trimmed, and stored as `null` when blank, because *nothing was proposed* is the fact the approver's buttons are chosen from. `attachment_file_id` is a file in the **requester's** own Nextcloud; the server copies it into the decision's proposal folder **before the review row is written**, so that a file which cannot be staged leaves no half-promised open review behind — which means a `400` here can mean *the attached file could not be read* and a `404` can mean *this team has no team folder, so a file cannot be attached to a review*. All four are optional and a request with none of them is the 4.11.18 shape: *look at this again*, with nothing proposed |
+| `POST /api/v1/teams/{teamId}/decisions/{decisionId}/reviews/complete` | `{ outcome, reason, question?, answer? }` → the serialised **decision**, because that is what the client renders afterwards. Approver-gated (`403`). `outcome` is one of **`denied` · `accepted` · `kept` · `archived`**. A *requested* review is answered `denied` or `accepted`; a *periodic* one `kept` or `archived`. The service takes any of the four for either kind — which two are offered is the surface's business. **Three of them leave the decision `approved`** and restart the review clock from today; only `archived` retires it. `accepted` (v4.11.26) **rewrites the decision's wording in place** from `question` and `answer`: same status, same `resolvedBy`, same `resolvedAt`. At least one of the two must be present *and* differ from what is stored, or `400` — an accept that alters nothing is a `denied` wearing the wrong label. They are ignored for the other three outcomes. **v4.11.30 — omitting both is how an approver says "as proposed"**: each field falls back to the review row's `proposed_question` / `proposed_answer`, field by field, so an approver may retype the wording and leave the question to the requester. It is still a `400` on a review that proposed nothing, which is the case the message was written for. The `revised` audit payload gains `as_proposed` (whether the approver took the words as given or wrote their own) and `attachment_name` (the file the new wording came from). **The approver never touches the attachment** — it is the requester's; it stays where it was staged on an `accepted` and is deleted on `denied`, `kept` and `archived` alike, because the decision stands unchanged and its source files must not grow a document nobody adopted. ⚠️ **v4.11.24 had `accepted` return the decision to `open` for redrafting; it never does that again** — the proposal lifecycle has terminal `denied` and `withdrawn` in it, and a review must not be able to destroy the decision it was asked about (DESIGN §2.161). **`reason` is required** (v4.11.23; `400` without it, ≤ 1000 chars) — the same rule approve and deny have carried since v3.71.3, because somebody asked a question and *kept* with no words answers nobody. It joins the motivation on the row, so it reads as the exchange it was. `404` when no review is open. The review id is not in the URL: the server resolves the open one rather than the client fetching an id first |
+| `POST /api/v1/teams/{teamId}/decisions/{decisionId}/archive` | **v4.11.24.** `{ reason }` → the serialised decision. Retires an approved decision outright, with no review behind it — the Actions-menu half of *archive*, where the periodic review is the other half. Approver-gated (`403`), reason required (`400`), `404` while a review is open (that review is where it gets decided). Audited as `archived`, carrying the reason and the category it came from |
+| `POST /api/v1/teams/{teamId}/decisions/{decisionId}/category` | **v4.11.30.** `{ category }` → the serialised decision. Moves a decision into the category it should have been proposed in (DESIGN §2.163). **Gated on being an approver of the category it is in now**, not of the one it is going to (`403`): the people who find a decision in their queue that does not belong to them are the current approvers, and they are the ones who need to push it out. `400` for a target that is not one of the team's categories, is the archive (archiving has its own verb and its own mandatory reason), or is the category the decision is already in. `404` for a retired decision and while a review is open — that review is with the current approvers, so answer it first. No reason field: where a decision is filed is a clerical fact, not a judgement, and the `category_moved` audit line carries `from`, `to` and the actor. An **approved** decision recalculates `review_due_at` from the new category's period, because the period belongs to the category; anything not yet approved keeps a null clock, which `approve()` starts |
+| `POST /api/v1/teams/{teamId}/decisions/{decisionId}/supersede` | `{ supersededById }` → the serialised (now superseded) decision. Approver-gated (`403`). Writes `supersedes_id` on the **newer** decision and retires this one. Refusals, each with its own sentence: superseding itself, a decision that is not `approved`, a replacement that is not `approved`, a replacement that already supersedes another. **v4.11.31 — it now audits both sides**: `superseded` + `archived` against the retired decision as before, and a new **`supersedes`** transition against the replacement, payload `{ supersedes, supersedes_title }`. An audit trail is per decision, so writing only against the retired row left the replacement's trail empty — and the replacement is the one still governing. Three rows for one act, two decisions |
+| `GET /api/v1/teams/{teamId}/decisions/{decisionId}/supersede-options?q=` | `{ items: [{ id, question, category, resolvedAt }] }` — the team's approved decisions whose question matches `q` (≤ 200 chars, `400` beyond), minus this one, newest first, **at most four** (v4.11.20; 4.11.18 returned 50 unsearched). The same number and the same reasoning as `public-decisions` above: a picker is for recognising the decision you already have in mind. An empty `q` gives the four most recent. Readable by any member; the act is approver-gated. Deliberately **not** filtered to decisions that supersede nothing: `supersede` refuses those with a sentence, and a picker that silently omits what somebody is looking for sends them to read the code. The server fetches five and drops this decision afterwards, or a decision sorting into the first four would leave three |
+
+`GET …/{decisionId}/audit` returns the trail **newest first** since v4.11.23 — the detail panel's order. The proposal `.md` document renders the same events oldest first, which is the mapper's order; the endpoint reverses rather than the client, so there is one defined order per reader.
+
+**v4.11.31 — a retired decision is taken back out of public.** `retire()` clears `is_public` on the way into the archive and writes an `unpublished` audit row with `reason: "archived"` beside the `archived` one. The archive is team-only, and the flag says the decision *is* a public record — searchable, listable, the raw material a knowledge item is built on — which a decision that has stopped governing is not. A decision that was already team-only writes no such row: an audit trail that reports non-events is one people stop reading.
+
+**Who may do what, in one line:** any member asks for a review — and, since **v4.11.30**, says in that request what the decision should say instead and attaches the file it should say it from; an approver of the decision's category answers it (approving the proposed wording, editing it first, or denying), archives, supersedes, and moves it to another category. The attachment is the requester's throughout: the approver reads it and never edits it. **v4.11.24** also widened `PUT …/proposal` and `POST …/finalize-proposal` from proposer-only to **proposer or team admin**, mirroring `withdraw()`; that stays in v4.11.26 although accepting no longer reopens anything, because the decisions 4.11.24 already reopened still need somebody able to move them and an ordinary proposal whose proposer has left the team must not be strandable either. That is `DecisionService::assertApproverFor()` — the same authority that gates approve and deny, made public for this, because retiring a decision is the mirror of approving it. Either-one, like approval: one approver's answer completes the review.
+
+### The category's review period
+
+`teamhub_dec_categories` gains `review_period_months` (0–120, 0 = never) and `is_archive`. Both are on every category payload as `review_period_months` and `is_archive`, and `POST`/`PUT /decisions/manage/categories[/{id}]` accept `review_period_months`. `is_archive` is **not settable over the API**: there is exactly one archive per team and it is created with the module.
+
+Changing a category's period recomputes `review_due_at` on every approved decision in it, from each decision's own anchor — its last completed review, or its approval. So shortening a period does not punish a decision reviewed last month, and lengthening one does not hide a decision that is already overdue.
+
+**The archive category is locked.** `PUT` refuses a rename, an approver list and any non-zero review period (`400` each, with the reason); `DELETE` refuses outright. Its icon and description stay editable — nothing stores those. It is also the one category allowed **zero approvers**: nothing in it is ever approved, so substituting one would name somebody responsible for a queue that cannot exist.
+
+**And nothing can be proposed into it** (v4.11.30, DESIGN §2.163). `POST /decisions` refuses a `category` that is the team's archive with a `400` — *the archive category holds retired decisions, a proposal cannot be made in it* — and the composer stops listing it. Both, because a hidden option has never been a boundary: a proposal born in the archive sits in a category with no approvers and no review period, so nothing could ever approve it. The guard compares **case-insensitively**, because category names are unique case-insensitively and a guard that `archive` defeated would be a guard in name only. The archive is also not a target for `POST /decisions/{id}/category`: putting a decision there is *archiving* it, which has its own endpoint and its own mandatory reason.
+
+### Two seeded categories
+
+Switching the Decisions module on for a team (`PUT /decisions/config` with `decisions_enabled`) now also gives it **General** (the team's admins and owner as approvers, review period 0 — an ordinary category otherwise) and **Archive**. The `SeedDecisionCategories` repair step does the same for teams whose module predates 4.11.18: Archive for every one of them, General only for a team with no categories at all, so a team that already organises its decisions does not find a stray tile on its landing grid.
+
+General's approver list is a **snapshot of user ids**, not the "team admin" role — somebody promoted next month is not automatically an approver, and the list is editable like any other. That is how every category already works.
+
+### My Work and the bell
+
+Three provider statuses (`decision_review_requested`, `decision_review_due`, `decision_review_waiting`) and no new `ActionType`: the approver's row offers `COMPLETE` (*Keep decision*) and `REJECT` (*Archive decision*) with the row's own words in `metadata.actionLabels`, the requester's row offers `OPEN`, and both carry the whole review in `metadata.workflow`. A review row's `providerItemId` is prefixed `review:` — a decision row and a review row can exist for one decision at once, and two items sharing an id would share their snooze state and route each other's actions.
+
+Three notification subjects, the module's first: `decision_review_requested` and `decision_review_due` to the approvers, `decision_review_completed` to the member who asked. A completed review withdraws the pending bells about that decision for everyone, so nobody clicks through to a row a colleague already answered. A periodic review has no requester, so completing one sends nothing.
+
+`DecisionReviewJob` runs daily and opens the periodic review two weeks before it falls due.
 
 ---
 
@@ -1301,11 +1383,16 @@ Set the team's template label. Called once by `CreateTeamView` after team creati
 { "type": "project" }
 ```
 
-Server-side validated against `TeamTypeService::ALLOWED = ['collaboration','project','department']` — anything else returns 400.
+Server-side validated against `TeamTypeService::ALLOWED = ['collaboration','project','department','openproject','service']` — anything else returns 400.
+
+**Side effects of the value written** (both in `TeamController::saveTeamType`, not in `TeamTypeService`):
+
+- `expiresOn` in the body sets the team's expiry at creation, for the templates that allow one.
+- **`service` seeds the default issue process** *(4.11.6)* — `TeamServiceBuilder::seedDefault()` writes *"{Team} support request"* as an unpublished **draft** on the team. Skipped silently when the team already has a service of its own, or when the licence or the administrator's module switch is missing. A failure is logged and does not fail the request.
 
 **Response 200**:
 ```json
-{ "type": "project" }
+{ "type": "project", "expiry": null }
 ```
 
 **Failures**:
@@ -1648,6 +1735,43 @@ Also added `mergeNewTabs()` post-processing on `tabOrder` — saved `tab_order_j
 
 ---
 
+## Team tasks *(documented 4.11.15; endpoints older)*
+
+VTODO objects on the team's calendars — what *Create personal task* writes and the Tasks app shows. Both endpoints need the Tasks app; without it they answer `422`.
+
+### `GET /api/v1/teams/{teamId}/tasks`
+
+Up to 10 open tasks across every calendar connected to the team, undated ones included, soonest due first. Feeds the Upcoming tasks widget. **Auth**: `requireMemberLevel($teamId)`.
+
+**Response**: `[{ id, title, duedate, priority, status, url }]`
+
+### `POST /api/v1/teams/{teamId}/tasks`
+
+Creates a VTODO. **Auth**: `requireMemberLevel($teamId)`.
+
+| Param | Type | Notes |
+|---|---|---|
+| `title` | string | Required. `400` when empty. |
+| `description` | string | Optional. |
+| `duedate` | string | Optional, ISO 8601. An unparseable value is dropped rather than refused. |
+| `calendarId` | int | Optional. Defaults to the team's first connected calendar. |
+| `assignee` | string | *(4.11.15)* A team member's uid, `self`, or `team` — omitted means `team`. |
+
+**`assignee` is who the task is for**, and it is the whole of what tells a to-do somebody wrote for themselves from one the team owes (`TaskService`'s docblock; DESIGN §2.153):
+
+- a uid or `self` → `ORGANIZER` = caller, one `ATTENDEE` = that person. It reaches **their** My Work and nobody else's; a colleague is notified (`task_assigned`) and the caller gets a *Waiting for others* row.
+- `team` or omitted → `ORGANIZER` = caller, **no `ATTENDEE`**. The team's own task list, on every member's My Work. Every task written before 4.11.15 is this case.
+
+A uid that is not an effective member of the team is `400`. The person is identified by their `mailto:` address plus an `X-NC-USER-ID` parameter, so the match survives an email-address change.
+
+**Response 201**: `{ uri, title, assignee }` — `assignee` is the resolved uid, or `null` for a team task.
+
+**Status codes**: `400` title missing or assignee not in the team · `403` not a member, no signed-in user, or the calendar is read-only for this account · `404` the team has no calendar, or it is not in the caller's calendar home · `422` Tasks app missing · `500` with a `ref` for anything else.
+
+Completing a task is **not** an endpoint of its own: it is the `complete` action on the `tasks` My Work provider (`POST /api/v1/mywork/action`, item id `tasks:{calendarId}:{objectUri}`). Offered on a task that is yours or the team's, never on a *Waiting for others* row; an already-finished task answers `conflict`, and the organiser is notified (`task_completed`) when somebody else finishes what they asked for.
+
+---
+
 ## Team calendar events (range reader added 4.6.20)
 
 ### `GET /api/v1/teams/{teamId}/calendar/events/range`
@@ -1955,13 +2079,17 @@ Deliberately does NOT expose seats, customer, license id, or any admin-only fiel
 
 ## Unified-search providers (added 3.84.3 / pre-existing)
 
-NC's unified search calls `IProvider::search` on every registered provider. TeamHub registers three:
+NC's unified search calls `IProvider::search` on every registered provider. TeamHub registers five:
 
 | Provider | ID | `getOrder` | Surfaces |
 |---|---|---|---|
 | `TeamSearchProvider` (new in 3.84.3) | `teamhub-teams` | 49 | Teams the searcher is a member of (direct or via group / sub-team), filtered to user-created teams (`circles_circle.source=16`), pending-deletion excluded. Result entry deep-links to `/apps/teamhub/#/team/{teamId}`. |
 | `MessageSearchProvider` (pre-existing) | `teamhub-messages` | 50 | Messages in teams the searcher belongs to. |
 | `DecisionSearchProvider` (pre-existing) | `teamhub-decisions` | 51 | Decisions in teams the searcher belongs to. |
+| `ServiceSearchProvider` *(4.11.11)* | `teamhub-services` | 52 | The service catalog as **this viewer** sees it — `ServiceCatalogueReader::forUser()`, the same list the Services page renders, so the per-viewer cards (quota, more time) are filtered before matching. Matches label, description, offering team and category. Links to `?services=1`. |
+| `ServiceRequestSearchProvider` *(4.11.11)* | `teamhub-service-requests` | 53 | The searcher's **own** service requests — `listForParticipant()` narrowed to those they started, so a desk member's claimed work is not listed here. Open before finished, then most recently touched. Links to `?mywork=1`. |
+
+The two service providers answer with **no section at all** when the licence or the administrator's *Service teams module* switch is missing, rather than an error in the search drawer.
 
 Order values are hardcoded in each provider's `getOrder()`. NC has no admin UI to reorder providers — to change ordering, edit the values in source.
 
@@ -3000,21 +3128,43 @@ A warning surface, not a save-blocker: the profile wins at creation, so a confli
 
 ---
 
+## Files ⋯ menu endpoints (added 4.11.42)
+
+What TeamHub's two entries in a file's ⋯ menu ask the server. Both are called **from the Nextcloud Files app**, a page TeamHub does not render, and both are gated exactly like everything else: the caller comes from the session, the teams from `TeamService`, and every file is resolved in that user's own folder tree, so a file they cannot see drops out without a special case. `#[NoAdminRequired]`, no `#[NoCSRFRequired]`, both reads.
+
+**`fileAction#scopes` replaced `fileReview#getScopes` in 4.11.42.** The old endpoint was licence-gated, because reviews are; *Propose a decision* is not licensed, and riding on that endpoint would have hidden it on every unlicensed instance. So the gate moved off the endpoint and onto each action — and one call still answers for both, because the entry runs on every Files page load and a second round trip is a second cost on a page TeamHub only visits. `FileReviewService::listScopes()` is gone with it.
+
+### `GET /api/v1/file-actions/scopes`
+
+The caller's team-folder path prefixes and what each team allows, so the Files app's **synchronous** `enabled()` callback can decide whether to offer an entry without a round trip per file.
+
+**Response 200**: `{ "scopes": [ { "teamId", "teamName", "paths": ["/Team Alpha"], "actions": ["review", "propose"] } ] }`
+
+`actions` holds `review` (file reviews on globally — which needs a licence — and on for the team), `propose` (the Decisions module on globally and for the team), or both. A team that allows neither, and a team with no folder, are **omitted** rather than returned with a flag: the caller's only question is "may I offer this here", and per `CLAUDE.md` § Permissions an entry that does not apply is hidden rather than disabled.
+
+`paths` are **root-relative** — `/Team Alpha`, not `/alice/files/Team Alpha` — because that is what the Files app's client-side `Node.path` is. A user in no team gets `[]`, and no entry ever appears for them.
+
+### `GET /api/v1/teams/{teamId}/file-actions/propose-context`
+
+**Query**: `fileId` — required.
+
+What the deep link into the proposal composer needs about one file. The entry does not open a composer of its own: it opens TeamHub at `?team=…&propose=1&file=…`, and `App.vue` calls this to find out whether the file may be quoted and what it is called.
+
+**Response 200**: `{ "eligible", "teamId", "teamName", "fileName" }`
+
+`eligible: false` (with an empty name) is returned — **not** an error — when the Decisions module is off for the team, the file is not in that team's folders, or the caller cannot read it. The client's prefix test can legitimately disagree with the server if a folder was detached or the module switched off between page load and click, and that is a "no" to render rather than a fault. **`403`** when the caller is not a member of the team.
+
+The file **name comes from here rather than from the deep link** on purpose: it ends up inside the proposal's Context field as markdown, and a name carried in a URL is a name anybody can choose.
+
+---
+
 ## File review endpoints (added 4.8.18)
 
 Asking teammates to review a file. Design: `FILE-REVIEW-PLAN.md`; the module's own reasoning lives in `FileReviewService`.
 
-**Two of these are called from the Nextcloud Files app**, by the file action TeamHub registers there — a page TeamHub does not render. They are gated exactly like the rest: every method re-establishes the caller and their membership, and none trusts a team or file id because it arrived in a URL. All are `#[NoAdminRequired]` and none carries `#[NoCSRFRequired]`.
+**One of these is called from the Nextcloud Files app** — `review-context`, by the review dialog, on click. It is gated exactly like the rest: every method re-establishes the caller and their membership, and none trusts a team or file id because it arrived in a URL. All are `#[NoAdminRequired]` and none carries `#[NoCSRFRequired]`. The folder-prefix call that used to sit beside it is now `fileAction#scopes`, above.
 
 Every endpoint requires the module to be on **globally and for the team**; a team with it off answers `403`.
-
-### `GET /api/v1/file-reviews/scopes`
-
-The caller's team-folder path prefixes, so the Files app's **synchronous** `enabled()` callback can decide whether to offer the action without a round trip per file.
-
-**Response 200**: `{ "scopes": [ { "teamId", "teamName", "paths": ["/Team Alpha"] } ] }`
-
-`paths` are **root-relative** — `/Team Alpha`, not `/alice/files/Team Alpha` — because that is what the Files app's client-side `Node.path` is. Teams with the module off are omitted rather than flagged. A user in no team gets `[]`, and the action never appears for them.
 
 ### `GET /api/v1/files/{fileId}/review-context`
 
@@ -3247,7 +3397,7 @@ The grid of teams made in Contacts, on the Teams page, by occ or by a provisioni
 
 ### `GET /api/v1/team-adoptions`
 
-**Response 200**: `{ pending: [row], decided: [row], templates: [ { templateKey, label, defaultProfileKey } ], profiles: [ { profileKey, label } ], defaultTemplate }`. `decided` covers the last 30 days. `templates` excludes `openproject` and `service`.
+**Response 200**: `{ mode, pending: [row], templates: [ { templateKey, label, defaultProfileKey } ], profiles: [ { profileKey, label } ], defaultTemplate }`. **v4.11.39 — `decided` is gone**: the thirty-day history moved to the Compliance tab's audit log (DESIGN §2.172), and the grid was its only reader. `templates` excludes `openproject` and `service`. `mode` (added 4.11.34) is the instance's rule `accept` | `review` | `decline`; the grid reads it for its empty state, which in the two automatic modes must not promise that teams turn up there.
 
 `row`: `{ id, teamId, teamName, ownerUid, ownerName, status (pending|accepted|declined|withdrawn), route (auto|desk|admin|grid), workflowId, templateKey, profileKey, decidedBy, decidedByName, decidedAt, reason, provisionStatus (none|queued|done|failed), provisionNote, detectedAt, claimedBy, claimedByName, claimedByOther }`. On a pending row `templateKey` / `profileKey` come back **resolved** (the defaults filled in), so the pickers show what *Accept* will do. `claimedByOther` is true when another desk member has claimed the request and the viewer is not an administrator; the grid hides the buttons for that row.
 
@@ -3269,4 +3419,72 @@ The grid of teams made in Contacts, on the Teams page, by occ or by a provisioni
 
 **Notifications added**: `team_adoption_pending` (administrators, unlicensed route, links to `#team-adoption`), `team_adoption_accepted` and `team_adoption_declined` (the owner, when no request carried the answer).
 
+**4.11.32 — the sweep gained a second candidate class.** A circle Circles' SCIM integration provisioned from a directory group (`source = 10001`, `config & 262144`) is now offered too, as `kind: 'scim'`, and such a row is always `route: 'grid'`: it has no human owner, so the three routes that open a request for one cannot apply. See DESIGN §2.166.
+
+**4.11.34 — the customer sets what happens, and the creator group no longer decides.** `teamAdoptionMode` (app config, on `GET`/`POST /api/v1/admin/settings` as `teamAdoptionMode`) takes `accept`, `review` or `decline`, `review` being the default and what an unrecognised value clamps to. `accept` and `decline` decide in the sweep itself, with `route: 'auto'`, `decidedBy: ''` and no request opened; `decline` stores its own reason and notifies the owner with `team_adoption_declined`. Both apply to a `scim` candidate too. Under `review` the three remaining routes are unchanged (desk queue, administrators' My Work, the grid alone). This retires the rule that an instance with no team creator group adopted every such team by itself — that estate now chooses `accept` explicitly. See DESIGN §2.168.
+
+**4.11.35 — what `accept` applies.** `teamAdoptionTemplate` and `teamAdoptionProfile` ride `GET`/`POST /api/v1/admin/settings` beside the mode (length-capped on write; resolved at the point of use, so a deleted template or profile falls back to `collaboration` / `internal`). `decideByItself()` writes the pair onto the adoption row before deciding, exactly as the grid writes a pair a person chose, so the row reports what was applied. A team with **no owner and no decider** — every automatic acceptance of a `scim` candidate — is now classified under `PolicyService::ACTOR_SYSTEM` (`app:teamhub`); before this it reached `assignAtCreation()` with an empty actor, which returns at its no-session guard, and the team was left unclassified. See DESIGN §2.169.
+
+## Directory groups waiting for a team (added 4.11.32)
+
+Groups from LDAP, Active Directory or an identity provider that qualify for a team but do not have one. The surface for `idpTeamsMode = review`; in `auto` mode nothing waits here and in `off` mode the feature does not run. Design: DESIGN §2.166.
+
+**Gating, and how it differs from the adoption grid above.** Every route carries `#[AuthorizedAdminSetting]` **and** re-checks `IGroupManager::isAdmin()` in the controller. This has one home — Admin → TeamHub — and provisioning teams unattended from a directory is pinned to a full **Nextcloud administrator**: a *delegated* TeamHub admin passes the attribute and is then refused. Anybody else gets **403**.
+
+### `GET /api/v1/admin/idp-groups`
+
+**Response 200**: `{ mode (off|review|auto), pending: [row], serviceAccountProblem }`. **v4.11.39 — `decided` is gone**, for the same reason as the adoption grid above: what has been decided is in the audit log (DESIGN §2.172).
+
+`row`: `{ id, groupId, displayName, backend, groupDn, memberCount, detectedAt }`. `backend` is what `IGroup::getBackendNames()` reported when the group was found (`LDAP`, `Database`, …) and `groupDn` is the LDAP DN when there is one — both recorded at detection, because neither can be read again once the group is gone. Pending rows are **re-checked against the current rule** before they are returned: a row recorded under different settings is not offered.
+
+`serviceAccountProblem`: `''` when provisioning can run, otherwise `no_account`, `no_such_account`, `account_disabled`, `account_may_not_create_teams` or `unavailable`. A reason rather than a bool so the panel can say what to fix.
+
+### `POST /api/v1/admin/idp-groups/{id}/create`
+
+**Body**: `{ templateKey, profileKey }` (both optional; the configured defaults apply). Makes the team now, as the configured service account: `createTeam` → policy → the template's privacy bits → team type → the template's apps → the group as a member. **200** `{ ok, teamId, note }` — `ok: false` with a reason when it could not start, and `ok: true` with a non-empty `note` when the team exists but a step did not finish. **400** when the group has already been decided (two administrators in one grid: the row leaves `pending` atomically, so the loser is told rather than creating a second team). **404** for no such row.
+
+### `POST /api/v1/admin/idp-groups/{id}/decline`
+
+**Body**: `{ reason }` (optional). Final, like a declined adoption: the row stays and the sweep skips every group that has one. **200** `{ declined: true }`; **400** when already decided; **404** for no such row. **v4.11.39** — both this and `/create` go through `IdpGroupRequestService`, which writes the decision on the row **first** and then cancels the administrators' request for that group; the order is what carries the template and policy chosen per row, since a directory group stores no pair.
+
+**Admin settings added** (on `GET`/`POST /api/v1/admin/settings`, under `idpTeams`): `mode`, `backends`, `ldapOu`, `ldapDnAvailable` (read-only — false when user_ldap is absent, and the panel then does not offer the sub-OU field), `pattern`, `template`, `profile`, `serviceAccount`, `onGroupGone`, `serviceAccountProblem` (read-only). Written as the flat keys `idpTeamsMode`, `idpTeamsBackends`, `idpTeamsLdapOu`, `idpTeamsPattern`, `idpTeamsTemplate`, `idpTeamsProfile`, `idpTeamsServiceAccount`, `idpTeamsOnGroupGone`.
+
+**4.11.33 — `onGroupGone` takes `archive_then_delete` | `delete`.** Both delete; the first produces an archive through `ArchiveService::produceTeamArchive()` first, regardless of the Archive tab's own `archiveBeforeDelete`, because choosing it here *is* the instruction to archive. `keep_and_report` is retired and reads as the default, `archive_then_delete`.
+
+**4.11.33 — `GET /api/v1/templates` carries two more fields.** `{ templates, wizardDescription, expiryDefaultDate }`. The route is **deliberately not admin-gated** (`PolicyService::templatesForCreation()`), which is the point: the create-team dialog used to read both values from `GET /api/v1/admin/settings` and therefore showed them to administrators only.
+
+**Background jobs added**: `IdpGroupSweepJob` (hourly — new qualifying groups, then the orphan pass), `IdpGroupConsiderJob` (queued per group by `GroupMembershipChangedListener`).
+
 **Audit events added**: `team.adopted`, `team.adoption_declined`, `team.adoption_withdrawn`.
+
+## The audit log across every team (added 4.11.39)
+
+Until 4.11.39 the only paginated read was per team, so the Compliance tab could only be entered by picking one — and four services had been writing events under `AuditService::INSTANCE_SCOPE` (`'_instance'`) that nothing could display. Design: DESIGN §2.172. Admin-gated like every other audit route (`#[AuthorizedAdminSetting]`, `#[NoCSRFRequired]` on the GET).
+
+### `GET /api/v1/admin/audit/events`
+
+**Query**: `teamId` (`''` = every team; `_instance` = only what is not about one team), `page` (1-based), `perPage` (default **15**, capped at 200), `eventTypes` (comma-separated), `from`, `to` (unix seconds, inclusive, `0` = no bound).
+
+**Response 200**: `{ rows, total, page, per_page, total_pages }`. Each row is an audit row plus **`team_name`** — resolved in one query for the page, `''` for the instance sentinel and for a team whose circle is gone, which is why the client renders its own label for both. **400** for a `teamId` over 64 characters.
+
+Narrowing by `teamId` runs the same query as `GET /api/v1/admin/audit/teams/{teamId}/events`, which stays (its default page size is still 50). The ZIP export is still one team's whole log and has no all-teams form.
+
+### `GET /api/v1/admin/audit/teams` — one new field
+
+**`instance_scope`**: `{ team_id, event_count, last_event_at }`, reported beside `teams` because the sentinel is not a circle, has no name to read out of the database, and was therefore dropped by the display-name filter that excludes hard-deleted teams. `event_count: 0` means the dropdown offers no *Not about one team* option.
+
+**Audit events added**: `directory.group_found`, `directory.group_accepted`, `directory.group_declined`, `directory.group_failed`, `directory.group_orphaned`, `directory.group_forgotten` — all under `INSTANCE_SCOPE`, `target_type: group`, `target_id` the group id, actor `app:teamhub` when TeamHub decided. `group_found` is written in `review` mode only; in `auto` mode the group is found and answered in one breath and only `group_accepted` (carrying `mode: auto`) is written. `group_forgotten` matters most: v4.11.37 deletes the row when its group goes, so this event is afterwards the only trace the group was ever considered.
+
+## A directory group waiting for a team is an administrator's task (added 4.11.39)
+
+**Workflow**: `idp_group_adoption` (`IdpGroupAdoptionDefinition`), a sibling of `team_adoption` and system-started the same way — `POST /api/v1/workflows` with it answers 404. Two steps: `submit` (auto-completed at creation, in TeamHub's own name, `app:teamhub`) and `decide`, whose actor is the **`admin` group**, always — never a service desk. Its view carries `reference: { label, url }` pointing at Admin → TeamHub `#team-adoption` for an administrator and `null` for anybody else.
+
+**`teamhub_wf_instance.team_id` holds the Nextcloud group id** for this definition and this definition only, which is what makes the engine's `one_open_per_team` rule mean one open request per group. `teamName` on the view is therefore `''` — `WorkflowActorResolver::teamName()` finds no circle — and the group's name is in the title. `subject` is `{ type: 'group', id: groupId }`.
+
+**v4.11.41 — every workflow view carries `sourceGroup`.** A `SourceGroup` key (`teams`, `administration`) or `''`, from the new optional `IWorkflowDefinitionSource`; it says which My Work source chip the request appears under. `''` means *All and the Services chip only*, which is where every request was until this version (v4.10.18 gave a workflow no source, so any chip hid it). The directory-group and team-adoption definitions are `administration`; the team, quota and expiry requests are `teams`; the two generic service definitions are `''`. A chip for a single provider matches no workflow, whatever it says.
+
+**v4.11.41 — two verbs this definition refuses.** `POST /api/v1/workflows/{id}/request-information` answers **409** (*There is nobody to ask for information on this request.*) because the initiator is `app:teamhub`; `POST /api/v1/workflows/{id}/cancel` answers **409** (*This request cannot be withdrawn. Decline it instead…*) for any caller other than the instance's initiator, so TeamHub can still retire its own task. The workflow view's `viewer` block gained **`canRequestInformation`** and its `canCancel` now respects the same policy, both via the new optional `IWorkflowDefinitionActionPolicy`; a definition that does not implement it is unaffected, which is every other one.
+
+Licensed, like every workflow: on the basic tier no request is opened and the grid is the only place. No notification type was added — the engine's own `workflow_step_available` carries it.
+
+**Background jobs changed**: `IdpGroupSweepJob` gained a third pass, `IdpGroupRequestService::reconcile()`, which opens a request for every `pending` row that has none and cancels every open request whose row is no longer pending or no longer there; `IdpGroupConsiderJob` calls `openForGroup()` when it has just made a group pending, so a newly found group does not wait an hour for its task.

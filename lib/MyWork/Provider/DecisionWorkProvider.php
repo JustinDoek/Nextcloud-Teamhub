@@ -6,6 +6,8 @@ namespace OCA\TeamHub\MyWork\Provider;
 use OCA\TeamHub\AppInfo\Application;
 use OCA\TeamHub\Db\Decision;
 use OCA\TeamHub\Db\DecisionMapper;
+use OCA\TeamHub\Db\DecisionReview;
+use OCA\TeamHub\Db\DecisionReviewMapper;
 use OCA\TeamHub\MyWork\ActionResult;
 use OCA\TeamHub\MyWork\ActionType;
 use OCA\TeamHub\MyWork\Category;
@@ -16,6 +18,7 @@ use OCA\TeamHub\MyWork\WorkItem;
 use OCA\TeamHub\MyWork\WorkItemPage;
 use OCA\TeamHub\MyWork\WorkQuery;
 use OCA\TeamHub\Service\DecisionCategoryService;
+use OCA\TeamHub\Service\DecisionReviewService;
 use OCA\TeamHub\Service\DecisionService;
 use OCA\TeamHub\Service\MemberService;
 use OCP\IDBConnection;
@@ -52,6 +55,31 @@ use Psr\Log\LoggerInterface;
  * decision nobody in this list owes anything on never appears either — being
  * able to comment is not the same as owing a step.
  *
+ * ## The review cycle (v4.11.18)
+ *
+ * An approved decision can be put back in front of its approvers — by a team
+ * member who says circumstances changed, or by its category's review period
+ * falling due. Those produce rows of their own, from
+ * `teamhub_dec_reviews` rather than from the decision:
+ *
+ *  - an **open review** the user is an approver for → **Action required**.
+ *    What the row offers depends on what was asked (v4.11.26): a **periodic**
+ *    review carries *Keep decision* and *Archive decision*, both answerable
+ *    from the row; a **requested** one carries *Deny request* only. Accepting
+ *    a request means rewriting the decision's wording, and a form is not a
+ *    queue verb — the row's *Open* takes the approver to the decision, where
+ *    the Review block holds both answers.
+ *  - an **open review the user asked for** → **Waiting for others**, waiting
+ *    on the approvers.
+ *
+ * A completed review produces no row. The decision it kept, denied or
+ * revised is still in force and the decision it archived is retired, and
+ * none of those is work.
+ *
+ * **A review row's `providerItemId` is prefixed** — see `REVIEW_PREFIX`.
+ * `superseded` and `archived` decisions never produce a decision row at all:
+ * they are terminal and nobody owes anything on them.
+ *
  * ## Dates
  *
  * Decisions have no due date. Rather than invent one, `dueAt` stays null and
@@ -86,6 +114,25 @@ class DecisionWorkProvider implements IWorkProvider {
     // are opposite ends of the same decision.
     public const STATUS_AWAITING_FINALIZE = 'decision_awaiting_finalize';
     public const STATUS_OPEN_FOR_APPROVER = 'decision_open_for_approver';
+    // v4.11.18 — the review cycle of an approved decision. Three states and
+    // not one, for the same reason as above: an administrator must be able to
+    // remap "a colleague is asking me to look at this again" separately from
+    // "the calendar is" and from "I asked and am waiting".
+    public const STATUS_REVIEW_REQUESTED = 'decision_review_requested';
+    public const STATUS_REVIEW_DUE       = 'decision_review_due';
+    public const STATUS_REVIEW_WAITING   = 'decision_review_waiting';
+
+    /**
+     * v4.11.18 — the prefix on a review row's `providerItemId`.
+     *
+     * A review row and a decision row can both exist for one decision at
+     * once (the proposer's *Completed* row, and their *Waiting* row for the
+     * review they asked for), and two items sharing an id would share their
+     * snooze state and route each other's actions. The marker-in-front shape
+     * is the one `/mywork-workflows` names: `review:{reviewId}`, told apart
+     * from a bare decision id by the prefix.
+     */
+    public const REVIEW_PREFIX = 'review:';
 
     private ?string $unavailableReason = null;
 
@@ -93,6 +140,10 @@ class DecisionWorkProvider implements IWorkProvider {
         private IDBConnection $db,
         private DecisionMapper $decisionMapper,
         private DecisionService $decisionService,
+        // v4.11.18 — the review rows. The mapper for the single-row read the
+        // action endpoint makes, the service for the list and the write.
+        private DecisionReviewMapper $reviewMapper,
+        private DecisionReviewService $reviewService,
         private DecisionCategoryService $categoryService,
         private MemberService $memberService,
         private IUserManager $userManager,
@@ -134,6 +185,9 @@ class DecisionWorkProvider implements IWorkProvider {
                 self::STATUS_PROPOSED,
                 self::STATUS_APPROVED,
                 self::STATUS_DENIED,
+                self::STATUS_REVIEW_REQUESTED,
+                self::STATUS_REVIEW_DUE,
+                self::STATUS_REVIEW_WAITING,
             ],
             'categories' => [
                 Category::ACTION_REQUIRED,
@@ -196,14 +250,21 @@ class DecisionWorkProvider implements IWorkProvider {
 
         $truncated = false;
         $rows      = $this->loadRelevantDecisions($teamIds, $query, $truncated);
-        if ($rows === []) {
-            return WorkItemPage::empty();
-        }
 
         // Approver sets are per (team, category) and shared by many rows, so
         // resolve each once rather than per decision.
         $approverCache = [];
-        $items         = [];
+        // v4.11.18 — the review rows come from their own table and are
+        // independent of the decision rows: an approved decision under review
+        // produces no decision row for an approver at all, which is why
+        // folding them into the loop below would have missed every one.
+        $items = $this->reviewItems($teamIds, $query, $approverCache);
+
+        if ($rows === []) {
+            return $items === []
+                ? WorkItemPage::empty()
+                : new WorkItemPage($items, count($items), $truncated);
+        }
 
         foreach ($rows as $decision) {
             $teamId    = $decision->getTeamId();
@@ -296,10 +357,80 @@ class DecisionWorkProvider implements IWorkProvider {
         return new WorkItemPage($items, count($items), $truncated);
     }
 
+    /**
+     * v4.11.18 — the rows that come from an open review rather than from a
+     * decision.
+     *
+     * Two audiences, and a person can only be in one of them for a given
+     * review: an approver who asked for the review themselves gets the
+     * approver's row, because being able to answer outranks waiting for an
+     * answer. Everybody else sees nothing — a review is between the person
+     * who asked and the people who can answer.
+     *
+     * @param string[]                $teamIds
+     * @param array<string, string[]> $approverCache shared with the decision loop
+     * @return WorkItem[]
+     */
+    private function reviewItems(array $teamIds, WorkQuery $query, array &$approverCache): array {
+        try {
+            $reviews = $this->reviewService->openReviewsForTeams($teamIds);
+        } catch (\Throwable $e) {
+            // Unlike the decision load, this one does not rethrow. The
+            // decision rows are the provider's reason to exist and a silent
+            // empty there would be a lie; a review row missing is a feature
+            // degrading, and marking the whole provider errored would take
+            // the queue down with it.
+            $this->logger->warning('[TeamHub][MyWork][Decisions] Review load failed', [
+                'exception' => $e, 'app' => Application::APP_ID,
+            ]);
+            return [];
+        }
+        if ($reviews === []) {
+            return [];
+        }
+
+        $decisions = $this->decisionMapper->findByIds(
+            array_map(static fn (DecisionReview $r): int => $r->getDecisionId(), $reviews),
+        );
+
+        $items = [];
+        foreach ($reviews as $review) {
+            $decision = $decisions[$review->getDecisionId()] ?? null;
+            // A decision that was deleted, or retired by another road while
+            // this review was open. Neither is work: `retire()` closes an
+            // open review, so a retired one here means a row older than that
+            // rule, and acting on it would fail at the service anyway.
+            if ($decision === null || $decision->getStatus() !== 'approved') {
+                continue;
+            }
+
+            $teamId     = $decision->getTeamId();
+            $isApprover = $this->isApprover($teamId, $decision, $query->userId, $approverCache);
+
+            if ($isApprover) {
+                $items[] = $this->buildReviewItem($query, $review, $decision, true);
+                continue;
+            }
+            if ($review->getRequestedBy() === $query->userId) {
+                $items[] = $this->buildReviewItem($query, $review, $decision, false);
+            }
+        }
+
+        return $items;
+    }
+
     public function getItem(string $userId, string $providerItemId, array $allowedTeamIds): ?WorkItem {
         if (!$this->isAvailable() || $allowedTeamIds === []) {
             return null;
         }
+
+        // v4.11.18 — a review row, told apart by its prefix. Resolved before
+        // the decision path, because `(int)'review:12'` is 0 and would fall
+        // through to "no such decision" instead of to the review.
+        if (str_starts_with($providerItemId, self::REVIEW_PREFIX)) {
+            return $this->getReviewItem($userId, $providerItemId, $allowedTeamIds);
+        }
+
         $decisionId = (int)$providerItemId;
         if ($decisionId <= 0) {
             return null;
@@ -359,12 +490,89 @@ class DecisionWorkProvider implements IWorkProvider {
             $this->firstApproverParty($decision->getTeamId(), $decision, $cache), null, false);
     }
 
+    /**
+     * One review, for the action endpoint and for a refresh of a single row.
+     *
+     * The same gate as `reviewItems()`, and that is the point: this is the
+     * path every action authorises against, so a rule that exists in one and
+     * not the other is a permission bug waiting to happen (the note
+     * v4.5.25 left on the two decision paths, which still holds).
+     */
+    private function getReviewItem(string $userId, string $providerItemId, array $allowedTeamIds): ?WorkItem {
+        $reviewId = (int)substr($providerItemId, strlen(self::REVIEW_PREFIX));
+        if ($reviewId <= 0) {
+            return null;
+        }
+
+        $review = $this->reviewMapper->findById($reviewId);
+        if ($review === null
+            || !$review->isOpen()
+            || !in_array($review->getTeamId(), $allowedTeamIds, true)
+        ) {
+            return null;
+        }
+        if (!$this->isModuleOn($review->getTeamId())) {
+            return null;
+        }
+
+        $decision = $this->decisionMapper->findById($review->getDecisionId());
+        if ($decision === null || $decision->getStatus() !== 'approved') {
+            return null;
+        }
+
+        $query = new WorkQuery(userId: $userId, teamIds: $allowedTeamIds, now: time());
+        $cache = [];
+
+        $isApprover = $this->isApprover($review->getTeamId(), $decision, $userId, $cache);
+        if (!$isApprover && $review->getRequestedBy() !== $userId) {
+            return null;
+        }
+
+        return $this->buildReviewItem($query, $review, $decision, $isApprover);
+    }
+
     // ---------------------------------------------------------------------
     // Actions
     // ---------------------------------------------------------------------
 
     public function getAvailableActions(string $userId, WorkItem $item): array {
         $actions = [ActionType::OPEN];
+
+        // v4.11.18 — a review the user can answer. Two verbs, both already
+        // in the provider's capabilities: COMPLETE is "I looked and it
+        // stands", REJECT is "the other one". Their generic labels are wrong
+        // for this row, so the row carries its own in `metadata.actionLabels`
+        // — the mechanism `/mywork-workflows` prescribes, rather than a new
+        // ActionType for a workflow verb.
+        //
+        // Not APPROVE/REJECT: approving again would claim a second approval
+        // the record does not have and the audit stream would show two.
+        //
+        // **v4.11.26 — a periodic review has two one-click answers and a
+        // requested one has only the refusal.** The 4.11.24 split (periodic
+        // → keep/archive, requested → accept/deny) never reached this file,
+        // so every review answered from My Work was recorded as `kept` or
+        // `archived` whatever had been asked — review #8 of Marketing #11 on
+        // the test instance is one of those. Accepting now rewrites the
+        // decision's wording, which is a form and not a verb, so the row
+        // sends the approver to the decision for it: COMPLETE is dropped on
+        // a requested review rather than quietly meaning something else.
+        if ($item->status === self::STATUS_REVIEW_DUE
+            && ($item->permissions['canApprove'] ?? false)
+        ) {
+            return [ActionType::OPEN, ActionType::COMPLETE, ActionType::REJECT];
+        }
+        if ($item->status === self::STATUS_REVIEW_REQUESTED
+            && ($item->permissions['canApprove'] ?? false)
+        ) {
+            return [ActionType::OPEN, ActionType::REJECT];
+        }
+
+        // The requester's waiting row. Open and nothing else: they asked, and
+        // taking it back is not a thing the spec gives them.
+        if ($item->status === self::STATUS_REVIEW_WAITING) {
+            return $actions;
+        }
 
         if ($item->status === self::STATUS_AWAITING_APPROVAL
             && ($item->permissions['canApprove'] ?? false)
@@ -394,6 +602,13 @@ class DecisionWorkProvider implements IWorkProvider {
             return ActionResult::forbidden(
                 $this->l->t('You are not an approver for this decision.'),
             );
+        }
+
+        // v4.11.18 — a review's two verbs, before the decision paths: the
+        // item id is prefixed, so `(int)` on it is 0 and every branch below
+        // would act on the wrong thing.
+        if ($item->status === self::STATUS_REVIEW_REQUESTED || $item->status === self::STATUS_REVIEW_DUE) {
+            return $this->executeReviewAction($userId, $item, $action, $params);
         }
 
         $decisionId = (int)$item->providerItemId;
@@ -465,6 +680,92 @@ class DecisionWorkProvider implements IWorkProvider {
                 'exception' => $e, 'app' => Application::APP_ID,
             ]);
             return ActionResult::failure($this->l->t('That decision could not be updated.'));
+        }
+    }
+
+    /**
+     * Answer a review from its row (v4.11.18).
+     *
+     * v4.11.23 — the reason is **required**, as it is for approve and deny.
+     * The row sets `metadata.requiresReason`, so the generic dialog refuses
+     * an empty one before it posts; the service refuses it again.
+     *
+     * @param array<string, mixed> $params
+     */
+    private function executeReviewAction(string $userId, WorkItem $item, string $action, array $params): ActionResult {
+        $decisionId = (int)($item->metadata['decisionId'] ?? 0);
+        if ($decisionId <= 0) {
+            return ActionResult::gone($this->l->t('This review no longer exists.'));
+        }
+
+        $reason = trim((string)($params['reason'] ?? $params['message'] ?? ''));
+
+        // v4.11.26 — the outcome depends on what was asked, not only on
+        // which button was pressed. A periodic review asks "is this still
+        // right" and is answered keep/archive; a requested one is a request
+        // and is answered accept/deny, of which only *deny* is a one-click
+        // answer. `getAvailableActions()` does not offer COMPLETE on a
+        // requested review, so the `kept` arm below is unreachable from it —
+        // the match is written out in full anyway, because the next person to
+        // add a status here will read this and not the gate.
+        $requested = $item->status === self::STATUS_REVIEW_REQUESTED;
+        $outcome   = $action === ActionType::REJECT
+            ? ($requested ? 'denied' : 'archived')
+            : ($requested ? 'accepted' : 'kept');
+
+        // Refused here rather than letting the service throw, so the row
+        // shows a sentence the person can act on instead of a 502 — the same
+        // treatment approve and deny get a few lines down.
+        if ($reason === '') {
+            return ActionResult::failure(
+                $this->l->t('A review needs a short reason. Add one and try again.'),
+                'failed',
+            );
+        }
+
+        try {
+            $this->reviewService->complete(
+                $item->teamId,
+                $decisionId,
+                $outcome,
+                $reason,
+                $userId,
+            );
+
+            // `denied` and `kept` share one sentence on purpose: from the
+            // row's point of view they are the same news, which is that the
+            // decision did not move.
+            return ActionResult::success(
+                $outcome === 'archived'
+                    ? $this->l->t('Decision archived.')
+                    : $this->l->t('Review completed. The decision stands.'),
+                null,
+                true,
+            );
+        } catch (\InvalidArgumentException $e) {
+            return ActionResult::failure($e->getMessage(), 'failed');
+        } catch (\Throwable $e) {
+            $cls = get_class($e);
+            if (str_contains($cls, 'AccessDenied')) {
+                return ActionResult::forbidden(
+                    $this->l->t('You are not an approver for this decision.'),
+                );
+            }
+            if (str_contains($cls, 'DoesNotExist') || str_contains($cls, 'NotFound')) {
+                return ActionResult::gone($this->l->t('This decision no longer exists.'));
+            }
+            // Somebody else answered it first, or the team has no archive
+            // category yet — both read as a RuntimeException from the
+            // service, and both are states the row should refresh out of.
+            if ($e instanceof \RuntimeException) {
+                return ActionResult::conflict($e->getMessage());
+            }
+
+            $this->logger->error('[TeamHub][MyWork][Decisions] Review action failed', [
+                'action' => $action, 'decisionId' => $decisionId,
+                'exception' => $e, 'app' => Application::APP_ID,
+            ]);
+            return ActionResult::failure($this->l->t('That review could not be completed.'));
         }
     }
 
@@ -705,6 +1006,221 @@ class DecisionWorkProvider implements IWorkProvider {
                 'canReject'  => $canApprove,
             ],
         ]);
+    }
+
+    /**
+     * A row for one open review (v4.11.18).
+     *
+     * @param bool $canAnswer true for an approver, false for the member who
+     *                        asked — the one flag that decides the category,
+     *                        the priority, the reason sentence and the
+     *                        buttons, because they are four readings of one
+     *                        fact.
+     */
+    private function buildReviewItem(
+        WorkQuery      $query,
+        DecisionReview $review,
+        Decision       $decision,
+        bool           $canAnswer,
+    ): WorkItem {
+        $teamId    = $decision->getTeamId();
+        $requested = $review->isRequested();
+        $asker     = $review->getRequestedBy();
+        // Declared, not inlined: `firstApproverParty()` takes it by
+        // reference, and PHP refuses an assignment in that position.
+        $cache     = [];
+
+        if ($canAnswer) {
+            $status   = $requested ? self::STATUS_REVIEW_REQUESTED : self::STATUS_REVIEW_DUE;
+            $category = Category::ACTION_REQUIRED;
+            $priority = Priority::HIGH;
+            $reason   = $requested
+                ? $this->l->t('%s asked you to review this decision', [$this->displayName($asker)])
+                : $this->l->t('This decision has reached its review date');
+            $waiting  = null;
+        } else {
+            $status   = self::STATUS_REVIEW_WAITING;
+            $category = Category::WAITING_FOR_OTHERS;
+            $priority = Priority::NORMAL;
+            $reason   = $this->l->t('You asked for a review — it is with the approvers');
+            $waiting  = $this->firstApproverParty($teamId, $decision, $cache);
+        }
+
+        return WorkItem::make([
+            'providerId'     => self::ID,
+            'providerItemId' => self::REVIEW_PREFIX . $review->getId(),
+            'teamId'         => $teamId,
+            'teamName'       => $query->teamName($teamId),
+            'category'       => $category,
+            'title'          => $decision->getQuestion(),
+            // Says what the row is about before it says which decision — a
+            // queue with both a decision row and a review row for the same
+            // subject needs the difference on the row, not in the detail.
+            'subtitle'       => $decision->getCategory()
+                ? $this->l->t('Review · %s', [(string)$decision->getCategory()])
+                : $this->l->t('Review'),
+            'resourceType'   => self::RESOURCE_TYPE,
+            'resourceId'     => (string)$decision->getId(),
+            'resourceUrl'    => '/apps/teamhub?team=' . rawurlencode($teamId)
+                . '&decision=' . $decision->getId(),
+            'openTarget'     => OpenTarget::teamHubView('decisions', $decision->getMessageId()),
+            'priority'       => $priority,
+            'status'         => $status,
+            'reason'         => $reason,
+            'createdAt'      => (int)$review->getCreatedAt(),
+            'updatedAt'      => (int)$review->getCreatedAt(),
+            // The due date **is** a deadline, unlike everything else this
+            // provider shows: a periodic review has one by construction, and
+            // a requested review inherits whatever the decision carried. The
+            // class docblock's "decisions have no due date" is still true of
+            // decisions and was never true of reviews.
+            'dueAt'          => $decision->getReviewDueAt(),
+            'completedAt'    => null,
+            'assignee'       => null,
+            'waitingFor'     => $waiting,
+            'availableActions' => [],
+            'metadata'       => [
+                'decisionId'     => (int)$decision->getId(),
+                'reviewId'       => (int)$review->getId(),
+                'messageId'      => $decision->getMessageId(),
+                'workflowStatus' => $decision->getStatus(),
+                'reviewKind'     => $review->getKind(),
+                'impact'         => $decision->getImpact(),
+                'level'          => $decision->getLevel(),
+                'motivation'     => $review->getMotivation(),
+                'proposer'       => [
+                    'uid'         => $decision->getProposedBy(),
+                    'displayName' => $this->displayName($decision->getProposedBy()),
+                ],
+                // v4.11.23 — required, like approve and deny. The generic
+                // dialog prompts for it and will not submit it empty.
+                'requiresReason' => $canAnswer,
+                // The row's own words. The generic labels (*Complete*,
+                // *Reject*) describe a task and a refusal; this row offers
+                // outcomes for a decision — and which ones depends on what
+                // was asked (v4.11.26). A requested review carries only
+                // *Deny*: accepting rewrites the wording, and that needs the
+                // decision panel rather than a confirm dialog.
+                'actionLabels'   => $this->reviewActionLabels($canAnswer, $requested),
+                'confirm'        => $this->reviewConfirmations($canAnswer, $requested),
+                'workflow'       => $this->reviewWorkflow($review, $requested, $asker),
+            ],
+            'permissions'    => [
+                'canOpen'    => true,
+                // `canApprove` is what `getAvailableActions()` reads. Named
+                // for the capability and not for the verb, which is why it
+                // can gate a review's two outcomes as well as approve/deny.
+                'canApprove' => $canAnswer,
+                'canReject'  => $canAnswer,
+            ],
+        ]);
+    }
+
+    /**
+     * The verbs this review row offers, in its own words (v4.11.26).
+     *
+     * @return array<string, string>
+     */
+    private function reviewActionLabels(bool $canAnswer, bool $requested): array {
+        if (!$canAnswer) {
+            return [];
+        }
+        if ($requested) {
+            return [
+                // TRANSLATORS: My Work row action — the approver refuses the review request; the decision stands unchanged
+                ActionType::REJECT => $this->l->t('Deny request'),
+            ];
+        }
+        return [
+            // TRANSLATORS: My Work row action — the reviewer found nothing to change; the decision stands and its review clock restarts
+            ActionType::COMPLETE => $this->l->t('Keep decision'),
+            // TRANSLATORS: My Work row action — the reviewer retires the decision into the team's archive
+            ActionType::REJECT   => $this->l->t('Archive decision'),
+        ];
+    }
+
+    /**
+     * What the confirm dialog says before each of them (v4.11.26).
+     *
+     * @return array<string, array<string, string>>
+     */
+    private function reviewConfirmations(bool $canAnswer, bool $requested): array {
+        if (!$canAnswer) {
+            return [];
+        }
+        if ($requested) {
+            return [
+                ActionType::REJECT => [
+                    'title' => $this->l->t('Deny this review request?'),
+                    // Says what deny *is*, because the word on its own reads
+                    // as a refusal of the decision rather than of the
+                    // request, and that is the misreading this whole version
+                    // exists to clear up.
+                    'body'  => $this->l->t('The decision stays in force exactly as it is, and its review period starts again from today. To change its wording instead, open the decision and accept the request there.'),
+                    'reasonLabel' => $this->l->t('Reason'),
+                ],
+            ];
+        }
+        return [
+            ActionType::COMPLETE => [
+                'title' => $this->l->t('Keep this decision?'),
+                'body'  => $this->l->t('The decision stays in force and its review period starts again from today.'),
+                'reasonLabel' => $this->l->t('Reason'),
+            ],
+            ActionType::REJECT   => [
+                'title' => $this->l->t('Archive this decision?'),
+                'body'  => $this->l->t('It moves to the team archive and becomes read-only. The record and its audit trail are kept.'),
+                'reasonLabel' => $this->l->t('Reason'),
+            ],
+        ];
+    }
+
+    /**
+     * The whole review, on every row of it — `/mywork-workflows` § the
+     * tracker. Computed here rather than per audience, so the approver and
+     * the requester cannot be shown two different stories.
+     *
+     * Three steps for a requested review and two for a periodic one: nobody
+     * asked for the periodic one, and a first step reading *Requested* with
+     * no actor would be the tracker inventing a person.
+     *
+     * @return array{steps: array<int, array<string, mixed>>, current: int}
+     */
+    private function reviewWorkflow(DecisionReview $review, bool $requested, string $asker): array {
+        $steps = [];
+
+        if ($requested) {
+            $steps[] = [
+                'label' => $this->l->t('Review requested'),
+                'state' => 'done',
+                'actor' => $this->displayName($asker),
+                'at'    => (int)$review->getCreatedAt(),
+            ];
+        } else {
+            $steps[] = [
+                'label' => $this->l->t('Review date reached'),
+                'state' => 'done',
+                'actor' => null,
+                'at'    => (int)$review->getCreatedAt(),
+            ];
+        }
+
+        // v4.11.26 — the last step says which pair of answers is actually on
+        // offer. A requested review is accepted or denied; a periodic one is
+        // kept or archived. One label for both told half the readers the
+        // wrong story.
+        $steps[] = [
+            'label' => $requested
+                // TRANSLATORS: workflow tracker step — the approver will either accept the review request (and reword the decision) or deny it
+                ? $this->l->t('Approver accepts or denies')
+                // TRANSLATORS: workflow tracker step — the approver will either let the decision stand or retire it into the archive
+                : $this->l->t('Approver keeps or archives'),
+            'state' => 'current',
+            'actor' => null,
+            'at'    => null,
+        ];
+
+        return ['steps' => $steps, 'current' => count($steps)];
     }
 
     /** @var array<string,string> */

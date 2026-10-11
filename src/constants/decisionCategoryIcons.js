@@ -39,4 +39,8 @@ export const CATEGORY_ICONS = [
     { name: 'CodeBraces',            label: 'Development' },
     { name: 'HeartOutline',          label: 'Values' },
     { name: 'Handshake',             label: 'Partnerships' },
+    // v4.11.18 — the icon the seeded Archive category carries. In the list
+    // like any other, so a team may give it to a category of their own and
+    // the picker offers it.
+    { name: 'ArchiveOutline',        label: 'Archive' },
 ]

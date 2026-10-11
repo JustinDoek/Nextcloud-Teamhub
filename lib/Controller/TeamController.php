@@ -97,6 +97,11 @@ class TeamController extends Controller {
         private OpenProjectModuleService $openProjectModule,
         private IConfig $config,
         private \OCA\TeamHub\Service\RoomDiscoveryService $roomDiscovery,
+        // v4.11.6 — the default issue process a new service team is seeded
+        // with, from saveTeamType(). Beside TeamExpiryService for the same
+        // reason: it follows from the template being written, not from a
+        // route of its own.
+        private \OCA\TeamHub\Service\ServiceTeam\TeamServiceBuilder $serviceBuilder,
         private IUserSession $userSession,
         private IGroupManager $groupManager,
         private \OCP\App\IAppManager $appManager,
@@ -1276,6 +1281,23 @@ class TeamController extends Controller {
                 );
             }
 
+            // v4.11.6 — a new service team starts with the default issue
+            // process as a draft in its Services tab. Never fatal: the team
+            // exists either way, and a desk with no draft is a desk that
+            // builds its first service by hand, which is what it did before.
+            // `setType()` has established team-admin level above.
+            if ($stored === 'service') {
+                try {
+                    $user = $this->userSession->getUser();
+                    $this->serviceBuilder->seedDefault($teamId, $user !== null ? $user->getUID() : '');
+                } catch (\Throwable $e) {
+                    $this->logger->warning('[TeamHub][TeamController] Seeding the default service failed', [
+                        'teamId'    => $teamId,
+                        'exception' => $e,
+                    ]);
+                }
+            }
+
             return new JSONResponse([
                 'type'   => $stored,
                 'expiry' => $this->teamExpiryService->getExpiry($teamId),
@@ -1526,7 +1548,12 @@ class TeamController extends Controller {
      * POST /api/v1/teams/{teamId}/tasks
      *
      * Creates a VTODO task in the team calendar.
-     * Body: { title: string, duedate?: string (ISO 8601), description?: string }
+     * Body: { title: string, duedate?: string (ISO 8601), description?: string,
+     *         calendarId?: int, assignee?: string }
+     *
+     * `assignee` is a team member's uid, `self`, or `team` / omitted for the
+     * whole team — see `TaskService`'s docblock on why a task names who it is
+     * for. A uid that is not a member of this team answers 400.
      */
     #[NoAdminRequired]
     public function createTeamTask(string $teamId): JSONResponse {
@@ -1537,12 +1564,16 @@ class TeamController extends Controller {
             $duedate     = $this->request->getParam('duedate') ?: null;
             $description = $this->request->getParam('description') ?: null;
             $calendarId  = $this->request->getParam('calendarId') ? (int)$this->request->getParam('calendarId') : null;
+            $assignee    = $this->request->getParam('assignee') ?: null;
 
             if ($title === '') {
                 return new JSONResponse(['error' => 'Title is required'], Http::STATUS_BAD_REQUEST);
             }
 
-            $result = $this->taskService->createTeamTask($teamId, $title, $duedate, $description, $calendarId);
+            $result = $this->taskService->createTeamTask(
+                $teamId, $title, $duedate, $description, $calendarId,
+                $assignee !== null ? (string)$assignee : null,
+            );
             return new JSONResponse($result, Http::STATUS_CREATED);
         } catch (\Throwable $e) {
             return $this->exceptionResponse($e, 'Failed to create team task', [

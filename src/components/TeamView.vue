@@ -239,13 +239,14 @@
             <!-- Decisions tab — rendered when module is enabled globally AND for this team -->
             <TeamDecisionsView
                 v-if="currentView === 'decisions' && decisionsModuleEnabled && decisionsConfig.decisions_enabled"
-                @propose-decision="openCompose"
-                @propose-decision-superseding="openDecisionCompose" />
+                @propose-decision="openCompose" />
 
             <!-- Services tab (v4.10.41) — the service team's services and the
                  service builder on the whole tab. -->
+            <!-- v4.11.7 — two panes: the team's services, and the desk's
+                 request grid. `ServiceTeamTabView` owns the switch. -->
             <div v-if="currentView === 'services' && serviceDeskConfig.isServiceTeam" class="teamhub-services-tab">
-                <ServicesWidget page />
+                <ServiceTeamTabView />
             </div>
 
             <!-- Timeline tab — Advanced-mode projects get the Planning-phase
@@ -493,7 +494,8 @@
              finalize immediately or leave the proposal open for discussion. -->
         <ComposeDecisionModal
             :open="composeDecisionOpen"
-            @close="composeDecisionOpen = false"
+            :context-prefill="composeDecisionPrefill"
+            @close="closeCompose"
             @decision-created="onDecisionCreatedFromCompose" />
 
     </div>
@@ -548,6 +550,7 @@ import ProjectTimeView from './ProjectTimeView.vue'
 import TeamPresenceView   from './TeamPresenceView.vue'
 import TeamDecisionsView  from './TeamDecisionsView.vue'
 import ServicesWidget     from './ServicesWidget.vue'
+import ServiceTeamTabView from './services/ServiceTeamTabView.vue'
 import ComposeDecisionModal from './ComposeDecisionModal.vue'
 import ProjectPhaseStepper from './ProjectPhaseStepper.vue'
 import ProjectPhaseGuide from './ProjectPhaseGuide.vue'
@@ -647,6 +650,7 @@ export default {
         TeamPresenceView,
         TeamDecisionsView,
         ServicesWidget,
+        ServiceTeamTabView,
         ComposeDecisionModal,
         ProjectPhaseStepper,
         ProjectPhaseGuide,
@@ -759,6 +763,10 @@ export default {
             // Compose-decision modal (Session A) — opened by widget header `+`
             // and by TeamDecisionsView's Propose button. Single instance.
             composeDecisionOpen: false,
+            // v4.11.42 — markdown seeded into the composer's Context field,
+            // or '' for the normal empty composer. Cleared on close so the
+            // next *Propose decision* click opens a blank one.
+            composeDecisionPrefill: '',
             // Project-owner onboarding (v3.90.x) — controls ProjectPhaseGuide visibility.
             showProjectGuide: false,
             // v3.98.2 — Planning-phase workstreams modal (opened from Compass).
@@ -788,6 +796,8 @@ export default {
             'members', 'loading', 'intravoxAvailable', 'teamWidgets', 'teamMenuItems',
             'selectedDeckBoard', 'presenceConfig', 'presenceModuleEnabled',
             'decisionsConfig', 'decisionsModuleEnabled',
+            // v4.11.42 — { body, nonce } | null, set by the propose deep link.
+            'decisionsComposePrefill',
             // v4.10.41 — the Services tab.
             'serviceDeskConfig',
             'timelineConfig', 'messagesConfig', 'collectivesConfig', 'budgetConfig', 'timeConfig', 'project', 'teamType',
@@ -1320,6 +1330,29 @@ export default {
     },
 
     watch: {
+        /**
+         * v4.11.42 — somebody outside this view asked for the proposal
+         * composer, with its Context field already written: today the
+         * *Propose a decision* entry in the Files ⋯ menu, which arrives as
+         * `?team=…&propose=1&file=…` and hands over a markdown link to the
+         * file.
+         *
+         * Consumed and cleared, so switching teams afterwards does not reopen
+         * it. `immediate` because the prefill can be set while this component
+         * is still mounting — the deep-link reader selects the team first,
+         * which is what renders this view.
+         */
+        decisionsComposePrefill: {
+            immediate: true,
+            handler(prefill) {
+                if (!prefill?.body) {
+                    return
+                }
+                this.composeDecisionPrefill = prefill.body
+                this.composeDecisionOpen = true
+                this.SET_DECISIONS_COMPOSE_PREFILL(null)
+            },
+        },
         // v4.10.11 — the warm-up queue cannot decide which tabs boot a frame
         // until the team's resources are known; resume it when they are (and
         // only if it is idle: nothing in flight, no timer pending).
@@ -1597,7 +1630,7 @@ export default {
         // loadTeamLayout action, so the mutations this component mapped only to
         // unpack that response went with them. What is left is what TeamView
         // still writes itself.
-        ...mapMutations(['SET_VIEW', 'SET_PRESENCE_CONFIG', 'SET_DECISIONS_CONFIG', 'SET_DECISIONS_TARGET', 'SET_PROJECT', 'SET_PROJECT_TAB_FOCUS']),
+        ...mapMutations(['SET_VIEW', 'SET_PRESENCE_CONFIG', 'SET_DECISIONS_CONFIG', 'SET_DECISIONS_TARGET', 'SET_DECISIONS_COMPOSE_PREFILL', 'SET_PROJECT', 'SET_PROJECT_TAB_FOCUS']),
 
         setView(view) { this.SET_VIEW(view) },
 
@@ -1777,24 +1810,25 @@ export default {
         },
         toggleEditMode() { this.editMode = !this.editMode },
 
-        /**
-         * Navigate to the message stream and pre-set the compose form to
-         * open in decision mode. supersedesId is the decision id being
-         * superseded (null for a fresh proposal).
-         *
-         * The compose form reads window.__teamhubDecisionCompose on mount /
-         * next stream activation and pre-fills accordingly, then clears it.
-         */
-        openDecisionCompose(supersedesId) {
-            window.__teamhubDecisionCompose = { supersedesId: supersedesId || null }
-            this.SET_VIEW('msgstream')
+        // v4.11.18 — `openDecisionCompose(supersedesId)` is gone with the
+        // open-proposal *Supersede* button it existed for. Nothing else ever
+        // called it, and a proposal cannot name what it will replace: that is
+        // now an approver's act on the approved decision being retired.
+        // `PostMessageForm` still reads the handshake global for the plain
+        // "open in decision mode" case.
+
+        // Session A — open the focused compose modal.
+        openCompose() {
+            // v4.11.42 — blank: the prefill belongs to the deep link that set
+            // it, not to the next person who presses *Propose decision*.
+            this.composeDecisionPrefill = ''
+            this.composeDecisionOpen = true
         },
 
-        // Session A — open the focused compose modal (no supersedes — for
-        // supersedes the legacy handshake to msgstream remains, since the
-        // form needs the prior decision context loaded into the inline form).
-        openCompose() {
-            this.composeDecisionOpen = true
+        /** v4.11.42 — one place to close it, so the prefill never outlives it. */
+        closeCompose() {
+            this.composeDecisionOpen = false
+            this.composeDecisionPrefill = ''
         },
 
         // Fired by ComposeDecisionModal after a successful proposal.
@@ -1803,7 +1837,7 @@ export default {
         // so the user lands on its detail view immediately.
         async onDecisionCreatedFromCompose(message) {
             const decision = message?.decision || null
-            this.composeDecisionOpen = false
+            this.closeCompose()
             // Switch to the Decisions view.
             this.SET_VIEW('decisions')
             // Hand the messageId off via the store mutation so TeamDecisionsView's

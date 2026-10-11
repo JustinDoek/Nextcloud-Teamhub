@@ -89,4 +89,24 @@ class WorkflowInstanceMapper extends QBMapper {
             ->andWhere($qb->expr()->in('status', $qb->createNamedParameter($openStatuses, IQueryBuilder::PARAM_STR_ARRAY)));
         return $this->findEntities($qb);
     }
+
+    /**
+     * v4.11.39 — every open instance of one definition, whatever team.
+     *
+     * `IdpGroupRequestService::reconcile()` needs the other direction of the
+     * query above: not "has this group a request" but "is there a request
+     * whose group is no longer waiting". Covered by the existing
+     * `th_wfi_def_idx` on (definition_key, status).
+     *
+     * @param string[] $openStatuses
+     * @return WorkflowInstance[]
+     */
+    public function findOpenForDefinition(string $definitionKey, array $openStatuses): array {
+        $qb = $this->db->getQueryBuilder();
+        $qb->select('*')
+            ->from($this->getTableName())
+            ->where($qb->expr()->eq('definition_key', $qb->createNamedParameter($definitionKey)))
+            ->andWhere($qb->expr()->in('status', $qb->createNamedParameter($openStatuses, IQueryBuilder::PARAM_STR_ARRAY)));
+        return $this->findEntities($qb);
+    }
 }

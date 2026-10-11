@@ -7,6 +7,7 @@ use OCA\TeamHub\AppInfo\Application;
 use OCA\TeamHub\BackgroundJob\AuditMirrorJob;
 use OCA\TeamHub\Db\AuditLogMapper;
 use OCA\TeamHub\Service\AuditIngestionService;
+use OCA\TeamHub\Service\AuditService;
 use OCP\AppFramework\Controller;
 use OCP\AppFramework\Http;
 use OCP\AppFramework\Http\Attribute\AuthorizedAdminSetting;
@@ -29,7 +30,8 @@ use Psr\Log\LoggerInterface;
  *
  * Endpoints:
  *   GET    /api/v1/admin/audit/teams                       — summary list
- *   GET    /api/v1/admin/audit/teams/{teamId}/events       — paginated rows
+ *   GET    /api/v1/admin/audit/events                      — paginated rows, every team
+ *   GET    /api/v1/admin/audit/teams/{teamId}/events       — paginated rows, one team
  *   GET    /api/v1/admin/audit/teams/{teamId}/export       — ZIP export
  *   GET    /api/v1/admin/audit/retention                    — retention setting
  *   PUT    /api/v1/admin/audit/retention                    — save retention setting
@@ -39,6 +41,14 @@ class AuditController extends Controller {
     /** Hard ceiling on perPage to defend against runaway queries. */
     private const MAX_PER_PAGE = 200;
     private const DEFAULT_PER_PAGE = 50;
+
+    /**
+     * The all-teams view's page size (v4.11.39). Smaller than the per-team
+     * default because this page is read, not scanned: an administrator opens
+     * the Compliance tab to see what happened recently, and fifteen rows is
+     * what fits above the fold next to the filters.
+     */
+    private const ALL_PER_PAGE = 15;
 
     public function __construct(
         string $appName,
@@ -117,6 +127,22 @@ class AuditController extends Controller {
                 $pdRes->closeCursor();
             }
 
+            // v4.11.39 — the instance scope as its own bucket. Its rows are
+            // real events about the installation (policy profiles, blueprints,
+            // provisioning runs, the directory-group history) that had no
+            // reader at all while this list was the only way into the log;
+            // they are reported separately because the sentinel is not a
+            // circle and has no name to read out of the database.
+            $instanceCount = 0;
+            $instanceLast  = 0;
+            foreach ($summary as $row) {
+                if ($row['team_id'] === AuditService::INSTANCE_SCOPE) {
+                    $instanceCount = (int)$row['event_count'];
+                    $instanceLast  = (int)$row['last_event_at'];
+                    break;
+                }
+            }
+
             $teams = [];
             foreach ($summary as $row) {
                 $tid = $row['team_id'];
@@ -152,6 +178,91 @@ class AuditController extends Controller {
             return new JSONResponse([
                 'teams'            => $teams,
                 'activity_missing' => $activityMissing,
+                'instance_scope'   => [
+                    'team_id'       => AuditService::INSTANCE_SCOPE,
+                    'event_count'   => $instanceCount,
+                    'last_event_at' => $instanceLast,
+                ],
+            ]);
+        } catch (\Throwable $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // GET /api/v1/admin/audit/events
+    // -------------------------------------------------------------------------
+
+    /**
+     * v4.11.39 — paginated read across **every** team, instance-scoped rows
+     * included, with the team as an optional narrowing filter.
+     *
+     * This is what the Compliance tab reads. Until 4.11.39 it could only read
+     * {@see listEvents()}, which meant picking a team first — so an event
+     * filed under `AuditService::INSTANCE_SCOPE` was written by four services
+     * and readable by none, and the directory-group history (v4.11.39) would
+     * have gone the same way.
+     *
+     * `teamId` accepts `_instance` like any other value: the sentinel is a
+     * `team_id` as far as the query is concerned, which is the property that
+     * let the instance scope ship without a schema change.
+     *
+     * Query params:
+     *   teamId      string    '' = every team. `_instance` = not about a team.
+     *   page        int       1-based (default 1)
+     *   perPage     int       capped at MAX_PER_PAGE (default ALL_PER_PAGE)
+     *   eventTypes  string    Comma-separated list. Empty = no filter.
+     *   from        int       Unix seconds. Inclusive lower bound. 0 = no filter.
+     *   to          int       Unix seconds. Inclusive upper bound. 0 = no filter.
+     */
+    #[AuthorizedAdminSetting(settings: \OCA\TeamHub\Settings\AdminSettings::class)]
+    #[NoCSRFRequired]
+    public function listAllEvents(
+        string $teamId = '',
+        int    $page = 1,
+        int    $perPage = self::ALL_PER_PAGE,
+        string $eventTypes = '',
+        int    $from = 0,
+        int    $to = 0,
+    ): JSONResponse {
+        try {
+            $teamId = trim($teamId);
+            if (strlen($teamId) > 64) {
+                return new JSONResponse(['error' => 'Invalid teamId'], Http::STATUS_BAD_REQUEST);
+            }
+
+            $page    = max(1, $page);
+            $perPage = max(1, min(self::MAX_PER_PAGE, $perPage));
+            $offset  = ($page - 1) * $perPage;
+
+            $eventTypeArr = $this->parseEventTypes($eventTypes);
+            $fromTs = $from > 0 ? $from : null;
+            $toTs   = $to   > 0 ? $to   : null;
+
+            if ($teamId === '') {
+                $rows  = $this->mapper->findAll($offset, $perPage, $eventTypeArr, $fromTs, $toTs);
+                $total = $this->mapper->countAll($eventTypeArr, $fromTs, $toTs);
+            } else {
+                $rows  = $this->mapper->findByTeam($teamId, $offset, $perPage, $eventTypeArr, $fromTs, $toTs);
+                $total = $this->mapper->countByTeam($teamId, $eventTypeArr, $fromTs, $toTs);
+            }
+
+            // The all-teams view mixes teams, so each row has to say which
+            // one it belongs to; the per-team view never needed that.
+            $names = $this->displayNamesFor(array_values(array_unique(
+                array_map(static fn(array $r) => (string)($r['team_id'] ?? ''), $rows)
+            )));
+            foreach ($rows as $i => $row) {
+                $tid = (string)($row['team_id'] ?? '');
+                $rows[$i]['team_name'] = $names[$tid] ?? '';
+            }
+
+            return new JSONResponse([
+                'rows'        => $rows,
+                'total'       => $total,
+                'page'        => $page,
+                'per_page'    => $perPage,
+                'total_pages' => (int)ceil($total / $perPage),
             ]);
         } catch (\Throwable $e) {
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
@@ -191,15 +302,7 @@ class AuditController extends Controller {
             $page    = max(1, $page);
             $perPage = max(1, min(self::MAX_PER_PAGE, $perPage));
 
-            $eventTypeArr = [];
-            if ($eventTypes !== '') {
-                foreach (explode(',', $eventTypes) as $t) {
-                    $t = trim($t);
-                    if ($t !== '' && strlen($t) <= 64) {
-                        $eventTypeArr[] = $t;
-                    }
-                }
-            }
+            $eventTypeArr = $this->parseEventTypes($eventTypes);
 
             $fromTs = $from > 0 ? $from : null;
             $toTs   = $to   > 0 ? $to   : null;
@@ -373,6 +476,69 @@ class AuditController extends Controller {
     // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
+
+    /**
+     * The `eventTypes` query parameter: a comma-separated list, trimmed,
+     * empties and over-long entries dropped.
+     *
+     * @return list<string>
+     */
+    private function parseEventTypes(string $eventTypes): array {
+        if ($eventTypes === '') {
+            return [];
+        }
+        $out = [];
+        foreach (explode(',', $eventTypes) as $t) {
+            $t = trim($t);
+            if ($t !== '' && strlen($t) <= 64) {
+                $out[] = $t;
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Display names for a set of team ids, in one query (v4.11.39).
+     *
+     * `AuditService::INSTANCE_SCOPE` is not a circle and never resolves — the
+     * caller renders it from its own label, because "not about one team" is a
+     * phrase for the user's language, not a name to read out of the database.
+     *
+     * apps.md R-1: direct SELECT retained — same rationale as listTeams().
+     *
+     * @param list<string> $teamIds
+     * @return array<string,string>
+     */
+    private function displayNamesFor(array $teamIds): array {
+        $teamIds = array_values(array_filter(
+            $teamIds,
+            static fn(string $id) => $id !== '' && $id !== AuditService::INSTANCE_SCOPE,
+        ));
+        if ($teamIds === []) {
+            return [];
+        }
+        $names = [];
+        try {
+            $qb = $this->db->getQueryBuilder();
+            $qb->select('unique_id', 'name', 'display_name', 'sanitized_name')
+                ->from('circles_circle')
+                ->where($qb->expr()->in(
+                    'unique_id',
+                    $qb->createNamedParameter($teamIds, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_STR_ARRAY)
+                ));
+            $r = $qb->executeQuery();
+            while ($row = $r->fetch()) {
+                $names[(string)$row['unique_id']] = $this->resolveDisplayName($row);
+            }
+            $r->closeCursor();
+        } catch (\Throwable $e) {
+            // A name is a convenience; the rows themselves still answer.
+            $this->logger->warning('[TeamHub][AuditController] team name lookup failed', [
+                'exception' => $e, 'app' => Application::APP_ID,
+            ]);
+        }
+        return $names;
+    }
 
     /**
      * Resolve a circle row's best display name (matches the pattern used in

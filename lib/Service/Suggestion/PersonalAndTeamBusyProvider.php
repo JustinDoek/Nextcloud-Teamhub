@@ -6,6 +6,7 @@ namespace OCA\TeamHub\Service\Suggestion;
 
 use OCA\TeamHub\AppInfo\Application;
 use OCA\TeamHub\Service\MemberService;
+use OCA\TeamHub\Util\CalendarBlob;
 use OCP\DB\QueryBuilder\IQueryBuilder;
 use OCP\IDBConnection;
 use Psr\Log\LoggerInterface;
@@ -108,7 +109,7 @@ class PersonalAndTeamBusyProvider implements BusyProviderInterface {
         $intervals = [];
         while ($row = $res->fetch()) {
             try {
-                $vcal = \Sabre\VObject\Reader::read($row['calendardata']);
+                $vcal = \Sabre\VObject\Reader::read(CalendarBlob::read($row['calendardata']));
                 if (!isset($vcal->VEVENT)) {
                     continue;
                 }

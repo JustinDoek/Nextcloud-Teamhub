@@ -6,6 +6,7 @@ namespace OCA\TeamHub\Service\OpenProject;
 use OCA\TeamHub\AppInfo\Application;
 use OCA\TeamHub\Db\TeamOpenProjectLinkMapper;
 use OCA\TeamHub\Exception\OpenProjectException;
+use OCP\AppFramework\Utility\ITimeFactory;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -94,6 +95,7 @@ class OpenProjectActivityService {
         private OpenProjectReferenceService   $reference,
         private TeamOpenProjectLinkMapper     $linkMapper,
         private OpenProjectSyncHealth         $health,
+        private ITimeFactory                  $timeFactory,
         private OpenProjectMessages           $messages,
         private LoggerInterface               $logger,
     ) {
@@ -144,7 +146,7 @@ class OpenProjectActivityService {
             return $empty($unavailable);
         }
 
-        $now   = time();
+        $now   = $this->timeFactory->getTime();
         $floor = $now - self::MAX_WINDOW_DAYS * 86400;
         $from  = max($from, $floor);
         if ($to > 0 && $to < $from) {

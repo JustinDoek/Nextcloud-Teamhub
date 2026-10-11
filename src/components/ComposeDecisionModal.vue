@@ -14,6 +14,7 @@
             <PostMessageForm
                 ref="form"
                 force-decision
+                :initial-body="contextPrefill"
                 :share-mode="shareMode"
                 :submit-disabled="!canSubmit"
                 class="th-compose-modal__form"
@@ -150,6 +151,23 @@ export default {
 
     props: {
         open: { type: Boolean, default: false },
+        /**
+         * v4.11.42 — markdown to seed the Context field with, or '' for the
+         * blank composer every other caller wants.
+         *
+         * It exists for the *Propose a decision* entry in the Files ⋯ menu,
+         * which arrives with a link to the file it was invoked on. A prop
+         * rather than the `window.__teamhubDecisionCompose` handshake
+         * `PostMessageForm` still reads: the handshake is consumed by whichever
+         * form mounts first, and the inline stream form is often already
+         * mounted, so a value meant for this modal could land in that one
+         * instead.
+         *
+         * Only read when the modal opens — `NcModal`'s `v-if` means a fresh
+         * form each time — so changing it while open does nothing, which is
+         * the correct behaviour for something the proposer may have edited.
+         */
+        contextPrefill: { type: String, default: '' },
     },
 
     emits: ['close', 'decision-created'],

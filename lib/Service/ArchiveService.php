@@ -7,6 +7,7 @@ use OCA\TeamHub\AppInfo\Application;
 use OCA\TeamHub\Db\PendingDeletion;
 use OCA\TeamHub\Db\PendingDeletionMapper;
 use OCA\TeamHub\Exception\AccessDeniedException;
+use OCA\TeamHub\Util\CalendarBlob;
 use OCP\App\IAppManager;
 use OCP\AppFramework\Utility\ITimeFactory;
 use OCP\Files\IRootFolder;
@@ -1694,7 +1695,7 @@ class ArchiveService {
                 continue;
             }
 
-            $raw  = (string)$full['calendardata'];
+            $raw  = CalendarBlob::read($full['calendardata']);
 
             // Extract VTIMEZONE blocks (deduplicate by TZID).
             preg_match_all('/BEGIN:VTIMEZONE.*?END:VTIMEZONE/s', $raw, $tzMatches);

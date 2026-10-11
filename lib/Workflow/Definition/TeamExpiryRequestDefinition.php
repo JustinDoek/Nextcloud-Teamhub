@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace OCA\TeamHub\Workflow\Definition;
 
+use OCA\TeamHub\MyWork\SourceGroup;
 use OCA\TeamHub\Constants\ServiceCatalogue;
 use OCA\TeamHub\Db\WorkflowInstance;
 use OCA\TeamHub\Exception\ValidationException;
@@ -11,6 +12,7 @@ use OCA\TeamHub\Service\ServiceTeam\ServiceTeamService;
 use OCA\TeamHub\Service\TeamExpiryService;
 use OCA\TeamHub\Service\Workflow\WorkflowActorResolver;
 use OCA\TeamHub\Workflow\IWorkflowDefinition;
+use OCA\TeamHub\Workflow\IWorkflowDefinitionSource;
 use OCA\TeamHub\Workflow\IWorkflowDefinitionHooks;
 use OCA\TeamHub\Workflow\WorkflowActor;
 use OCA\TeamHub\Workflow\WorkflowDefinitionRegistry;
@@ -45,7 +47,8 @@ use OCP\IL10N;
  * so), never earlier than the current date, and on the record like every
  * change of the date.
  */
-class TeamExpiryRequestDefinition implements IWorkflowDefinition, IWorkflowDefinitionHooks {
+class TeamExpiryRequestDefinition implements IWorkflowDefinition,
+    IWorkflowDefinitionSource, IWorkflowDefinitionHooks {
 
     public const KEY     = 'team_expiry';
     public const VERSION = 1;
@@ -116,6 +119,14 @@ class TeamExpiryRequestDefinition implements IWorkflowDefinition, IWorkflowDefin
         }
         $serviceTeamId = $this->serviceTeams->serviceTeamForDefinition(self::KEY);
         return $serviceTeamId === null ? null : WorkflowActor::serviceAgent($serviceTeamId);
+    }
+
+    /**
+     * v4.11.41 — the My Work source chip these requests appear under.
+     * About one team's expiration date.
+     */
+    public function sourceGroup(): string {
+        return SourceGroup::TEAMS;
     }
 
     public function getConcurrency(): string {

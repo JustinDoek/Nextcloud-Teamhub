@@ -211,11 +211,35 @@ class ApprovalWorkProvider implements IWorkProvider {
                 : $this->l->t('not readable — requester and timing are unknown, so Waiting for others falls back to rule membership')],
         ];
 
-        try {
-            $rules = $this->loadRules();
-            $rows[] = ['label' => $this->l->t('Approval rules configured'), 'value' => (string)count($rules)];
-        } catch (\Throwable) {
-            $rows[] = ['label' => $this->l->t('Approval rules configured'), 'value' => $this->l->t('could not be read')];
+        // v4.11.21 — do not probe the rules when the app is not installed.
+        //
+        // This block used to call `loadRules()` unconditionally. On an
+        // instance without the Approval app the table does not exist,
+        // `loadRules()` logged the failure **at error level** and rethrew,
+        // and the catch below wrote "could not be read" — so every single
+        // load of Admin → TeamHub → My Work, and of the source tabs, put a
+        // full Postgres stack trace in `nextcloud.log` for a condition this
+        // code expects and handles. Reported by Justin, 2026-10-04, while
+        // looking for something else entirely, which is the cost of noise.
+        //
+        // The fetch path never hit it — that one is gated on
+        // `isAvailable()`. Only diagnostics ran ungated, which is the wrong
+        // way round: diagnostics are what you read *because* something is
+        // unavailable.
+        if (!$this->appManager->isInstalled('approval')) {
+            $rows[] = [
+                'label' => $this->l->t('Approval rules configured'),
+                'value' => $this->l->t('the Approval app is not installed'),
+            ];
+        } else {
+            try {
+                $rules = $this->loadRules();
+                $rows[] = ['label' => $this->l->t('Approval rules configured'), 'value' => (string)count($rules)];
+            } catch (\Throwable) {
+                // A genuine failure on an instance that *has* the app, so
+                // `loadRules()`'s error log is signal here and stays.
+                $rows[] = ['label' => $this->l->t('Approval rules configured'), 'value' => $this->l->t('could not be read')];
+            }
         }
 
         // The service call is the other half of the integration and fails

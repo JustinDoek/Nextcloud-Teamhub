@@ -81,6 +81,26 @@ final class WorkflowEventType {
     /** v4.10.21 — a document was detached before the workflow ended; carries `fileName`. */
     public const ATTACHMENT_REMOVED    = 'attachment_removed';
     /**
+     * v4.11.12 — the desk pointed the request at one of its decisions, or
+     * took the pointer away (Justin, 2026-09-30).
+     *
+     * **`visibility = all`, and part of the conversation** (see
+     * `CONVERSATION_EVENT_TYPES` in `src/constants/workflows.js`): linking a
+     * decision is something the desk *says* to the requester, next to the
+     * messages, not a note it keeps. Only an approved **public** decision may
+     * be linked, so the pill the requester sees is one they can open.
+     *
+     * `DECISION_LINKED` carries `decisionId`, `teamId`, and the decision's
+     * `question` and `status` **as they were at the time** — the same
+     * reasoning as an attachment's `fileName`: a conversation is a record of
+     * what was said, and it must still read correctly after the decision is
+     * renamed, unpublished or deleted. Whether the pill still opens is asked
+     * live, per reader. `DECISION_UNLINKED` carries `decisionId` and `teamId`.
+     */
+    public const DECISION_LINKED       = 'decision_linked';
+    /** v4.11.12 — see DECISION_LINKED. */
+    public const DECISION_UNLINKED     = 'decision_unlinked';
+    /**
      * v4.10.21 — the completed workflow was archived. The **last** event any
      * workflow ever carries: it is written inside the ending transaction,
      * before the seal is computed, and no write path can append to an ended
@@ -95,6 +115,7 @@ final class WorkflowEventType {
         self::COMPLETED, self::REJECTED, self::CANCELLED, self::CLOSED,
         self::STEP_CLAIMED, self::STEP_ASSIGNED, self::STEP_RELEASED, self::INTERNAL_NOTE, self::MESSAGE,
         self::ATTACHMENT_ADDED, self::ATTACHMENT_REMOVED, self::ARCHIVED,
+        self::DECISION_LINKED, self::DECISION_UNLINKED,
     ];
 
     /**

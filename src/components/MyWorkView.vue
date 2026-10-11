@@ -1,5 +1,26 @@
 <template>
 	<div ref="scroller" class="mywork" @scroll.passive="rememberScroll">
+		<!-- v4.11.12 — a request opened from My Work takes the page, with
+		     *Back to My Work* (Justin, 2026-09-30). My Work is a list of
+		     things to do; the one being done is the page, not a dialog over
+		     the others. The list keeps its filter, its scroll and its rows,
+		     because this component stays mounted. -->
+		<WorkflowDetailView
+			v-if="workflowDetailOpen"
+			inline
+			:back-label="t('teamhub', 'Back to My Work')"
+			:workflow="workflows.detail"
+			:loading="workflows.detailLoading"
+			:error="workflows.detailError"
+			:busy="workflows.busyId !== null && workflows.detail && workflows.busyId === workflows.detail.id"
+			:display-names="workflows.detail ? (workflows.detail.people || {}) : {}"
+			@back="closeWorkflow"
+			@close="closeWorkflow"
+			@retry="reopenWorkflow"
+			@action="onWorkflowAction"
+			@changed="emitCounts()" />
+
+		<template v-else>
 		<!-- ── Header ───────────────────────────────────────────────────── -->
 		<header class="mywork__header">
 			<div class="mywork__header-text">
@@ -91,7 +112,7 @@
 		<div v-if="!mergeWorkflows" class="mywork__workflows">
 			<WorkflowSection
 				:kind="WORKFLOW_SECTION.ACTION_REQUIRED"
-				:workflows="workflowSections.actionRequired"
+				:workflows="sourcedSections.actionRequired"
 				:loading="workflows.loading"
 				:loaded="workflows.loaded"
 				:error="workflows.error"
@@ -101,7 +122,7 @@
 				@retry="loadWorkflows" />
 			<WorkflowSection
 				:kind="WORKFLOW_SECTION.WAITING"
-				:workflows="workflowSections.waiting"
+				:workflows="sourcedSections.waiting"
 				:loading="workflows.loading"
 				:loaded="workflows.loaded"
 				:error="workflows.error"
@@ -110,9 +131,9 @@
 				@action="onWorkflowAction"
 				@retry="loadWorkflows" />
 			<WorkflowSection
-				v-if="workflowSections.completed.length"
+				v-if="sourcedSections.completed.length"
 				:kind="WORKFLOW_SECTION.COMPLETED"
-				:workflows="workflowSections.completed"
+				:workflows="sourcedSections.completed"
 				:loading="workflows.loading"
 				:loaded="workflows.loaded"
 				:error="workflows.error"
@@ -128,12 +149,9 @@
 		     sections above still render, and the licence note says why the
 		     rest is missing — once, in one place. -->
 		<template v-if="!licenseGated">
-		<!-- ── The one list's heading (v4.10.17) ────────────────────────────
-		     One question above one list, so the page says what it is for
-		     before it says how it can be sliced. -->
-		<h3 v-if="unifiedGroups.length || loading" class="mywork__lead">
-			{{ t('teamhub', 'What needs your attention') }}
-		</h3>
+		<!-- v4.11.5 — the list's heading *What needs your attention*
+		     (v4.10.17) is gone, Justin: the top of the page took too much
+		     space, and the subtitle under *My Work* already says it. -->
 
 		<!-- ── One filter: the type of work (v4.10.18) ─────────────────────
 		     The only control on this page. Everything else that used to sit
@@ -150,20 +168,21 @@
 		     the filter panel: show me only my Deck cards / only the
 		     decisions. Counts come from the server with this filter *not*
 		     applied, so picking one never changes the others. -->
+		<!-- v4.11.9 — the pill of What's new and the service catalog: an
+		     optional icon, the name, the number. One shape for a filter
+		     wherever it appears (Justin, 2026-09-30). -->
 		<div v-if="typeFilters.length > 1" class="mywork__types" role="group" :aria-label="t('teamhub', 'Show only one type of work')">
-			<NcButton
+			<TogglePill
 				v-for="type in typeFilters"
 				:key="type.key"
-				class="mywork__type"
+				:label="type.label"
+				:count="type.count"
 				:pressed="type.active"
-				variant="tertiary"
 				@click="selectType(type.key)">
 				<template v-if="type.icon" #icon>
-					<component :is="type.icon" :size="iconBody" aria-hidden="true" />
+					<component :is="type.icon" :size="iconInline" aria-hidden="true" />
 				</template>
-				{{ type.label }}
-				<span v-if="type.count !== null" class="mywork__type-count">{{ type.count }}</span>
-			</NcButton>
+			</TogglePill>
 		</div>
 
 		<!-- ── First load ───────────────────────────────────────────────── -->
@@ -313,7 +332,9 @@
 			</section>
 
 			<!-- ── Pagination ───────────────────────────────────────────── -->
-			<div v-if="total > pageSize" class="mywork__pagination">
+			<!-- v4.11.5 — not under the Services chip: it pages the
+			     aggregated queue, which that view does not show. -->
+			<div v-if="total > pageSize && !servicesView" class="mywork__pagination">
 				<NcButton variant="secondary" :disabled="page <= 1 || loading" @click="goToPage(page - 1)">
 					<template #icon><ChevronLeft :size="iconBody" /></template>
 					{{ t('teamhub', 'Previous') }}
@@ -338,18 +359,9 @@
 		<WorkflowLicenceNote v-if="mergeWorkflows" :licensed="!licenseGated" :workflows-licensed="workflowsLicensed" />
 		</template>
 
-		<!-- ── Workflow detail and actions (v4.10.15) ───────────────────── -->
-		<WorkflowDetailModal
-			v-if="workflowDetailOpen"
-			:workflow="workflows.detail"
-			:loading="workflows.detailLoading"
-			:error="workflows.detailError"
-			:busy="workflows.busyId !== null && workflows.detail && workflows.busyId === workflows.detail.id"
-			:display-names="workflows.detail ? (workflows.detail.people || {}) : {}"
-			@close="closeWorkflow"
-			@retry="reopenWorkflow"
-			@action="onWorkflowAction"
-			@changed="emitCounts()" />
+		</template>
+
+		<!-- ── Workflow actions (v4.10.15) ──────────────────────────────── -->
 		<WorkflowActionDialog
 			v-if="workflowAction"
 			:action="workflowAction.action"
@@ -521,6 +533,9 @@ import CardText from 'vue-material-design-icons/CardText.vue'
 import Folder from 'vue-material-design-icons/Folder.vue'
 import Gavel from 'vue-material-design-icons/Gavel.vue'
 import Calendar from 'vue-material-design-icons/Calendar.vue'
+// v4.11.15 — team tasks. A ticked checkbox: a plain Calendar would read
+// as a meeting, and tasks sit next to meetings in the queue.
+import CheckboxMarkedOutline from 'vue-material-design-icons/CheckboxMarkedOutline.vue'
 import Puzzle from 'vue-material-design-icons/Puzzle.vue'
 // v4.8.18 — the file review provider's glyph, used in the source filter and
 // the group headers the same way every other provider icon is.
@@ -538,6 +553,8 @@ import ShieldCrownOutline from 'vue-material-design-icons/ShieldCrownOutline.vue
 // v4.10.1 — the team-space administrator source and its report rows.
 import FolderAccountOutline from 'vue-material-design-icons/FolderAccountOutline.vue'
 import ArchiveCheckOutline from 'vue-material-design-icons/ArchiveCheckOutline.vue'
+// v4.11.5 — the Services chip: the glyph a service row and the Services page carry.
+import Lifebuoy from 'vue-material-design-icons/Lifebuoy.vue'
 
 import MyWorkItemRow from './mywork/MyWorkItemRow.vue'
 // v4.10.15 — WorkflowHub in My Work.
@@ -545,14 +562,17 @@ import WorkflowSection from './mywork/WorkflowSection.vue'
 // v4.10.17 — the merged list renders workflow rows itself, beside the
 // aggregated ones, so it needs the row component and not only the section.
 import WorkflowItemRow from './mywork/WorkflowItemRow.vue'
-import WorkflowDetailModal from './mywork/WorkflowDetailModal.vue'
+import WorkflowDetailView from './mywork/WorkflowDetailView.vue'
 import WorkflowActionDialog from './mywork/WorkflowActionDialog.vue'
 import WorkflowLicenceNote from './mywork/WorkflowLicenceNote.vue'
+import TogglePill from './TogglePill.vue'
 import {
 	WORKFLOW_SECTION,
 	WORKFLOW_ACTION,
 	actionText as workflowActionText,
 	isOpen as workflowIsOpen,
+	isServiceRequest,
+	matchesSource,
 	rowKey,
 } from '../constants/workflows.js'
 import {
@@ -573,6 +593,8 @@ import {
 	formatAbsolute,
 	buildSourceTabs,
 	sourceGroupOf,
+	SERVICES_VIEW,
+	withServicesTab,
 } from '../constants/myWork.js'
 import { ICON_INLINE, ICON_BODY, ICON_TOOLBAR, ICON_HERO, ICON_LARGE } from '../constants/uiTokens.js'
 
@@ -606,14 +628,15 @@ export default {
 	name: 'MyWorkView',
 	components: {
 		  NcTextArea, NcButton, NcLoadingIcon, NcEmptyContent, NcModal,
+		TogglePill,
 		Refresh, ChevronLeft, ChevronRight, ChevronDown, ClipboardCheckOutline,
 		AlertCircleOutline, InformationOutline,
 		CalendarToday, CalendarClock, AccountClock, CheckCircleOutline,
 		ShieldAccountOutline, AccountPlusOutline,
-		ViewGrid, CardText, Folder, Gavel, Calendar, Puzzle, FileEyeOutline, BriefcaseOutline, FlagOutline,
-		AccountGroupOutline, ShieldCrownOutline, FolderAccountOutline, ArchiveCheckOutline,
+		ViewGrid, CardText, Folder, Gavel, Calendar, CheckboxMarkedOutline, Puzzle, FileEyeOutline, BriefcaseOutline, FlagOutline,
+		AccountGroupOutline, ShieldCrownOutline, FolderAccountOutline, ArchiveCheckOutline, Lifebuoy,
 		MyWorkItemRow,
-		WorkflowSection, WorkflowItemRow, WorkflowDetailModal, WorkflowActionDialog, WorkflowLicenceNote,
+		WorkflowSection, WorkflowItemRow, WorkflowDetailView, WorkflowActionDialog, WorkflowLicenceNote,
 	},
 	emits: ['open-team', 'open-item', 'counts-changed'],
 
@@ -663,6 +686,61 @@ export default {
 	computed: {
 		...mapState({ myWork: state => state.myWork, workflows: state => state.workflows }),
 		...mapGetters('workflows', { workflowSections: 'sections', workflowActionRequiredCount: 'actionRequiredCount' }),
+		...mapGetters('serviceTeams', { hasServiceCatalogue: 'hasCatalogue' }),
+
+		/** v4.11.5 — the Services chip is on: service requests only. */
+		servicesView() {
+			return this.filters.providerId === SERVICES_VIEW
+		},
+
+		/** v4.11.5 — the three workflow sections, service requests only. */
+		serviceSections() {
+			const s = this.workflowSections
+			return {
+				actionRequired: s.actionRequired.filter(isServiceRequest),
+				waiting: s.waiting.filter(isServiceRequest),
+				completed: s.completed.filter(isServiceRequest),
+			}
+		},
+
+		/**
+		 * v4.11.41 — the three workflow sections narrowed to the active
+		 * source chip. With *All* on this is every request, which is what
+		 * the page showed before a workflow had a source at all.
+		 */
+		sourcedSections() {
+			const active = this.filters.providerId
+			const s = this.workflowSections
+			if (!active) {
+				return s
+			}
+			const keep = w => matchesSource(w, active)
+			return {
+				actionRequired: s.actionRequired.filter(keep),
+				waiting: s.waiting.filter(keep),
+				completed: s.completed.filter(keep),
+			}
+		},
+
+		/**
+		 * v4.11.41 — how many open requests each source group holds, for the
+		 * chip counts. Only the two categories that are work: a completed
+		 * request is a record, and the aggregated counts the chips show do
+		 * not include records either.
+		 *
+		 * @return {Object<string, number>}
+		 */
+		workflowSourceCounts() {
+			const out = {}
+			const s = this.workflowSections
+			for (const w of [...s.actionRequired, ...s.waiting]) {
+				const group = w?.sourceGroup
+				if (group) {
+					out[group] = (out[group] || 0) + 1
+				}
+			}
+			return out
+		},
 
 		/**
 		 * v4.10.16 — whether this instance is licensed, as the workflow
@@ -740,10 +818,23 @@ export default {
 		 */
 		typeFilters() {
 			const known = this.allSourceCounts
-			const tabs = buildSourceTabs(
-				this.providers,
-				known || this.payload?.sourceCounts || {},
-				this.filters.providerId,
+			const s = this.serviceSections
+			// v4.11.5 — the Services chip counts the rows it shows, like
+			// every source chip counts its items across the categories.
+			const tabs = withServicesTab(
+				buildSourceTabs(
+					this.providers,
+					known || this.payload?.sourceCounts || {},
+					this.filters.providerId,
+					// v4.11.41 — the requests each group holds, which no
+					// provider counts because no provider aggregates them.
+					this.workflows.loaded ? this.workflowSourceCounts : {},
+				),
+				{
+					count: this.workflows.loaded ? s.actionRequired.length + s.waiting.length + s.completed.length : null,
+					available: this.hasServiceCatalogue,
+					active: this.filters.providerId,
+				},
 			)
 			if (known) {
 				return tabs
@@ -751,7 +842,9 @@ export default {
 			// No unnarrowed answer yet — a filter restored from preferences on
 			// a cold start. An inactive chip shows no number rather than a
 			// zero it cannot stand behind; the real ones arrive with All.
-			return tabs.map(tab => (tab.active ? tab : { ...tab, count: null }))
+			// The Services count is the workflow list's, not the queue's, so it
+			// stands.
+			return tabs.map(tab => (tab.active || tab.key === SERVICES_VIEW ? tab : { ...tab, count: null }))
 		},
 
 		/**
@@ -783,14 +876,32 @@ export default {
 		 * than lost.
 		 */
 		unifiedGroups() {
-			// v4.10.18 — a workflow belongs to no source: it is a request
-			// travelling between people, not a Deck card or a Decision. So a
-			// type filter hides it, and the group heading agrees with the chip
-			// instead of counting one more than it. With All on, it is back.
-			const byCategory = this.filters.providerId ? {} : {
-				[CATEGORY.ACTION_REQUIRED]: this.workflowSections.actionRequired,
-				[CATEGORY.WAITING_FOR_OTHERS]: this.workflowSections.waiting,
-				[CATEGORY.COMPLETED]: this.workflowSections.completed,
+			// v4.11.5 — the Services chip: the service requests in the same
+			// categories and order, and none of the aggregated queue.
+			if (this.servicesView) {
+				const s = this.serviceSections
+				const byCategory = {
+					[CATEGORY.ACTION_REQUIRED]: s.actionRequired,
+					[CATEGORY.WAITING_FOR_OTHERS]: s.waiting,
+					[CATEGORY.COMPLETED]: s.completed,
+				}
+				return CATEGORY_ORDER
+					.filter(key => (byCategory[key] || []).length)
+					.map(key => ({ key, label: categoryLabel(key), itemIds: [], workflows: byCategory[key] }))
+			}
+			// v4.11.41 — a workflow does have a source now. v4.10.18 said it
+			// had none, so every chip hid every request and All was the only
+			// place to find one; Justin, 2026-10-10, asked for these tasks to
+			// appear under the view they belong to, and for that to hold for
+			// every workflow rather than one. A definition names a
+			// `SourceGroup` key, the server sends it, and `matchesSource`
+			// does the rest — a chip for a single provider still matches
+			// nothing, because no workflow is aggregated by a provider.
+			const s = this.sourcedSections
+			const byCategory = {
+				[CATEGORY.ACTION_REQUIRED]: s.actionRequired,
+				[CATEGORY.WAITING_FOR_OTHERS]: s.waiting,
+				[CATEGORY.COMPLETED]: s.completed,
 			}
 			const out  = []
 			const seen = new Set()
@@ -987,7 +1098,9 @@ export default {
 			}
 			// v4.10.15 — with workflow rows on screen above, "caught up"
 			// would contradict them; the queue is empty, the page is not.
-			if (this.workflowSections.actionRequired.length || this.workflowSections.waiting.length) {
+			// v4.11.41 — the *visible* rows: a request filed under another
+			// chip is not on screen, so it must not change this sentence.
+			if (this.sourcedSections.actionRequired.length || this.sourcedSections.waiting.length) {
 				return t('teamhub', 'No other work')
 			}
 			return t('teamhub', 'You’re all caught up')
@@ -1328,7 +1441,10 @@ export default {
 			}
 			if (f.search) params.search = f.search
 			if (f.teamId) params.teamIds = f.teamId
-			if (f.providerId) params.providerIds = f.providerId
+			// v4.11.5 — the Services chip is the page's own narrowing, never
+			// a source: the queue is read unnarrowed, which also keeps the
+			// other chips' counts current.
+			if (f.providerId && f.providerId !== SERVICES_VIEW) params.providerIds = f.providerId
 			if (f.priority) params.priorities = f.priority
 			if (f.status) params.statuses = f.status
 			if (f.resourceType) params.resourceTypes = f.resourceType
@@ -1860,12 +1976,6 @@ export default {
 	margin-block: var(--th-space-md, 12px);
 }
 
-.mywork__type-count {
-	margin-inline-start: var(--th-space-xs, 4px);
-	color: var(--color-text-maxcontrast);
-	font-size: var(--th-font-meta, 13px);
-}
-
 /* ── Two-column layout ──────────────────────────────────────────────── */
 
 /* v4.10.17 — one column. The 300px rail beside it is gone; Waiting for
@@ -1875,13 +1985,6 @@ export default {
 	grid-template-columns: minmax(0, 1fr);
 	align-items: start;
 	gap: var(--th-space-lg, 16px);
-}
-
-/* The question the page answers, above the list that answers it. */
-.mywork__lead {
-	margin: var(--th-space-lg, 16px) 0 var(--th-space-sm, 8px);
-	font-size: var(--th-font-heading-lg, 20px);
-	font-weight: var(--th-font-weight-semibold, 600);
 }
 
 /* Holds the space the Team / Reason / Deadline captions used to take, so

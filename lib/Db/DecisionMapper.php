@@ -422,6 +422,70 @@ class DecisionMapper extends QBMapper {
     }
 
     /**
+     * One team's **approved, public** decisions whose question or answer
+     * contains the words given (v4.11.12) — the desk's picker when it links a
+     * decision into a service request's conversation.
+     *
+     * Both narrowings are the product rule, not shortcuts (Justin,
+     * 2026-09-30): only an **approved** decision answers a request, and only a
+     * **public** one opens for the requester who reads that conversation.
+     * `decided` is the pre-4.5.x spelling of `approved` and counts as one.
+     *
+     * `is_public` is compared against the integer 1: the column is a
+     * SMALLINT, and comparing it against a boolean is exactly the
+     * MariaDB/Postgres difference the migrations skill warns about.
+     *
+     * @return Decision[]
+     */
+    public function searchPublicInTeam(string $teamId, string $term, int $limit = 4): array {
+        $qb     = $this->db->getQueryBuilder();
+        $needle = '%' . mb_strtolower($term) . '%';
+        $qb->select('*')
+            ->from($this->getTableName())
+            ->where($qb->expr()->eq('team_id', $qb->createNamedParameter($teamId)))
+            ->andWhere($qb->expr()->eq('is_public', $qb->createNamedParameter(1, IQueryBuilder::PARAM_INT)))
+            ->andWhere($qb->expr()->in('status', $qb->createNamedParameter(['approved', 'decided'], IQueryBuilder::PARAM_STR_ARRAY)))
+            ->orderBy('created_at', 'DESC')
+            ->setMaxResults(max(1, min(50, $limit)));
+        if ($term !== '') {
+            $qb->andWhere($qb->expr()->orX(
+                $qb->expr()->like(
+                    $qb->createFunction('LOWER(question)'),
+                    $qb->createNamedParameter($needle)
+                ),
+                $qb->expr()->like(
+                    $qb->createFunction('LOWER(COALESCE(selected_answer, \'\'))'),
+                    $qb->createNamedParameter($needle)
+                )
+            ));
+        }
+        return $this->findEntities($qb);
+    }
+
+    /**
+     * Several decisions by id in one query (v4.11.12) — the links on a page
+     * of the desk's request grid, which would otherwise be a lookup per row.
+     *
+     * @param int[] $ids
+     * @return array<int, Decision> keyed by id
+     */
+    public function findByIds(array $ids): array {
+        $ids = array_values(array_unique(array_filter(array_map('intval', $ids), static fn (int $i): bool => $i > 0)));
+        if ($ids === []) {
+            return [];
+        }
+        $qb = $this->db->getQueryBuilder();
+        $qb->select('*')
+            ->from($this->getTableName())
+            ->where($qb->expr()->in('id', $qb->createNamedParameter($ids, IQueryBuilder::PARAM_INT_ARRAY)));
+        $out = [];
+        foreach ($this->findEntities($qb) as $decision) {
+            $out[(int)$decision->getId()] = $decision;
+        }
+        return $out;
+    }
+
+    /**
      * Full-text search across question and selected_answer, with team_name join.
      *
      * Used by DecisionSearchProvider for NC unified search.
@@ -466,5 +530,94 @@ class DecisionMapper extends QBMapper {
         }
         $result->closeCursor();
         return $rows;
+    }
+
+    /**
+     * The decision that supersedes this one, if any (v4.11.18).
+     *
+     * `supersedes_id` lives on the *newer* decision — one column, one
+     * direction, no second answer to disagree with it — so reading "what
+     * replaced this" is a lookup by that column rather than a field on the
+     * row being asked about. Served by `teamhub_dec_super_idx`, which
+     * v3.64 already put there.
+     *
+     * Called from `DecisionService::get()` and not from `serialize()`: the
+     * detail panel is the only surface that shows the successor, and doing
+     * it per row would be a query per row in every list (the reasoning
+     * DESIGN §2.79 recorded for the proposal body).
+     */
+    public function findBySupersedesId(int $decisionId): ?Decision {
+        if ($decisionId <= 0) {
+            return null;
+        }
+        $qb = $this->db->getQueryBuilder();
+        $qb->select('*')
+            ->from($this->getTableName())
+            ->where($qb->expr()->eq('supersedes_id', $qb->createNamedParameter($decisionId, IQueryBuilder::PARAM_INT)))
+            // Oldest first: if an earlier version ever allowed two, the one
+            // that claimed it first is the honest answer.
+            ->orderBy('id', 'ASC')
+            ->setMaxResults(1);
+
+        $rows = $this->findEntities($qb);
+        return $rows[0] ?? null;
+    }
+
+    /**
+     * Approved decisions whose review has come within the notice window and
+     * that have not had a notice written for *this* cycle (v4.11.18).
+     *
+     * The second condition is `review_notified_at <> review_due_at` rather
+     * than "is null", because the column stores the cycle the notice was
+     * written for, not the moment of writing: completing a review moves
+     * `review_due_at`, the stored value stops matching, and the next cycle
+     * gets its own notice without anybody clearing a flag.
+     *
+     * Served by `th_dec_rev_due_idx` (status, review_due_at). Instance-wide
+     * and not team-scoped — it is the daily pass, and the teams it should
+     * touch are exactly the teams that have a decision falling due.
+     *
+     * @return Decision[]
+     */
+    public function findReviewDue(int $noticeCutoff, int $limit = 500): array {
+        $qb = $this->db->getQueryBuilder();
+        $qb->select('*')
+            ->from($this->getTableName())
+            ->where($qb->expr()->eq('status', $qb->createNamedParameter('approved')))
+            ->andWhere($qb->expr()->isNotNull('review_due_at'))
+            ->andWhere($qb->expr()->lte('review_due_at', $qb->createNamedParameter($noticeCutoff, IQueryBuilder::PARAM_INT)))
+            ->andWhere($qb->expr()->orX(
+                $qb->expr()->isNull('review_notified_at'),
+                $qb->expr()->neq('review_notified_at', 'review_due_at'),
+            ))
+            ->orderBy('review_due_at', 'ASC')
+            ->addOrderBy('id', 'ASC')
+            ->setMaxResults($limit);
+
+        return $this->findEntities($qb);
+    }
+
+    /**
+     * Every approved decision of one category in one team (v4.11.18) — what
+     * a change to the category's review period has to recompute.
+     *
+     * `category` is a name on this table rather than an id, so the match is
+     * on the name. Case-sensitive, like `DecisionService::assertApproverFor`
+     * and for the same reason: names are stored case-preserved and two
+     * categories differing only in case are two categories.
+     *
+     * @return Decision[]
+     */
+    public function findApprovedByTeamCategory(string $teamId, string $category, int $limit = 1000): array {
+        $qb = $this->db->getQueryBuilder();
+        $qb->select('*')
+            ->from($this->getTableName())
+            ->where($qb->expr()->eq('team_id', $qb->createNamedParameter($teamId)))
+            ->andWhere($qb->expr()->eq('category', $qb->createNamedParameter($category)))
+            ->andWhere($qb->expr()->eq('status', $qb->createNamedParameter('approved')))
+            ->orderBy('id', 'ASC')
+            ->setMaxResults($limit);
+
+        return $this->findEntities($qb);
     }
 }

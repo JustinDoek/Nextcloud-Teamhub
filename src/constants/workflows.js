@@ -260,6 +260,34 @@ export function ownOpenTasks(workflow) {
 }
 
 /**
+ * Does this request belong under the active My Work source chip (v4.11.41)?
+ *
+ * v4.10.18 answered "never": a workflow had no source, so every chip hid
+ * every request and *All* was the only place to find one. A definition now
+ * names a `SourceGroup` key (`IWorkflowDefinitionSource`) and the server
+ * sends it on the view.
+ *
+ * `active` is whatever the chip put in `filters.providerId`:
+ *   - `''` (All) — everything, as before.
+ *   - a group key (`teams`, `administration`) — the requests that named it.
+ *   - a bare provider id (`deck`, `decisions`) — none: that chip lists one
+ *     provider's aggregated rows, and no workflow is aggregated.
+ *
+ * The Services chip is not handled here; it is the page's own narrowing and
+ * uses {@see isServiceRequest}.
+ *
+ * @param {object} workflow
+ * @param {string} active
+ * @return {boolean}
+ */
+export function matchesSource(workflow, active) {
+	if (!active) {
+		return true
+	}
+	return !!workflow?.sourceGroup && workflow.sourceGroup === active
+}
+
+/**
  * A request a service team handles (v4.10.44): My Work calls it a
  * *Service*, not a *Workflow* (Justin, 2026-09-25).
  */
@@ -494,7 +522,14 @@ export function availableActions(workflow) {
 			// The holder is waiting on an answer; completing is refused until it comes.
 			out.push(WORKFLOW_ACTION.REJECT)
 		} else {
-			out.push(WORKFLOW_ACTION.COMPLETE, WORKFLOW_ACTION.REJECT, WORKFLOW_ACTION.REQUEST_INFORMATION)
+			out.push(WORKFLOW_ACTION.COMPLETE, WORKFLOW_ACTION.REJECT)
+			// v4.11.41 — a definition whose initiator is not a person has
+			// nobody to ask, and asking would block the step for good. The
+			// server decides; `!== false` so a view from an older server,
+			// which sends no such flag, keeps offering it.
+			if (v.canRequestInformation !== false) {
+				out.push(WORKFLOW_ACTION.REQUEST_INFORMATION)
+			}
 		}
 	}
 	if (v.isParticipant && waitingForInfo && workflow.status !== WORKFLOW_STATUS.BLOCKED) {
@@ -622,6 +657,10 @@ export function eventLabel(event) {
 	case 'status_requested': return t('teamhub', 'Update requested')
 	// TRANSLATORS: a message the requester and the service team wrote to each other on a request
 	case 'message': return t('teamhub', 'Message')
+	// TRANSLATORS: timeline and conversation entry — the service team pointed the request at one of its decisions
+	case 'decision_linked': return t('teamhub', 'Decision linked')
+	// TRANSLATORS: timeline and conversation entry — the service team took a linked decision off the request again
+	case 'decision_unlinked': return t('teamhub', 'Decision removed')
 	case 'participant_added': return t('teamhub', 'Participant added')
 	case 'blocked': return t('teamhub', 'Blocked')
 	case 'unblocked': return t('teamhub', 'Block lifted')
@@ -665,7 +704,16 @@ export function timeline(workflow, history) {
  * up. Oldest first, the order a conversation is read in. Internal notes are
  * not in it — they have their own tab and never reach the requester.
  */
-export const CONVERSATION_EVENT_TYPES = ['message', 'information_requested', 'information_provided']
+/**
+ * v4.11.12 — a decision the desk linked is part of the conversation, not a
+ * note beside it (Justin, 2026-09-30): the link is posted where the work is
+ * being discussed, and both sides read it. Only an approved public decision
+ * can be linked, so the pill the requester sees is one they may open.
+ */
+export const CONVERSATION_EVENT_TYPES = [
+	'message', 'information_requested', 'information_provided',
+	'decision_linked', 'decision_unlinked',
+]
 
 export function conversation(history) {
 	return (history || [])
@@ -704,6 +752,19 @@ export function formatRecent(seconds) {
 
 export function formatAbsolute(seconds) {
 	return seconds ? formatDateTime(seconds * 1000) : ''
+}
+
+/**
+ * v4.11.12 — a plain calendar date, written the way the reader's locale
+ * writes one (30-9-2026, 9/30/2026, 2026/9/30): the desk grid's Date column.
+ *
+ * Not `formatRecent()`: a grid is read down a column and compared row to
+ * row, so every row needs the same shape. "Yesterday" and "14:05" cannot be
+ * compared with "24 Sep", and neither can be scanned for a date. The full
+ * timestamp stays on the element's `title`.
+ */
+export function formatDay(seconds) {
+	return seconds ? formatDate(seconds * 1000) : ''
 }
 
 /**

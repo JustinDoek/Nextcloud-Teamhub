@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace OCA\TeamHub\Service;
 
 use OCA\TeamHub\AppInfo\Application;
+use OCA\TeamHub\Util\CalendarBlob;
 use OCP\App\IAppManager;
 use OCP\IUserSession;
 use Psr\Container\ContainerInterface;
@@ -231,36 +232,17 @@ class CalendarService {
             return [];
         }
 
-        // v3.100.8 (apps.md R-2) — resolve via ICalendarManager (fully
-        // public OCP API); fall back to direct SELECT if the manager can't
-        // resolve (older NC, unusual deployment). Exclude birthday
-        // calendar; sort by display name.
-        try {
-            $calendarManager = $this->container->get(\OCP\Calendar\ICalendarManager::class);
-            $principalUri = 'principals/users/' . $uid;
-            $calendars = $calendarManager->getCalendarsForPrincipal($principalUri);
-            $out = [];
-            foreach ($calendars as $cal) {
-                $uri = (string)$cal->getUri();
-                if ($uri === 'contact_birthdays') {
-                    continue;
-                }
-                $out[] = [
-                    'id'    => (int)$cal->getKey(),
-                    'uri'   => $uri,
-                    'name'  => (string)($cal->getDisplayName() ?? $uri),
-                    'color' => (string)($cal->getDisplayColor() ?? '#0082c9'),
-                ];
-            }
-            usort($out, static fn(array $a, array $b): int => strcmp($a['name'], $b['name']));
-            return $out;
-        } catch (\Throwable $e) {
-            $this->logger->debug('[TeamHub][CalendarService] listOwnedCalendars: ICalendarManager path unavailable — using DB fallback', [
-                'uid' => $uid, 'reason' => $e->getMessage(),
-                'app' => Application::APP_ID,
-            ]);
-        }
-
+        // apps.md R-2 note: kept as direct SELECT, deliberately.
+        //
+        // This used to try OCP\Calendar\IManager first and fall back to the
+        // SELECT. Two reasons it is gone (issue #106): the branch named a
+        // class that does not exist (`OCP\Calendar\ICalendarManager`) and so
+        // never once ran, and the API cannot answer this question anyway —
+        // `getCalendarsForPrincipal()` returns everything a principal can
+        // *reach*, own and shared alike, while "owned" is exactly what the
+        // caller needs. `connectExistingCalendar()` below refuses a calendar
+        // the user does not own, so offering shared ones here would only
+        // populate the picker with entries that are then rejected.
         try {
             $db = $this->container->get(\OCP\IDBConnection::class);
             $principalUri = 'principals/users/' . $uid;
@@ -327,44 +309,33 @@ class CalendarService {
             $db = $this->container->get(\OCP\IDBConnection::class);
             $principalUri = 'principals/users/' . $uid;
 
-            // v3.100.8 (apps.md R-2) — SECURITY: verify the calendar
-            // exists and is owned by this user via ICalendarManager (public
-            // OCP API). Fall back to direct SELECT if the manager can't
-            // resolve for older NC versions.
-            $calendarName = null;
-            try {
-                $calendarManager = $this->container->get(\OCP\Calendar\ICalendarManager::class);
-                $calendars = $calendarManager->getCalendarsForPrincipal($principalUri);
-                foreach ($calendars as $cal) {
-                    if ((int)$cal->getKey() === $calendarId) {
-                        $calendarName = (string)($cal->getDisplayName() ?? $cal->getUri());
-                        break;
-                    }
-                }
-            } catch (\Throwable $e) {
-                $this->logger->debug('[TeamHub][CalendarService] connectExistingCalendar: ICalendarManager check unavailable — using DB fallback', [
-                    'uid' => $uid, 'calendarId' => $calendarId,
-                    'reason' => $e->getMessage(), 'app' => Application::APP_ID,
-                ]);
+            // SECURITY: the calendar must exist AND be owned by this user,
+            // which is what the `principaluri` term below enforces —
+            // preventing a forged resourceId from sharing somebody else's
+            // calendar with the team.
+            //
+            // apps.md R-2 note: kept as direct SELECT, deliberately. The
+            // public API was tried here first until issue #106; it named a
+            // class that does not exist (`OCP\Calendar\ICalendarManager`), so
+            // it never ran — and `getCalendarsForPrincipal()` could not have
+            // stood in for this check, because it answers "can reach",
+            // including calendars shared *to* the user, where this needs
+            // "owns".
+            $qb = $db->getQueryBuilder();
+            $res = $qb->select('id', 'displayname', 'uri')
+                ->from('calendars')
+                ->where($qb->expr()->eq('id', $qb->createNamedParameter($calendarId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                ->andWhere($qb->expr()->eq('principaluri', $qb->createNamedParameter($principalUri)))
+                ->setMaxResults(1)
+                ->executeQuery();
+            $row = $res->fetch();
+            $res->closeCursor();
+
+            if (!$row) {
+                return ['success' => false, 'error' => 'Calendar not found or not owned by user'];
             }
 
-            if ($calendarName === null) {
-                $qb = $db->getQueryBuilder();
-                $res = $qb->select('id', 'displayname', 'uri')
-                    ->from('calendars')
-                    ->where($qb->expr()->eq('id', $qb->createNamedParameter($calendarId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
-                    ->andWhere($qb->expr()->eq('principaluri', $qb->createNamedParameter($principalUri)))
-                    ->setMaxResults(1)
-                    ->executeQuery();
-                $row = $res->fetch();
-                $res->closeCursor();
-
-                if (!$row) {
-                    return ['success' => false, 'error' => 'Calendar not found or not owned by user'];
-                }
-
-                $calendarName = (string)($row['displayname'] ?? $row['uri']);
-            }
+            $calendarName = (string)($row['displayname'] ?? $row['uri']);
 
             // Refuse only if this specific calendar is already connected to this team.
             // Multiple different calendars are allowed (multi-resource model).
@@ -893,15 +864,12 @@ class CalendarService {
      * works perfectly. Observed exactly that way: the endpoint logged
      * "Unparseable calendar object skipped" for every object on the instance.
      *
-     * Mirrors `CalDavBackend::readBlob()`, which exists in NC for this reason
-     * and is private, so it cannot be reused directly.
+     * v4.11.16 — the implementation moved to `Util\CalendarBlob`, because
+     * this class was not the only one reading the column and was the only one
+     * that knew. This stays as the local name the methods below already use.
      */
     private static function readBlob(mixed $data): string {
-        if (is_resource($data)) {
-            return (string)stream_get_contents($data);
-        }
-
-        return (string)$data;
+        return CalendarBlob::read($data);
     }
 
     /**

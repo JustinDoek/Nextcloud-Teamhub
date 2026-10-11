@@ -137,16 +137,30 @@
 
                     <!-- Search bar — searches DECISIONS across all categories.
                          Empty: show category grid. Typed: show matching decision cards inline. -->
-                    <div class="th-dv__landing-search-wrap">
-                        <MagnifyIcon :size="ICON_BODY" class="th-dv__landing-search-icon" aria-hidden="true" />
-                        <NcTextField
-                            v-model="searchQuery"
-                            type="search"
-                            class="th-dv__landing-search"
-                            :placeholder="t('teamhub', 'Search decisions…')"
-                            :aria-label="t('teamhub', 'Search decisions')"
-                            @input="onSearchInput"
-                            label-outside />
+                    <div class="th-dv__landing-top">
+                        <div class="th-dv__landing-search-wrap">
+                            <MagnifyIcon :size="ICON_BODY" class="th-dv__landing-search-icon" aria-hidden="true" />
+                            <NcTextField
+                                v-model="searchQuery"
+                                type="search"
+                                class="th-dv__landing-search"
+                                :placeholder="t('teamhub', 'Search decisions…')"
+                                :aria-label="t('teamhub', 'Search decisions')"
+                                @input="onSearchInput"
+                                label-outside />
+                        </div>
+
+                        <!-- v4.11.24 — beside the search rather than on its
+                             own line above the grid: it is the second thing
+                             you can do on this page, not a section header. -->
+                        <NcButton
+                            v-if="canManageCategories"
+                            class="th-dv__landing-add"
+                            variant="secondary"
+                            @click="openCategoryDialog(null)">
+                            <template #icon><PlusIcon :size="ICON_BODY" /></template>
+                            {{ t('teamhub', 'Add category') }}
+                        </NcButton>
                     </div>
 
                     <!-- SEARCH MODE — when there's a query -->
@@ -213,12 +227,24 @@
 
                         <!-- 2-column category grid -->
                         <ul v-else class="th-dv__landing-grid" role="list">
+                            <!-- v4.11.19 — the card is no longer one big
+                                 <button>. Its approvers' avatars open
+                                 Nextcloud's contact menu, and an interactive
+                                 element inside a button is both invalid HTML
+                                 and unreachable — the button swallows the
+                                 click. So the card is the <li>, the open
+                                 action is a button that stretches over it
+                                 (`::after`, inset 0), and the avatars sit
+                                 above that overlay. One tab stop for the
+                                 card plus one per avatar, which is also the
+                                 reading order. -->
                             <li
                                 v-for="cat in categories"
                                 :key="cat.id"
+                                class="th-dv__cat-card"
                                 role="listitem">
                                 <button
-                                    class="th-dv__cat-card"
+                                    class="th-dv__cat-card-main"
                                     :aria-label="t('teamhub', 'Open {name} decisions', { name: cat.name })"
                                     @click="openCategory(cat)">
                                     <span class="th-dv__cat-card-icon" aria-hidden="true">
@@ -228,8 +254,51 @@
                                         <span class="th-dv__cat-card-name">{{ cat.name }}</span>
                                         <span v-if="cat.description" class="th-dv__cat-card-desc">{{ cat.description }}</span>
                                     </span>
-                                    <ChevronRightIcon :size="ICON_INLINE" class="th-dv__cat-card-chevron" aria-hidden="true" />
                                 </button>
+
+                                <!-- Who decides here. The archive has no
+                                     approvers by design, so it gets no
+                                     avatars rather than an empty slot. -->
+                                <span
+                                    v-if="categoryApprovers(cat).length"
+                                    class="th-dv__cat-card-approvers"
+                                    :aria-label="approverListLabel(cat)">
+                                    <NcAvatar
+                                        v-for="uid in categoryApprovers(cat)"
+                                        :key="uid"
+                                        class="th-dv__cat-card-avatar"
+                                        :user="uid"
+                                        :display-name="memberDisplayName(uid)"
+                                        :size="AVATAR_SM"
+                                        :hide-status="true"
+                                        :disable-menu="false" />
+                                    <!-- Not an avatar: a count is not a
+                                         person, and a generic bubble that
+                                         opens nobody's contact card would
+                                         be a broken avatar. -->
+                                    <span
+                                        v-if="approverOverflow(cat) > 0"
+                                        class="th-dv__cat-card-more"
+                                        :title="approverListLabel(cat)">
+                                        +{{ approverOverflow(cat) }}
+                                    </span>
+                                </span>
+
+                                <!-- v4.11.23 — a team admin manages the
+                                     category from the grid it appears on,
+                                     rather than going to Manage team for a
+                                     form that is now the same component. -->
+                                <NcActions
+                                    v-if="canManageCategories"
+                                    class="th-dv__cat-card-menu"
+                                    :aria-label="t('teamhub', 'Actions for {name}', { name: cat.name })">
+                                    <NcActionButton close-after-click @click="openCategoryDialog(cat)">
+                                        <template #icon><PencilIcon :size="ICON_BODY" /></template>
+                                        {{ t('teamhub', 'Edit category') }}
+                                    </NcActionButton>
+                                </NcActions>
+
+                                <ChevronRightIcon :size="ICON_INLINE" class="th-dv__cat-card-chevron" aria-hidden="true" />
                             </li>
                         </ul>
                     </template>
@@ -319,23 +388,81 @@
                             {{ t('teamhub', 'Back') }}
                         </NcButton>
 
-                        <!-- Right-side controls: status + share + close -->
+                        <!-- Right-side controls: status + actions + close
+                             v4.11.19 — one Actions menu, beside the status
+                             pill. Everything you can *do* to a decision used
+                             to be a button in whichever block happened to own
+                             it: Edit and Finalize in the drafting block,
+                             Request review and Supersede below it, Keep and
+                             Archive inside the review note, Link task and
+                             Create task in one section, Link decision and Link
+                             external in another, Copy link up here. Eleven
+                             buttons in six places, and which of them you saw
+                             depended on the status *and* your role, so the
+                             panel's shape changed under you. They are one list
+                             now, in one place, in a fixed order.
+
+                             What stays outside: Approve and Deny, because they
+                             submit the approval form and its mandatory reason —
+                             a submit button belongs to its form, and a menu
+                             item that only scrolls you to a field is worse than
+                             the field. Same reasoning keeps Save/Cancel in the
+                             proposal editor and Link/Cancel in the inline link
+                             forms. Back and Close are chrome, not actions. -->
                         <div class="th-dv__detail-header-right">
                             <span
                                 class="th-dv__status-pill th-dv__detail-status"
                                 :class="`th-dv__status-pill--${selected.status}`">
                                 {{ statusLabel(selected.status) }}
                             </span>
-                            <NcButton
-                                class="th-dv__detail-share"
-                                :aria-label="t('teamhub', 'Copy link to this decision')"
-                                :title="t('teamhub', 'Copy link')"
-                                @click="copyDecisionLink(selected)"
-                                variant="tertiary">
-                                <template #icon>
-                                    <LinkVariantIcon :size="ICON_BODY" />
+
+                            <NcActions
+                                v-if="panelActions.length"
+                                class="th-dv__detail-menu"
+                                :aria-label="t('teamhub', 'Actions for this decision')"
+                                :disabled="panelActionsBusy">
+                                <template v-for="action in panelActions" :key="action.key">
+                                    <!-- A separator carries no label; it is
+                                         the gap between groups of verbs. -->
+                                    <NcActionSeparator v-if="action.key.startsWith('sep')" />
+
+                                    <!-- The only one that leaves the app, so
+                                         the only one that is a link and not a
+                                         button. -->
+                                    <NcActionLink
+                                        v-else-if="action.href"
+                                        :href="action.href"
+                                        target="_blank"
+                                        rel="noreferrer noopener">
+                                        <template #icon>
+                                            <component :is="action.icon" :size="ICON_BODY" />
+                                        </template>
+                                        {{ action.label }}
+                                    </NcActionLink>
+
+                                    <!-- Publishing is a state, not a verb, so
+                                         it reads as a checkbox and shows what
+                                         it currently is. -->
+                                    <NcActionCheckbox
+                                        v-else-if="action.key === 'public'"
+                                        :model-value="!!selected.isPublic"
+                                        :disabled="settingPublic"
+                                        @update:model-value="setPublic">
+                                        {{ action.label }}
+                                    </NcActionCheckbox>
+
+                                    <NcActionButton
+                                        v-else
+                                        close-after-click
+                                        @click="runPanelAction(action.key)">
+                                        <template #icon>
+                                            <component :is="action.icon" :size="ICON_BODY" />
+                                        </template>
+                                        {{ action.label }}
+                                    </NcActionButton>
                                 </template>
-                            </NcButton>
+                            </NcActions>
+
                             <NcButton
                                 class="th-dv__detail-close"
                                 :aria-label="t('teamhub', 'Close detail')"
@@ -418,6 +545,43 @@
                         </div>
                     </dl>
 
+                    <!-- ── Public record (v4.11.12, Justin 2026-09-30) ──
+                         Whether this decision is a team-internal record or a
+                         public one. Public means readable by **every
+                         logged-in account on this instance** — instance-wide,
+                         never anonymous, and never a link that grants access
+                         on its own. It widens who may read; it changes
+                         nothing about who may act on it.
+
+                         Gated on the team's own action level, the same gate
+                         as *Link decision* and *Link task*, so a team that
+                         wants publishing to be an admin's call raises that
+                         one setting. Everybody else sees the state as text:
+                         whether a decision is public is not a secret from
+                         the team whose decision it is. -->
+                    <!-- v4.11.19 — the switch moved into the Actions menu as a
+                         checkbox; what stays here is the state and what it
+                         means, which is a thing you read rather than a thing
+                         you press. Still shown to everybody: whether a
+                         decision is public is not a secret from the team whose
+                         decision it is, and somebody below the action level
+                         sees the sentence without the checkbox. -->
+                    <div class="th-dv__detail-public">
+                        <p class="th-dv__detail-public-state">
+                            {{ selected.isPublic
+                                ? t('teamhub', 'Public decision')
+                                : t('teamhub', 'Team decision') }}
+                        </p>
+                        <!-- v4.11.19 — the "make it public" half of the
+                             sentence names the Actions menu only for somebody
+                             who will find the checkbox there. Telling a member
+                             below the action level where a control they do not
+                             have would be is worse than not mentioning it. -->
+                        <p class="th-dv__detail-public-hint">
+                            {{ publicHint }}
+                        </p>
+                    </div>
+
                     <!-- Subject — v3.71.3 moved from above the metadata grid
                          to sit directly above the Final proposal block, so
                          the reader sees the question right next to its
@@ -452,6 +616,127 @@
                         </span>
                         <p class="th-dv__detail-withdrawn-text">{{ selected.withdrawnReason }}</p>
                     </div>
+
+                    <!-- v4.11.18 — a retired decision says so before it says
+                         anything else, and says what replaced it. Above the
+                         Source block on purpose: "this no longer applies" is
+                         the first thing a reader of an archived record needs,
+                         and finding it under the attachments would be finding
+                         it too late. `NcNoteCard` rather than a hand-rolled
+                         banner (/ui-standards). -->
+                    <NcNoteCard
+                        v-if="selected.isRetired"
+                        type="warning"
+                        class="th-dv__detail-retired">
+                        <p class="th-dv__detail-retired-line">
+                            <template v-if="selected.status === 'superseded'">
+                                {{ t('teamhub', 'This decision has been superseded and is read-only.') }}
+                            </template>
+                            <template v-else>
+                                {{ t('teamhub', 'This decision has been archived and is read-only.') }}
+                            </template>
+                        </p>
+
+                        <!-- The decision that replaced it. A link and not a
+                             sentence: the reader's next move is to go there. -->
+                        <p v-if="supersededByRow" class="th-dv__detail-retired-line">
+                            <button
+                                class="th-dv__detail-retired-link"
+                                @click="selectDecisionById(supersededByRow.id)">
+                                {{ t('teamhub', 'Superseded by: {question}', { question: supersededByRow.question }) }}
+                            </button>
+                        </p>
+
+                        <p v-if="selected.archivedFromCategory" class="th-dv__detail-retired-line">
+                            <!-- TRANSLATORS: %{category} is the category the decision was decided under before it was archived -->
+                            {{ t('teamhub', 'Archived from {category}', { category: selected.archivedFromCategory }) }}
+                        </p>
+                        <p v-if="selected.archivedAt" class="th-dv__detail-retired-line">
+                            {{ t('teamhub', 'Archived {date}', { date: fullDate(selected.archivedAt) }) }}
+                        </p>
+                    </NcNoteCard>
+
+                    <!-- v4.11.18 — a review somebody has asked for, while it
+                         is running. Every member sees it: a decision under
+                         review is still in force, and knowing that it is
+                         being looked at is the point of asking in the open. -->
+                    <NcNoteCard
+                        v-if="openReview"
+                        type="info"
+                        class="th-dv__detail-review">
+                        <p class="th-dv__detail-review-line">
+                            <template v-if="openReview.kind === 'requested'">
+                                {{ t('teamhub', '{name} asked for a review of this decision. It stays in force until the approvers answer.', { name: openReview.requestedByName }) }}
+                            </template>
+                            <template v-else>
+                                {{ t('teamhub', 'This decision has reached its review date. It stays in force until the approvers answer.') }}
+                            </template>
+                        </p>
+                        <blockquote v-if="openReview.motivation" class="th-dv__detail-review-quote">
+                            {{ openReview.motivation }}
+                        </blockquote>
+
+                        <!-- v4.11.30 — **what the requester is asking the
+                             decision to say.** In the banner and not in the
+                             approver's block, because it is not only the
+                             approvers' business: a decision under review is
+                             still in force, and the whole team is entitled to
+                             read what somebody is asking to change it to.
+
+                             It is also the thing that was missing. The
+                             complaint this version answers was *if I create a
+                             review I cannot review the attachment* — so the
+                             file is here too, as a button into the same
+                             read-only viewer the Source list opens, and the
+                             approver does not have to go hunting through the
+                             team folder for a document they are being asked
+                             to agree with. -->
+                        <div v-if="openReviewHasProposal || openReview.attachmentFileId" class="th-dv__review-proposal">
+                            <span class="th-dv__review-proposal-label">
+                                {{ t('teamhub', 'Proposed wording') }}
+                            </span>
+                            <p v-if="openReview.proposedQuestion" class="th-dv__review-proposal-question">
+                                {{ openReview.proposedQuestion }}
+                            </p>
+                            <blockquote v-if="openReview.proposedAnswer" class="th-dv__detail-review-quote">
+                                {{ openReview.proposedAnswer }}
+                            </blockquote>
+                            <NcButton
+                                v-if="openReview.attachmentFileId"
+                                variant="tertiary"
+                                :title="t('teamhub', 'Open {name} in read-only viewer', { name: openReview.attachmentName })"
+                                @click="openReviewAttachment(openReview)">
+                                <template #icon>
+                                    <FileDocumentOutlineIcon :size="ICON_INLINE" aria-hidden="true" />
+                                </template>
+                                {{ openReview.attachmentName }}
+                            </NcButton>
+                        </div>
+
+                        <!-- v4.11.23 — the answer is a block in the right
+                             column, not a menu item. See the Review block
+                             beside the Approval one. -->
+                        <p v-if="canApprove(selected) && openReview.kind === 'requested'" class="th-dv__detail-review-line">
+                            <template v-if="openReviewHasProposal">
+                                {{ t('teamhub', 'Answer it under Review, on the right. Approving writes the proposed wording into the decision; it keeps its approval either way.') }}
+                            </template>
+                            <template v-else>
+                                {{ t('teamhub', 'Answer it under Review, on the right. Accepting rewrites the wording; the decision keeps its approval either way.') }}
+                            </template>
+                        </p>
+                        <p v-else-if="canApprove(selected)" class="th-dv__detail-review-line">
+                            {{ t('teamhub', 'Answer it under Review, on the right.') }}
+                        </p>
+                    </NcNoteCard>
+
+                    <!-- The next review date, when the category asks for one
+                         and no review is running. A date and nothing else —
+                         there is nothing to do about it yet. -->
+                    <p
+                        v-else-if="selected.reviewDueAt && selected.status === 'approved'"
+                        class="th-dv__detail-review-due">
+                        {{ t('teamhub', 'Next review due {date}', { date: fullDate(selected.reviewDueAt) }) }}
+                    </p>
 
                     <!-- Source — combines proposer's source-of-context (URL/text)
                          with the canonical proposal document and any attachments
@@ -593,38 +878,13 @@
                             </div>
                         </template>
 
-                        <div v-else class="th-dv__drafting-actions">
-                            <NcButton variant="secondary" @click="startEditProposal(selected)">
-                                <template #icon><PencilIcon :size="ICON_BODY" /></template>
-                                {{ t('teamhub', 'Edit proposal') }}
-                            </NcButton>
-                            <NcButton
-                                variant="primary"
-                                :disabled="finalizingProposal"
-                                @click="onFinalizeProposal(selected)">
-                                <template #icon><GavelIcon :size="ICON_BODY" /></template>
-                                {{ finalizingProposal ? t('teamhub', 'Finalizing…') : t('teamhub', 'Finalize') }}
-                            </NcButton>
-                            <!-- v4.5.46 — replaces the "Being discussed with…"
-                                 sentence. Where the discussion is happening is
-                                 something you act on, not something you read;
-                                 the button says it and takes you there. Absent
-                                 when the proposal has no conversation, which is
-                                 every `immediate` proposal. -->
-                            <NcButton
-                                v-if="selected.talkToken"
-                                variant="secondary"
-                                :href="talkUrl(selected.talkToken)"
-                                target="_blank"
-                                rel="noreferrer noopener">
-                                <template #icon><ForumIcon :size="ICON_BODY" /></template>
-                                <!-- TRANSLATORS: button — opens the Talk conversation or thread where the proposal is being discussed -->
-                                {{ t('teamhub', 'Discussion') }}
-                            </NcButton>
-                        </div>
-
-                        <p class="th-dv__drafting-hint">
-                            {{ t('teamhub', 'Finalizing locks the wording and sends the proposal to the category approvers.') }}
+                        <!-- v4.11.19 — Edit proposal, Finalize and Discussion
+                             are in the Actions menu. The hint stays, because
+                             what Finalize *does* is not obvious from its name
+                             and is the one thing on this block that cannot be
+                             undone. -->
+                        <p v-if="!editingProposal" class="th-dv__drafting-hint">
+                            {{ t('teamhub', 'Finalizing locks the wording and sends the proposal to the category approvers. Edit, finalize and the discussion are in the Actions menu.') }}
                         </p>
 
                         </div><!-- /th-dv__drafting-main -->
@@ -639,21 +899,135 @@
                     </div><!-- /th-dv__drafting-body -->
                     </div>
 
-                    <!-- Actions -->
-                    <div class="th-dv__detail-actions">
-                        <NcButton
-                            v-if="(selected.status === 'open' || selected.status === 'proposed') && canActOn(selected)"
-                            variant="tertiary"
-                            @click="openSupersede(selected)">
-                            <template #icon><SwapHorizontalIcon :size="ICON_BODY" /></template>
-                            {{ t('teamhub', 'Supersede') }}
-                        </NcButton>
-                    </div>
+                    <!-- v4.11.18 put Request review and Supersede here, on the
+                         approved decision rather than the open proposal.
+                         v4.11.19 moved them into the Actions menu with the
+                         rest; the reasoning for *which decisions* they apply
+                         to is in `panelActions`. -->
 
                     </div><!-- /th-dv__detail-col--left -->
 
-                    <!-- RIGHT COLUMN — approval (top) + audit trail (below) -->
+                    <!-- RIGHT COLUMN — approval / review (top) + audit trail -->
                     <div class="th-dv__detail-col th-dv__detail-col--right">
+
+                    <!-- ── Review block (v4.11.23) ──
+                         The Approval block's twin, and deliberately so.
+                         Justin's rule: **permanent actions live in the
+                         Actions menu, temporary ones live on the page.**
+                         Answering a review is the most temporary thing a
+                         decision ever has — somebody is waiting on it — and
+                         it needs a mandatory reason, so the buttons belong
+                         with the field they submit, in the same place an
+                         approver already looks for exactly this.
+
+                         Only one of the two blocks can ever be on screen:
+                         approval is `finalized`, a review is `approved`. -->
+                    <div
+                        v-if="openReview && canApprove(selected)"
+                        class="th-dv__detail-approval">
+                        <span class="th-dv__detail-section-label">{{ t('teamhub', 'Review') }}</span>
+
+                        <label class="th-dv__approval-label" :for="`th-dv-review-reason-${selected.id}`">
+                            {{ t('teamhub', 'Reason') }}
+                            <span class="th-dv__approval-required" aria-hidden="true">*</span>
+                        </label>
+                        <NcTextArea
+                            :id="`th-dv-review-reason-${selected.id}`"
+                            v-model="reviewReason"
+                            class="th-dv__approval-textarea"
+                            rows="3"
+                            :placeholder="t('teamhub', 'Say why the decision stands, why it is being reworded, or why it is being retired — this becomes part of the audit trail.')"
+                            :disabled="completingReview"
+                            :maxlength="reviewReasonMax"
+                            :aria-describedby="`th-dv-review-counter-${selected.id}`"
+                            label-outside />
+                        <p
+                            :id="`th-dv-review-counter-${selected.id}`"
+                            class="th-dv__approval-counter"
+                            :class="{ 'th-dv__approval-counter--warn': reviewReason.length > reviewReasonMax - 50 }">
+                            {{ reviewReason.length }} / {{ reviewReasonMax }}
+                        </p>
+
+                        <!-- v4.11.24 — the two answers depend on what was
+                             asked. A **requested** review is a request, so
+                             it is accepted or denied; a **periodic** one
+                             asks "is this still right", so it is kept or
+                             archived. Same block, same field, same service
+                             call — four outcomes, two offered at a time. -->
+                        <div v-if="openReview.kind === 'requested'" class="th-dv__approval-actions">
+                            <!-- Accepting says the decision is altered: its
+                                 wording is rewritten in place and it stays
+                                 approved throughout (v4.11.26 — it used to
+                                 reopen for redrafting, which let a review
+                                 end with the decision denied).
+                                 `success`, because agreeing to a colleague's
+                                 request is the affirmative answer here — it
+                                 is Deny that refuses.
+
+                                 **v4.11.30 — two shapes, and which one you
+                                 get is decided by the request and not by
+                                 the approver.** A request that carries the
+                                 wording it wants has something to approve,
+                                 so *Approve* posts it in one click and
+                                 *Edit wording* is the second-choice road for
+                                 an approver who agrees with the ask but not
+                                 with the words. A request that proposed
+                                 nothing has nothing to approve, so the only
+                                 affirmative answer is to write the wording
+                                 yourself — which is what *Accept and reword*
+                                 has always been, and is the only button
+                                 offered there. Justin: *the approver only
+                                 approves or denies with a reason, or is able
+                                 to edit the final wording.* -->
+                            <NcButton
+                                v-if="openReviewHasProposal"
+                                variant="success"
+                                :disabled="!reviewReasonValid || completingReview"
+                                @click="onCompleteReview('accepted')">
+                                <template #icon><CheckCircleIcon :size="ICON_BODY" /></template>
+                                {{ completingReview ? t('teamhub', 'Saving') : t('teamhub', 'Approve as proposed') }}
+                            </NcButton>
+                            <NcButton
+                                :variant="openReviewHasProposal ? 'secondary' : 'success'"
+                                :disabled="!reviewReasonValid || completingReview"
+                                @click="openReviewAccept(selected)">
+                                <template #icon>
+                                    <PencilIcon v-if="openReviewHasProposal" :size="ICON_BODY" />
+                                    <CheckCircleIcon v-else :size="ICON_BODY" />
+                                </template>
+                                {{ openReviewHasProposal
+                                    ? t('teamhub', 'Edit wording')
+                                    : t('teamhub', 'Accept and reword') }}
+                            </NcButton>
+                            <NcButton
+                                variant="error"
+                                :disabled="!reviewReasonValid || completingReview"
+                                @click="onCompleteReview('denied')">
+                                <template #icon><CloseIcon :size="ICON_BODY" /></template>
+                                {{ t('teamhub', 'Deny') }}
+                            </NcButton>
+                        </div>
+
+                        <div v-else class="th-dv__approval-actions">
+                            <NcButton
+                                variant="success"
+                                :disabled="!reviewReasonValid || completingReview"
+                                @click="onCompleteReview('kept')">
+                                <template #icon><CheckCircleIcon :size="ICON_BODY" /></template>
+                                {{ completingReview ? t('teamhub', 'Saving') : t('teamhub', 'Keep decision') }}
+                            </NcButton>
+                            <!-- `warning`, not `error`. Retiring a decision
+                                 that has served its purpose is not a refusal
+                                 and should not be painted as one. -->
+                            <NcButton
+                                variant="warning"
+                                :disabled="!reviewReasonValid || completingReview"
+                                @click="onCompleteReview('archived')">
+                                <template #icon><ArchiveOutlineIcon :size="ICON_BODY" /></template>
+                                {{ t('teamhub', 'Archive decision') }}
+                            </NcButton>
+                        </div>
+                    </div>
 
                     <!-- ── Approval block (v3.71.3) ──
                          Replaces the previous inline Approve/Deny buttons +
@@ -703,114 +1077,22 @@
                                 <template #icon><CloseIcon :size="ICON_BODY" /></template>
                                 {{ denying ? t('teamhub', 'Denying…') : t('teamhub', 'Deny') }}
                             </NcButton>
-                            <!-- v3.74.10 — Schedule approver meeting.
-                                 Only shown when team has Calendar configured AND user is approver.
-                                 Approve/Deny don't disable this button — discussing first is valid. -->
-                            <NcButton
-                                v-if="canScheduleApproverMeeting(selected)"
-                                variant="secondary"
-                                :disabled="openingMeetingWizard"
-                                :title="t('teamhub', 'Open the meeting wizard pre-filled with the other approvers in this category so you can discuss the proposal together before deciding.')"
-                                @click="openApproverMeetingWizard(selected)">
-                                <template #icon><CalendarPlusIcon :size="ICON_BODY" /></template>
-                                <!-- TRANSLATORS: short button label; hover-tooltip explains the action -->
-                                {{ t('teamhub', 'Schedule meeting') }}
-                            </NcButton>
-                        </div>
-                    </div>
-
-                    <!-- ── Linked tasks (Session B) ── -->
-                    <div class="th-dv__detail-tasks">
-                        <span class="th-dv__detail-section-label">{{ t('teamhub', 'Linked tasks') }}</span>
-
-                        <div v-if="tasksLoading" class="th-dv__tasks-loading">
-                            <NcLoadingIcon :size="ICON_BODY" />
+                            <!-- v4.11.19 — *Schedule meeting* (v3.74.10) is in
+                                 the Actions menu. It is the one item in this
+                                 block that was not a submit button: it
+                                 scheduled a conversation rather than
+                                 answering the proposal, and it deliberately
+                                 did not disable Approve/Deny. Leaving it
+                                 beside them made it look like a third
+                                 outcome. -->
                         </div>
 
-                        <!-- Task list -->
-                        <ul v-if="linkedTasks.length" class="th-dv__link-list">
-                            <li v-for="task in linkedTasks" :key="task.id" class="th-dv__link-item">
-                                <a
-                                    :href="generateUrl('/' + task.task_path)"
-                                    target="_blank"
-                                    rel="noopener"
-                                    class="th-dv__link-row"
-                                    :title="task.task_path">
-                                    <OpenInNewIcon :size="ICON_BODY" class="th-dv__link-icon" aria-hidden="true" />
-                                    <span class="th-dv__link-label">{{ task.label || task.task_path }}</span>
-                                </a>
-                                <!-- Completion pill — only shown for Deck cards (isDone is non-null) -->
-                                <span
-                                    v-if="task.isDone !== null && task.isDone !== undefined"
-                                    class="th-dv__task-status-pill"
-                                    :class="task.isDone ? 'th-dv__task-status-pill--done' : 'th-dv__task-status-pill--open'"
-                                    :aria-label="task.isDone ? t('teamhub', 'Completed') : t('teamhub', 'Open')">
-                                    <!-- TRANSLATORS: pill label shown on a linked Deck card that has been completed/done -->
-                                    <template v-if="task.isDone">{{ t('teamhub', 'Complete') }}</template>
-                                    <!-- TRANSLATORS: pill label shown on a linked Deck card that is still open/in-progress -->
-                                    <template v-else>{{ t('teamhub', 'Open') }}</template>
-                                </span>
-                                <NcButton
-                                    v-if="canPerformDecisionActions"
-                                    class="th-dv__link-remove"
-                                    :aria-label="t('teamhub', 'Remove link')"
-                                    :title="t('teamhub', 'Remove link')"
-                                    @click="deleteTaskLink(task.id)"
-                                    variant="tertiary"
-                                    size="small">
-                                    <template #icon>
-                                        <CloseIcon :size="ICON_INLINE" />
-                                    </template>
-                                </NcButton>
-                            </li>
-                        </ul>
-
-                        <!-- Action buttons — gated on canPerformDecisionActions -->
-                        <div v-if="canPerformDecisionActions" class="th-dv__tasks-actions">
-                            <!-- Link task inline form -->
-                            <div v-if="showLinkTaskForm" class="th-dv__tasks-link-form">
-                                <NcTextField
-                                    v-model="linkTaskPath"
-                                    class="th-dv__tasks-link-input"
-                                    :placeholder="t('teamhub', 'Paste task URL or path…')"
-                                    :aria-label="t('teamhub', 'Task URL or path')"
-                                    @keydown.enter="submitLinkTask"
-                                    label-outside />
-                                <NcTextField
-                                    v-model="linkTaskLabel"
-                                    class="th-dv__tasks-link-input th-dv__tasks-link-input--label"
-                                    :placeholder="t('teamhub', 'Label (optional)')"
-                                    :aria-label="t('teamhub', 'Task label')"
-                                    label-outside />
-                                <div class="th-dv__tasks-link-btns">
-                                    <NcButton variant="primary" :disabled="!linkTaskPath.trim() || linkingTask" @click="submitLinkTask">
-                                        {{ linkingTask ? t('teamhub', 'Linking…') : t('teamhub', 'Link') }}
-                                    </NcButton>
-                                    <NcButton variant="tertiary" @click="showLinkTaskForm = false">
-                                        {{ t('teamhub', 'Cancel') }}
-                                    </NcButton>
-                                </div>
-                            </div>
-
-                            <!-- Buttons row -->
-                            <div v-else class="th-dv__link-actions">
-                                <NcButton variant="secondary" @click="showLinkTaskForm = true">
-                                    <template #icon><LinkVariantIcon :size="ICON_BODY" /></template>
-                                    <!-- TRANSLATORS: button to paste a URL linking an external task to this decision -->
-                                    {{ t('teamhub', 'Link task') }}
-                                </NcButton>
-                                <!-- Create task is only available when the team has a Deck board configured.
-                                     Without a board there is nowhere to create the card. -->
-                                <NcButton
-                                    v-if="resources.deck && resources.deck.length > 0"
-                                    variant="secondary"
-                                    @click="showCreateTaskModal = true">
-                                    <template #icon><PlusIcon :size="ICON_BODY" /></template>
-                                    <!-- TRANSLATORS: button to open the Deck card creation modal, auto-linked to this decision -->
-                                    {{ t('teamhub', 'Create task') }}
-                                </NcButton>
-                            </div>
-                        </div>
+                        <!-- Only where the item exists: pointing at a menu
+                             entry a team without Calendar will never see
+                             would be worse than saying nothing. -->
+                        <p v-if="canScheduleApproverMeeting(selected)" class="th-dv__approval-hint">
+                            {{ t('teamhub', 'Want to talk it over with the other approvers first? Schedule meeting is in the Actions menu.') }}
+                        </p>
                     </div>
 
                     <!-- ── Scheduled meetings (v3.74.10) ──
@@ -842,40 +1124,83 @@
                         </ul>
                     </div>
 
-                    <!-- ── Linked decisions (Session C, unified with external in v3.75.3) ──
-                         Single section for both internal (decision↔decision)
-                         and external (outbound URL) links. Each row carries
-                         a small pill to distinguish the two kinds. -->
-                    <div class="th-dv__detail-dec-links">
-                        <span class="th-dv__detail-section-label">{{ t('teamhub', 'Linked decisions') }}</span>
+                    <!-- ── Links ──
+                         v3.75.3 unified decision↔decision links with external
+                         URLs here. v4.11.19 folds the linked **tasks** in as
+                         well, so everything this decision points at is one
+                         list with a kind pill on each row.
 
-                        <div v-if="decLinksLoading || externalLinksLoading" class="th-dv__dec-links-loading">
+                         Why one list: the two sections had the same shape, the
+                         same remove button, the same inline paste-a-URL form
+                         and the same gate, and differed only in what the row
+                         pointed at. A reader asking "what else is attached to
+                         this decision" had to look in two places and notice
+                         that the answer was split; a decision with one task and
+                         one related decision rendered two sections of one row.
+                         The pill is what the heading used to be. -->
+                    <div class="th-dv__detail-dec-links">
+                        <span class="th-dv__detail-section-label">{{ t('teamhub', 'Links') }}</span>
+
+                        <div v-if="linksLoading" class="th-dv__dec-links-loading">
                             <NcLoadingIcon :size="ICON_BODY" />
                         </div>
 
-                        <!-- Unified list. Each row dispatches on kind:
-                             internal → button that opens the linked decision
-                             external → anchor that opens the URL in a new tab -->
+                        <!-- One list, three kinds. Each row dispatches on kind:
+                             decision → button that opens the peer decision
+                             task     → anchor to the task, in a new tab
+                             external → anchor to an outbound URL, in a new tab -->
                         <ul v-if="unifiedLinks.length"
                             class="th-dv__link-list"
                             aria-live="polite"
-                            :aria-label="t('teamhub', 'Linked decisions')">
+                            :aria-label="t('teamhub', 'Links on this decision')">
                             <li
                                 v-for="row in unifiedLinks"
                                 :key="row.kind + ':' + row.id"
                                 class="th-dv__link-item">
 
-                                <!-- Internal link — opens the peer decision in this view -->
+                                <!-- v4.11.31 — the decision this one
+                                     replaced. Opens in this view like any
+                                     other decision row; what differs is the
+                                     pill, which names the *relationship*
+                                     rather than the kind of thing linked,
+                                     and that it has no Remove button below:
+                                     a supersede is part of what this
+                                     decision is, not something attached to
+                                     it. Synthesised from `supersedes_id`, so
+                                     there is nothing to remove it from. -->
                                 <button
-                                    v-if="row.kind === 'internal'"
+                                    v-if="row.kind === 'supersedes'"
                                     class="th-dv__link-row"
                                     :title="row.peer_title"
                                     @click="selectDecisionById(row.peer_id)">
-                                    <LinkVariantIcon :size="ICON_BODY" class="th-dv__link-icon" aria-hidden="true" />
+                                    <SwapHorizontalIcon :size="ICON_BODY" class="th-dv__link-icon" aria-hidden="true" />
+                                    <span class="th-dv__link-label">{{ row.peer_title }}</span>
+                                    <span class="th-dv__link-pill th-dv__link-pill--kind th-dv__link-pill--kind-supersedes">
+                                        <!-- TRANSLATORS: pill on a link row — this decision replaced the decision the row points at -->
+                                        {{ t('teamhub', 'Supersedes') }}
+                                    </span>
+                                    <!-- No status pill, unlike the Decision
+                                         row below. The peer of a Supersedes
+                                         row is always `superseded` — that is
+                                         what being on this row means — so a
+                                         status pill would say a second time
+                                         what the kind pill just said. In
+                                         German it would say it in the same
+                                         word: *Superseded* and *Supersedes*
+                                         are both "Ersetzt". -->
+                                </button>
+
+                                <!-- A decision in this team — opens in this view -->
+                                <button
+                                    v-else-if="row.kind === 'internal'"
+                                    class="th-dv__link-row"
+                                    :title="row.peer_title"
+                                    @click="selectDecisionById(row.peer_id)">
+                                    <GavelIcon :size="ICON_BODY" class="th-dv__link-icon" aria-hidden="true" />
                                     <span class="th-dv__link-label">{{ row.peer_title }}</span>
                                     <span class="th-dv__link-pill th-dv__link-pill--kind th-dv__link-pill--kind-internal">
-                                        <!-- TRANSLATORS: pill on a linked-decision row indicating it points to another decision in this TeamHub instance -->
-                                        {{ t('teamhub', 'Internal') }}
+                                        <!-- TRANSLATORS: pill on a link row — it points at another decision in this TeamHub -->
+                                        {{ t('teamhub', 'Decision') }}
                                     </span>
                                     <span
                                         v-if="decisionsLevelEnabled && row.peer_level"
@@ -890,7 +1215,36 @@
                                     </span>
                                 </button>
 
-                                <!-- External link — opens an outbound URL -->
+                                <!-- A task — a Deck card or a pasted path -->
+                                <a
+                                    v-else-if="row.kind === 'task'"
+                                    :href="generateUrl('/' + row.task_path)"
+                                    target="_blank"
+                                    rel="noopener"
+                                    class="th-dv__link-row"
+                                    :title="row.task_path">
+                                    <FormatListBulletedIcon :size="ICON_BODY" class="th-dv__link-icon" aria-hidden="true" />
+                                    <span class="th-dv__link-label">{{ row.label || row.task_path }}</span>
+                                    <span class="th-dv__link-pill th-dv__link-pill--kind th-dv__link-pill--kind-task">
+                                        <!-- TRANSLATORS: pill on a link row — it points at a task (a Deck card or a pasted task URL) -->
+                                        {{ t('teamhub', 'Task') }}
+                                    </span>
+                                    <!-- Completion is only known for Deck cards,
+                                         where `isDone` is non-null. A pasted path
+                                         has no state we can read, so it gets no
+                                         pill rather than a guessed one. -->
+                                    <span
+                                        v-if="row.isDone !== null && row.isDone !== undefined"
+                                        class="th-dv__link-pill th-dv__link-pill--status"
+                                        :class="row.isDone ? 'th-dv__link-pill--status-approved' : 'th-dv__link-pill--status-open'">
+                                        <!-- TRANSLATORS: pill on a linked Deck card that has been completed -->
+                                        <template v-if="row.isDone">{{ t('teamhub', 'Complete') }}</template>
+                                        <!-- TRANSLATORS: pill on a linked Deck card that is still open -->
+                                        <template v-else>{{ t('teamhub', 'Open') }}</template>
+                                    </span>
+                                </a>
+
+                                <!-- An outbound URL -->
                                 <a
                                     v-else
                                     :href="row.url"
@@ -902,17 +1256,23 @@
                                     <OpenInNewIcon :size="ICON_BODY" class="th-dv__link-icon" aria-hidden="true" />
                                     <span class="th-dv__link-label">{{ externalLinkDisplay(row) }}</span>
                                     <span class="th-dv__link-pill th-dv__link-pill--kind th-dv__link-pill--kind-external">
-                                        <!-- TRANSLATORS: pill on a linked-decision row indicating it points to a URL outside TeamHub -->
+                                        <!-- TRANSLATORS: pill on a link row — it points at a URL outside TeamHub -->
                                         {{ t('teamhub', 'External') }}
                                     </span>
                                 </a>
 
+                                <!-- v4.11.31 — every kind but `supersedes`.
+                                     That row is read off `supersedes_id` and
+                                     is the lifecycle talking; a Remove button
+                                     on it would promise to undo a supersede,
+                                     which is not a thing this module can
+                                     do. -->
                                 <NcButton
-                                    v-if="canPerformDecisionActions"
+                                    v-if="canPerformDecisionActions && row.kind !== 'supersedes'"
                                     class="th-dv__link-remove"
                                     :aria-label="t('teamhub', 'Remove link')"
                                     :title="t('teamhub', 'Remove link')"
-                                    @click="row.kind === 'internal' ? removeDecisionLink(row.id) : deleteExternalLink(row.id)"
+                                    @click="removeLink(row)"
                                     variant="tertiary"
                                     size="small">
                                     <template #icon>
@@ -922,16 +1282,44 @@
                             </li>
                         </ul>
 
-                        <!-- Empty state: no links of either kind yet -->
-                        <p v-else-if="!decLinksLoading && !externalLinksLoading" class="th-dv__link-empty">
-                            {{ t('teamhub', 'No linked decisions') }}
+                        <!-- Empty state: nothing of any kind attached yet -->
+                        <p v-else-if="!linksLoading" class="th-dv__link-empty">
+                            {{ t('teamhub', 'Nothing linked to this decision') }}
                         </p>
 
-                        <!-- Action row — both link affordances side by side -->
-                        <div v-if="canPerformDecisionActions" class="th-dv__link-actions-row">
-                            <!-- Inline external-link form (replaces the action row when open) -->
-                            <div v-if="showLinkExternalForm" class="th-dv__tasks-link-form th-dv__tasks-link-form--ext">
+                        <!-- v4.11.19 — the four *Link …* buttons are in the
+                             Actions menu. What stays here is the form a menu
+                             item opens, because a field belongs where its
+                             result will appear. -->
+                        <div v-if="canPerformDecisionActions && (showLinkTaskForm || showLinkExternalForm)" class="th-dv__link-actions-row">
+                            <div v-if="showLinkTaskForm" class="th-dv__tasks-link-form">
                                 <NcTextField
+                                    ref="linkTaskInput"
+                                    v-model="linkTaskPath"
+                                    class="th-dv__tasks-link-input"
+                                    :placeholder="t('teamhub', 'Paste task URL or path')"
+                                    :aria-label="t('teamhub', 'Task URL or path')"
+                                    @keydown.enter="submitLinkTask"
+                                    label-outside />
+                                <NcTextField
+                                    v-model="linkTaskLabel"
+                                    class="th-dv__tasks-link-input th-dv__tasks-link-input--label"
+                                    :placeholder="t('teamhub', 'Label (optional)')"
+                                    :aria-label="t('teamhub', 'Task label')"
+                                    label-outside />
+                                <div class="th-dv__tasks-link-btns">
+                                    <NcButton variant="primary" :disabled="!linkTaskPath.trim() || linkingTask" @click="submitLinkTask">
+                                        {{ linkingTask ? t('teamhub', 'Linking…') : t('teamhub', 'Link') }}
+                                    </NcButton>
+                                    <NcButton variant="tertiary" @click="showLinkTaskForm = false">
+                                        {{ t('teamhub', 'Cancel') }}
+                                    </NcButton>
+                                </div>
+                            </div>
+
+                            <div v-else class="th-dv__tasks-link-form th-dv__tasks-link-form--ext">
+                                <NcTextField
+                                    ref="linkExternalInput"
                                     v-model="linkExternalUrl"
                                     type="url"
                                     class="th-dv__tasks-link-input"
@@ -954,73 +1342,76 @@
                                     </NcButton>
                                 </div>
                             </div>
-                            <div v-else class="th-dv__link-actions">
-                                <NcButton variant="secondary" @click="openDecisionPicker">
-                                    <template #icon><LinkVariantIcon :size="ICON_BODY" /></template>
-                                    <!-- TRANSLATORS: button to open a picker that links another decision (in this app) to the current one -->
-                                    {{ t('teamhub', 'Link decision') }}
-                                </NcButton>
-                                <NcButton variant="secondary" @click="showLinkExternalForm = true">
-                                    <template #icon><OpenInNewIcon :size="ICON_BODY" /></template>
-                                    <!-- TRANSLATORS: button to attach an outbound URL pointing to a decision held in a different tool -->
-                                    {{ t('teamhub', 'Link external decision') }}
-                                </NcButton>
-                            </div>
                         </div>
                     </div>
 
-                    <!-- ── Decision picker modal (Session C) ── -->
-                    <NcModal
+                    <!-- ── Link a decision ──
+                         Session C; an `NcDialog` since v4.11.19. Converted
+                         with the supersede picker rather than after it: two
+                         pickers doing nearly the same job, side by side in
+                         one panel, one in Nextcloud's dialog and one in a
+                         bare modal, is the inconsistency the move was for.
+                         Its behaviour is unchanged — it still searches every
+                         decision, not only the approved ones, because a link
+                         is a relation and a relation to an open proposal is
+                         a real thing to record. -->
+                    <NcDialog
                         v-if="showDecisionPicker"
                         :name="t('teamhub', 'Link a decision')"
-                        @close="closeDecisionPicker">
-                        <div class="th-dv__dec-picker">
-                            <p class="th-dv__dec-picker-hint">
+                        size="normal"
+                        @closing="closeDecisionPicker">
+                        <div class="th-dv-dialog">
+                            <p class="th-dv-dialog__intro">
                                 {{ t('teamhub', 'Search for a decision to link') }}
                             </p>
-                            <div class="th-dv__dec-picker-search">
-                                <NcTextField
-                                    ref="decPickerInput"
-                                    v-model="decPickerQuery"
-                                    type="search"
-                                    class="th-dv__dec-picker-input"
-                                    :placeholder="t('teamhub', 'Search decisions…')"
-                                    :aria-label="t('teamhub', 'Search decisions')"
-                                    @input="onDecPickerInput"
-                                    label-outside />
-                            </div>
-                            <div v-if="decPickerLoading" class="th-dv__dec-picker-loading">
+
+                            <NcTextField
+                                ref="decPickerInput"
+                                v-model="decPickerQuery"
+                                type="search"
+                                class="th-dv-dialog__field"
+                                :label="t('teamhub', 'Search decisions')"
+                                :placeholder="t('teamhub', 'Type a few words from its question')"
+                                @update:model-value="onDecPickerInput" />
+
+                            <div v-if="decPickerLoading" class="th-dv-dialog__loading">
                                 <NcLoadingIcon :size="ICON_BODY" />
+                                <span>{{ t('teamhub', 'Searching') }}</span>
                             </div>
-                            <ul v-else-if="decPickerResults.length"
-                                class="th-dv__dec-picker-list"
+
+                            <ul
+                                v-else-if="decPickerResults.length"
+                                class="th-dv-dialog__results"
                                 aria-live="polite"
                                 :aria-label="t('teamhub', 'Search results')">
-                                <li
-                                    v-for="d in decPickerResults"
-                                    :key="d.id"
-                                    class="th-dv__dec-picker-item">
+                                <li v-for="d in decPickerResults" :key="d.id">
                                     <button
-                                        class="th-dv__dec-picker-item-btn"
+                                        type="button"
+                                        class="th-dv-dialog__result"
                                         :disabled="decPickerLinking"
                                         @click="linkPickedDecision(d.id)">
-                                        <span class="th-dv__dec-picker-item-title">{{ d.question }}</span>
-                                        <span
-                                            class="th-dv__dec-picker-item-status"
-                                            :class="'th-dv__dec-picker-item-status--' + d.status">
-                                            {{ d.status }}
+                                        <GavelIcon :size="ICON_BODY" class="th-dv-dialog__result-icon" aria-hidden="true" />
+                                        <span class="th-dv-dialog__result-text">
+                                            <span class="th-dv-dialog__result-title">{{ d.question }}</span>
+                                            <span class="th-dv-dialog__result-meta">{{ statusLabel(d.status) }}</span>
                                         </span>
                                     </button>
                                 </li>
                             </ul>
-                            <p v-else-if="decPickerQuery.trim() && !decPickerLoading" class="th-dv__dec-picker-empty">
-                                {{ t('teamhub', 'No decisions found') }}
-                            </p>
-                            <p v-else-if="!decPickerQuery.trim() && !decPickerLoading" class="th-dv__dec-picker-empty">
-                                {{ t('teamhub', 'Type to search decisions') }}
-                            </p>
+
+                            <NcEmptyContent
+                                v-else
+                                class="th-dv-dialog__empty"
+                                :name="decPickerQuery.trim()
+                                    ? t('teamhub', 'No decisions found')
+                                    : t('teamhub', 'Type to search decisions')"
+                                :description="decPickerQuery.trim()
+                                    ? t('teamhub', 'Try fewer words.')
+                                    : t('teamhub', 'A few words from the decision’s question is enough.')">
+                                <template #icon><GavelIcon :size="ICON_XL" /></template>
+                            </NcEmptyContent>
                         </div>
-                    </NcModal>
+                    </NcDialog>
 
                     <!-- ── Audit trail (Session J) ── -->
                     <div class="th-dv__detail-audit">
@@ -1066,22 +1457,307 @@
             </transition>
         </div>
 
-        <!-- ── Supersede modal ── -->
-        <NcModal
+        <!-- ── Add or edit a category (v4.11.23) ──
+             The same component Manage team → Decisions uses, so the two
+             surfaces cannot offer different options. -->
+        <DecisionCategoryDialog
+            v-if="categoryDialogOpen"
+            :team-id="currentTeamId"
+            :category="categoryDialogTarget"
+            :members="members || []"
+            @saved="onCategorySaved"
+            @close="closeCategoryDialog" />
+
+        <!-- ── Archive a decision (v4.11.24) ──
+             The Actions-menu half of *archive*. A menu item that needs a
+             field opens a dialog for it — the same shape *Request a review*
+             uses, and the reason §2.159's rule gives for not putting the
+             field itself in the menu. -->
+        <NcDialog
+            v-if="archiveTarget"
+            :name="t('teamhub', 'Archive decision')"
+            :buttons="archiveButtons"
+            size="normal"
+            @closing="closeArchive">
+            <div class="th-dv-dialog">
+                <p class="th-dv-dialog__intro">
+                    {{ t('teamhub', 'The decision moves to the team archive and becomes read-only. The record and its audit trail are kept.') }}
+                </p>
+                <NcTextArea
+                    v-model="archiveReason"
+                    class="th-dv-dialog__field"
+                    rows="3"
+                    :label="t('teamhub', 'Why is it being archived?')"
+                    :placeholder="t('teamhub', 'Say why it no longer applies — this becomes part of the audit trail.')"
+                    :disabled="archiving"
+                    :maxlength="reviewReasonMax"
+                    :helper-text="`${archiveReason.length} / ${reviewReasonMax}`"
+                    required />
+            </div>
+        </NcDialog>
+
+        <!-- ── Accept a review request (v4.11.26) ──
+             Accepting means the decision is **altered**, so this dialog is
+             where the alteration is written. The decision never leaves
+             `approved`: there is no redraft, no second finalize and no
+             second approval, which is what keeps `denied` out of reach of a
+             review.
+
+             Both fields are prefilled with what the decision says now, so
+             the approver edits a decision rather than filling in a form.
+             The reason comes over from the Review block's field — it was
+             already typed and required there, and asking for it twice would
+             read as two different questions. -->
+        <NcDialog
+            v-if="reviewAcceptTarget"
+            :name="openReviewHasProposal ? t('teamhub', 'Edit the proposed wording') : t('teamhub', 'Accept and reword')"
+            :buttons="reviewAcceptButtons"
+            size="large"
+            @closing="closeReviewAccept">
+            <div class="th-dv-dialog">
+                <p class="th-dv-dialog__intro">
+                    {{ t('teamhub', 'The decision stays in force and keeps its approval — only its wording changes. The previous wording is kept in the audit trail.') }}
+                </p>
+                <!-- v4.11.30 — says whose words are in the boxes. An
+                     approver who opened this from *Edit wording* is looking
+                     at the requester's proposal, not at the decision as it
+                     stands, and editing the one while believing it is the
+                     other is how a correction becomes a surprise.
+                     The attachment is deliberately not here: it is the
+                     requester's and the approver does not edit it. -->
+                <NcNoteCard v-if="openReviewHasProposal" type="info">
+                    {{ t('teamhub', 'These are the words {name} proposed. Edit them and approve, or go back and approve them as they are.', { name: openReview ? openReview.requestedByName : '' }) }}
+                </NcNoteCard>
+                <NcTextField
+                    v-model="reviewAcceptQuestion"
+                    class="th-dv-dialog__field"
+                    :label="t('teamhub', 'Question')"
+                    :disabled="completingReview"
+                    :maxlength="4000" />
+                <NcTextArea
+                    v-model="reviewAcceptAnswer"
+                    class="th-dv-dialog__field"
+                    rows="8"
+                    :label="t('teamhub', 'Decision')"
+                    :placeholder="t('teamhub', 'The wording the team is subject to from now on.')"
+                    :disabled="completingReview"
+                    :maxlength="4000"
+                    required />
+                <NcNoteCard v-if="!reviewAcceptChanged" type="info">
+                    {{ t('teamhub', 'Nothing has been changed yet. Accepting a review means altering the decision — edit the wording above, or deny the request instead.') }}
+                </NcNoteCard>
+            </div>
+        </NcDialog>
+
+        <!-- ── Request a review ──
+             v4.11.19 — an `NcDialog`, not a bare `NcModal`. The previous one
+             wrapped its content in `.th-dv-modal` / `__intro` / `__quote` /
+             `__actions`, and **none of those four classes had a single rule
+             anywhere in this file**. They never did: the old supersede
+             confirm was their only user and it was two lines of text, so an
+             unstyled box looked like a plain box. Putting a labelled form
+             with a counter and two buttons inside the same box is what made
+             it visible. `NcDialog` brings Nextcloud's own padding, heading,
+             scrolling and button row, so there is nothing of ours left to
+             forget to style. -->
+        <NcDialog
+            v-if="reviewRequestTarget"
+            :name="t('teamhub', 'Request a review')"
+            :buttons="reviewRequestButtons"
+            size="normal"
+            @closing="closeReviewRequest">
+            <div class="th-dv-dialog">
+                <p class="th-dv-dialog__intro">
+                    {{ t('teamhub', 'The approvers of this category will be asked to look at the decision again. It stays in force until they answer.') }}
+                </p>
+                <NcTextArea
+                    v-model="reviewMotivation"
+                    class="th-dv-dialog__field"
+                    rows="4"
+                    :label="t('teamhub', 'Why does this need reviewing?')"
+                    :placeholder="t('teamhub', 'Describe what changed — this becomes part of the audit trail.')"
+                    :disabled="requestingReview"
+                    :maxlength="reviewMotivationMax"
+                    :helper-text="reviewMotivationHelper"
+                    required />
+
+                <!-- v4.11.30 — what the requester is asking for.
+                     Justin: *the review requester should give the correct
+                     wording and if needed attachment.* They are the one who
+                     knows what the decision should now say; the approver's
+                     job is to agree with it, refuse it, or correct the
+                     words. Both fields are prefilled with what the decision
+                     says today, so this reads as editing a decision rather
+                     than filling in a form — the same choice the *Accept and
+                     reword* dialog made for the approver.
+
+                     Optional, and the fieldset says so. *Look at this
+                     again*, with nothing proposed, is still a legitimate
+                     thing for a member to ask and is the only shape a review
+                     had before this version. -->
+                <fieldset class="th-dv-dialog__fieldset">
+                    <legend class="th-dv-dialog__legend">
+                        {{ t('teamhub', 'What should it say instead?') }}
+                    </legend>
+                    <p class="th-dv-dialog__legend-hint">
+                        {{ t('teamhub', 'Optional. Fill this in and the approvers can approve your wording in one step. Leave it empty to ask them to look at the decision without proposing anything.') }}
+                    </p>
+
+                    <NcTextField
+                        v-model="reviewProposedQuestion"
+                        class="th-dv-dialog__field"
+                        :label="t('teamhub', 'Proposed question')"
+                        :disabled="requestingReview"
+                        :maxlength="reviewProposedMax" />
+                    <NcTextArea
+                        v-model="reviewProposedAnswer"
+                        class="th-dv-dialog__field"
+                        rows="6"
+                        :label="t('teamhub', 'Proposed wording')"
+                        :placeholder="t('teamhub', 'The wording you are asking the team to be subject to instead.')"
+                        :disabled="requestingReview"
+                        :maxlength="reviewProposedMax" />
+
+                    <DecisionAttachField
+                        v-model="reviewProposedAttachment"
+                        class="th-dv-dialog__field"
+                        :label="t('teamhub', 'Supporting file')"
+                        :hint="t('teamhub', 'Copied into the decision so the approvers can read it. It is kept if they approve and removed if they deny.')"
+                        :disabled="requestingReview" />
+                </fieldset>
+            </div>
+        </NcDialog>
+
+        <!-- ── Move a decision to another category (v4.11.30) ──
+             Justin: *an approver for a category can move a proposal that is
+             in the wrong category to the proper category from the actions
+             menu on the decision page.*
+
+             A menu item that needs a field opens a dialog for it, which is
+             the shape *Request a review* and *Archive decision* both use.
+             No reason field: where a decision is filed is a clerical fact
+             about it, not a judgement on it, and the audit line already
+             carries both category names and who moved it. -->
+        <NcDialog
+            v-if="moveCategoryTarget"
+            :name="t('teamhub', 'Move to another category')"
+            :buttons="moveCategoryButtons"
+            size="normal"
+            @closing="closeMoveCategory">
+            <div class="th-dv-dialog">
+                <p class="th-dv-dialog__intro">
+                    {{ t('teamhub', 'The decision moves to the category you pick, and its approvers take it over from there. The archive is not on this list — archiving a decision is a separate action.') }}
+                </p>
+                <NcNoteCard v-if="!moveCategoryOptions.length" type="info">
+                    {{ t('teamhub', 'This team has no other category to move it to. A team admin can add one on the Decisions page.') }}
+                </NcNoteCard>
+                <template v-else>
+                    <label for="th-dv-move-category" class="th-dv-dialog__label">
+                        {{ t('teamhub', 'New category') }}
+                    </label>
+                    <NcSelect
+                        v-model="moveCategoryChoice"
+                        class="th-dv-dialog__field"
+                        input-id="th-dv-move-category"
+                        label-outside
+                        :aria-label-combobox="t('teamhub', 'New category')"
+                        :options="moveCategoryOptions"
+                        :reduce="o => o.id"
+                        :clearable="false"
+                        :disabled="movingCategory"
+                        :placeholder="t('teamhub', 'Pick a category')" />
+                    <!-- A moved decision that is already approved restarts
+                         its clock on the new category's period, which is a
+                         consequence worth reading before the click and not
+                         after. -->
+                    <p v-if="selected && selected.status === 'approved'" class="th-dv-dialog__hint">
+                        {{ t('teamhub', 'This decision is approved, so its next review date is recalculated from the new category.') }}
+                    </p>
+                </template>
+            </div>
+        </NcDialog>
+
+        <!-- ── Supersede picker ──
+             v4.11.19 — an `NcDialog` with a search field and **at most four
+             results**, which is what the service desk's *Link a decision*
+             picker settled on in v4.11.12 and is the same act: a picker is
+             for recognising the decision you already have in mind, not for
+             browsing. 4.11.18 listed the fifty most recent and reasoned that
+             a team with more than fifty approved decisions should look in
+             its archive — which told somebody with sixty exactly nothing.
+             The server does the matching, so it is the same LIKE the
+             Decisions list already runs.
+
+             No footer buttons: picking a result **is** the confirmation, so
+             a *Supersede* button below the list would be a second click for
+             a choice already made. Cancel is the dialog's own close. -->
+        <NcDialog
             v-if="supersedeTarget"
             :name="t('teamhub', 'Supersede decision')"
-            @close="supersedeTarget = null">
-            <div class="th-dv-modal">
-                <p class="th-dv-modal__intro">
-                    {{ t('teamhub', 'You are about to withdraw this decision and open a new proposal in its place.') }}
+            size="normal"
+            @closing="closeSupersede">
+            <div class="th-dv-dialog">
+                <p class="th-dv-dialog__intro">
+                    {{ t('teamhub', 'Pick the decision that overrules this one. This decision moves to the archive and becomes read-only.') }}
                 </p>
-                <blockquote class="th-dv-modal__quote">{{ supersedeTarget.question }}</blockquote>
-                <div class="th-dv-modal__actions">
-                    <NcButton variant="secondary" @click="supersedeTarget = null">{{ t('teamhub', 'Cancel') }}</NcButton>
-                    <NcButton variant="primary" @click="confirmSupersede">{{ t('teamhub', 'Go to stream to propose') }}</NcButton>
+                <NcTextField
+                    ref="supersedeSearch"
+                    v-model="supersedeQuery"
+                    type="search"
+                    class="th-dv-dialog__field"
+                    :label="t('teamhub', 'Search approved decisions')"
+                    :placeholder="t('teamhub', 'Type a few words from its question')"
+                    :disabled="superseding"
+                    @update:model-value="onSupersedeSearch" />
+
+                <div v-if="supersedeLoading" class="th-dv-dialog__loading">
+                    <NcLoadingIcon :size="ICON_BODY" />
+                    <span>{{ t('teamhub', 'Searching') }}</span>
                 </div>
+
+                <NcNoteCard v-else-if="supersedeError" type="error">
+                    {{ supersedeError }}
+                </NcNoteCard>
+
+                <ul
+                    v-else-if="supersedeOptions.length"
+                    class="th-dv-dialog__results"
+                    :aria-label="t('teamhub', 'Approved decisions')">
+                    <li v-for="d in supersedeOptions" :key="d.id">
+                        <button
+                            type="button"
+                            class="th-dv-dialog__result"
+                            :disabled="superseding"
+                            @click="confirmSupersede(d.id)">
+                            <GavelIcon :size="ICON_BODY" class="th-dv-dialog__result-icon" aria-hidden="true" />
+                            <span class="th-dv-dialog__result-text">
+                                <span class="th-dv-dialog__result-title">{{ d.question }}</span>
+                                <span class="th-dv-dialog__result-meta">
+                                    <template v-if="d.category">{{ d.category }}</template>
+                                    <template v-if="d.category && d.resolvedAt"> · </template>
+                                    <template v-if="d.resolvedAt">{{ fullDate(d.resolvedAt) }}</template>
+                                </span>
+                            </span>
+                        </button>
+                    </li>
+                </ul>
+
+                <!-- Two empty states, because they mean different things:
+                     a search that found nothing is not a team with nothing
+                     to find. -->
+                <NcEmptyContent
+                    v-else
+                    class="th-dv-dialog__empty"
+                    :name="supersedeQuery.trim()
+                        ? t('teamhub', 'No approved decision matches that')
+                        : t('teamhub', 'No other approved decision yet')"
+                    :description="supersedeQuery.trim()
+                        ? t('teamhub', 'Only approved decisions can supersede another one. Try fewer words.')
+                        : t('teamhub', 'A decision has to be approved before it can supersede another one.')">
+                    <template #icon><GavelIcon :size="ICON_XL" /></template>
+                </NcEmptyContent>
             </div>
-        </NcModal>
+        </NcDialog>
 
         <!-- ── Read-only file viewer — v3.71.2 ──
              Opens any source file (proposal .md or copied attachment) in an
@@ -1258,13 +1934,19 @@ import { translate as t, translatePlural as n } from '@nextcloud/l10n'
 import { formatDate, formatDateTime } from '../lib/localDate.js'
 import { mapState, mapMutations }                from 'vuex'
 import { generateUrl }                           from '@nextcloud/router'
-import { handleInternalLinkClick }               from '../lib/internalLinks.js'
+import { decisionUrl, handleInternalLinkClick }  from '../lib/internalLinks.js'
 import { CATEGORY_ICONS, CATEGORY_ICON_MAP } from '../lib/decisionCategoryIcons.js'
 import { showError, showSuccess }                from '@nextcloud/dialogs'
-import { NcAvatar, NcButton, NcModal, NcEmptyContent, NcLoadingIcon, NcTextField, NcTextArea } from '@nextcloud/vue'
+import {
+	NcActionButton, NcActionCheckbox, NcActionLink, NcActions, NcActionSeparator,
+	NcAvatar, NcButton, NcDialog, NcModal, NcEmptyContent, NcLoadingIcon, NcNoteCard,
+	NcTextField, NcTextArea, NcSelect,
+} from '@nextcloud/vue'
 import axios from '@nextcloud/axios'
 import DOMPurify from 'dompurify'
-import { ICON_BODY, ICON_INLINE, ICON_LARGE, ICON_XL } from '../constants/uiTokens.js'
+import { AVATAR_SM, ICON_BODY, ICON_INLINE, ICON_LARGE, ICON_XL } from '../constants/uiTokens.js'
+// v4.11.19 — the Actions menu's contents and every gate behind them.
+import { decisionPanelActions } from '../constants/decisions.js'
 
 // MDI icons used directly in the template (separate from the category-icon set
 // loaded from ../lib/decisionCategoryIcons.js, which is for picker rendering only)
@@ -1294,9 +1976,21 @@ import FlagOutlineIcon         from 'vue-material-design-icons/FlagOutline.vue'
 // v4.5.42 — the proposer's drafting block.
 import PencilIcon              from 'vue-material-design-icons/Pencil.vue'
 import ForumIcon               from 'vue-material-design-icons/Forum.vue'
+// v4.11.18 — the review and retirement cycle. ArchiveOutline is also in
+// CATEGORY_ICONS now (the seeded Archive category carries it), but the
+// picker's map and the template's imports are separate lists by design —
+// see ../lib/decisionCategoryIcons.js.
+import RefreshIcon             from 'vue-material-design-icons/Refresh.vue'
+import ArchiveOutlineIcon      from 'vue-material-design-icons/ArchiveOutline.vue'
+import FolderMoveOutlineIcon   from 'vue-material-design-icons/FolderMoveOutline.vue'
 import AddTaskModal             from './AddTaskModal.vue'
 import SuggestMeetingWizard     from './SuggestMeetingWizard.vue'
 import DecisionProgressRail     from './DecisionProgressRail.vue'
+// v4.11.23 — the category form, shared with ManageTeamView.
+import DecisionCategoryDialog   from './DecisionCategoryDialog.vue'
+// v4.11.30 — the optional file on a review request: pick one from your own
+// Nextcloud or upload one, and hand the server the id either way.
+import DecisionAttachField     from './DecisionAttachField.vue'
 
 const PAGE_SIZE = 50
 
@@ -1304,7 +1998,10 @@ export default {
     name: 'TeamDecisionsView',
 
     components: {
-          NcTextArea, NcTextField, NcAvatar, NcButton, NcModal, NcEmptyContent, NcLoadingIcon,
+          NcTextArea, NcTextField, NcSelect, NcAvatar, NcButton, NcDialog, NcModal, NcEmptyContent, NcLoadingIcon, NcNoteCard,
+        // v4.11.19 — the Actions menu. NcCheckboxRadioSwitch left with the
+        // inline *Public decision* switch it was the only user of.
+        NcActions, NcActionButton, NcActionCheckbox, NcActionLink, NcActionSeparator,
         GavelIcon, PlusIcon, TagIcon, ChevronRightIcon, ChevronLeftIcon,
         CloseIcon, CheckCircleIcon,
         SortAscendingIcon, SortDescendingIcon, FilterVariantIcon,
@@ -1314,10 +2011,15 @@ export default {
         LinkVariantIcon, CalendarPlusIcon, CalendarClockIcon,
         FlagOutlineIcon,
         PencilIcon, ForumIcon,
-        AddTaskModal, SuggestMeetingWizard, DecisionProgressRail,
+        RefreshIcon, ArchiveOutlineIcon, FolderMoveOutlineIcon,
+        AddTaskModal, SuggestMeetingWizard, DecisionProgressRail, DecisionCategoryDialog,
+        DecisionAttachField,
     },
 
-    emits: ['propose-decision', 'propose-decision-superseding'],
+    // v4.11.18 — `propose-decision-superseding` is gone with the
+    // open-proposal Supersede button. Superseding is now a write on the
+    // approved decision, not a handshake that opens the composer.
+    emits: ['propose-decision'],
 
     data() {
         return {
@@ -1325,6 +2027,12 @@ export default {
             ICON_INLINE,
             ICON_LARGE,
             ICON_XL,
+            // v4.11.19 — the approver avatars on a category card. Three,
+            // because a fourth stops reading as "these people" and starts
+            // reading as a crowd; the rest become a +N that names them all
+            // on hover.
+            AVATAR_SM,
+            APPROVER_AVATAR_CAP: 3,
             // ── View state machine ──────────────────────────────────────────
             // 'landing' = category grid, 'list' = decisions list for a category
             view:           'landing',
@@ -1357,7 +2065,86 @@ export default {
             sort:         'recent',
 
             selected:        null,  // decision object currently shown in detail panel
-            supersedeTarget: null,
+
+            // v4.11.23 — the category form, opened from the landing grid.
+            // `null` target means create.
+            categoryDialogOpen:   false,
+            categoryDialogTarget: null,
+
+            // ── v4.11.18 — review and retirement of an approved decision ──
+            // The supersede picker. `supersedeTarget` is the decision being
+            // retired; the options are the team's other approved decisions.
+            supersedeTarget:  null,
+            supersedeOptions: [],
+            supersedeLoading: false,
+            supersedeError:   '',
+            superseding:      false,
+
+            // Requesting a review.
+            reviewRequestTarget: null,
+            reviewMotivation:    '',
+            reviewMotivationMax: 1000,   // DecisionReviewService::MAX_MOTIVATION_LEN
+            requestingReview:    false,
+
+            // v4.11.30 — what the request is asking for. Prefilled with the
+            // decision's current wording when the dialog opens, so an empty
+            // proposal is one the requester deliberately cleared rather than
+            // one they were handed two blank boxes for. `null` attachment
+            // means no file; `{ fileId, name }` means one.
+            reviewProposedQuestion:   '',
+            reviewProposedAnswer:     '',
+            reviewProposedAttachment: null,
+            reviewProposedMax:        4000,  // DecisionReviewService::MAX_PROPOSED_LEN
+
+            // v4.11.30 — moving a miscategorised decision, from the menu.
+            moveCategoryTarget: null,
+            moveCategoryChoice: null,
+            movingCategory:     false,
+
+            // v4.11.24 — archiving straight from the Actions menu.
+            archiveTarget: null,
+            archiveReason: '',
+            archiving:     false,
+
+            // v4.11.19 — the supersede picker searches now, so it debounces.
+            supersedeQuery:      '',
+            supersedeSearchId:   null,
+
+            // The reviews of the selected decision, newest first, and the
+            // open one pulled out of them. Loaded per selection beside the
+            // audit — the list endpoint deliberately omits them, the same
+            // reasoning §2.79 recorded for the proposal body.
+            // v4.11.23 — the Review block's mandatory reason, mirroring
+            // `approvalReason`. Its own field rather than a shared one: the
+            // two blocks are never on screen together, but a reason typed
+            // for an approval has no business surviving into a review.
+            reviewReason:     '',
+            reviewReasonMax:  1000,   // DecisionReviewService::MAX_REASON_LEN
+            reviews:          [],
+            reviewsLoading:   false,
+            reviewsForDecisionId: null,
+            completingReview: false,
+            // v4.11.26 — the *Accept and reword* dialog. The decision being
+            // reworded, and the two fields of it that the approver is
+            // rewriting; both are prefilled from what it says now, so an
+            // untouched dialog submits nothing and the server would refuse
+            // it anyway.
+            reviewAcceptTarget:   null,
+            reviewAcceptQuestion: '',
+            reviewAcceptAnswer:   '',
+            // { id, question, status } — the decision that replaced a
+            // superseded one. Resolved by GET /decisions/{id}, which is the
+            // only response that carries it.
+            supersededBy:     null,
+            // v4.11.31 — { id, question, status } — the decision **this** one
+            // replaced, for the Links section. The mirror of `supersededBy`
+            // and resolved from the same `supersedes_id`, read from the other
+            // side: that column is the only place a supersede is stored.
+            supersedes:       null,
+            // Which decision `supersedes` has been **settled** for, loaded
+            // or failed. Needed because `linksLoading` below waits for that
+            // fetch, and a failed one would otherwise spin for ever.
+            supersedesSettledFor: null,
 
             // Session H — approve/deny flow
             approverCategories: [],  // cache of {id, name, approvers: [uid]} for auth
@@ -1426,6 +2213,8 @@ export default {
             showCreateTaskModal: false,   // toggle AddTaskModal
 
             // ── v3.75.2: External decision links ───────────────────────
+            // v4.11.12 — a publish/unpublish call in flight.
+            settingPublic:        false,
             externalLinks:        [],     // [{ id, url, label, createdBy, createdAt }]
             externalLinksLoading: false,
             externalLinksDecisionId: null, // tracks which decision the links belong to
@@ -1462,9 +2251,22 @@ export default {
             return !!(this.decisionsConfig && this.decisionsConfig.decisions_level_enabled)
         },
 
-        // Expose landingCategories as `categories` for the grid template.
+        /**
+         * The landing grid's tiles.
+         *
+         * v4.11.18 — the archive goes last, whatever its name sorts as. It is
+         * where decisions end up rather than one of the places a team decides
+         * things, and a team whose archive sorts first would open the
+         * Decisions tab on its own history. The server orders by name; this
+         * is a stable partition on top of that, not a re-sort.
+         */
         categories() {
-            return this.landingCategories
+            const live    = []
+            const archive = []
+            for (const cat of this.landingCategories) {
+                (cat.is_archive ? archive : live).push(cat)
+            }
+            return [...live, ...archive]
         },
 
         // Expose the module-level map as a computed so template can reach it.
@@ -1498,6 +2300,29 @@ export default {
          */
         unifiedLinks() {
             const out = []
+            // v4.11.31 — first: the decision this one replaced. Justin,
+            // 2026-10-06: *there should be a link under Links that links to
+            // the superseded decision with appropriate pill.*
+            //
+            // **Not a row in `teamhub_dec_links`.** It is synthesised from
+            // `supersedes_id`, which stays the one place a supersede lives,
+            // so this link cannot be removed, cannot drift out of step with
+            // the lifecycle, and cannot become a second answer free to
+            // disagree with the first. That is also why it carries no Remove
+            // button below: a supersede is a thing that happened, not an
+            // attachment somebody chose.
+            //
+            // Above the chosen links, because it is the only one of them
+            // that is part of what this decision *is*.
+            if (this.supersedes) {
+                out.push({
+                    kind:        'supersedes',
+                    id:          this.supersedes.id,
+                    peer_id:     this.supersedes.id,
+                    peer_title:  this.supersedes.question,
+                    peer_status: this.supersedes.status,
+                })
+            }
             // Internal links — already loaded by loadDecisionLinks.
             for (const l of (this.linkedDecisions || [])) {
                 out.push({
@@ -1508,6 +2333,20 @@ export default {
                     peer_status: l.peer_status,
                     peer_level:  l.peer_level,
                     created_at:  l.created_at,
+                })
+            }
+            // v4.11.19 — tasks, previously their own section. Between
+            // decisions and external URLs: a task is in-app like a decision
+            // but it is not another decision, and an outbound URL is the one
+            // kind that leaves the instance, so it sorts last.
+            for (const task of (this.linkedTasks || [])) {
+                out.push({
+                    kind:       'task',
+                    id:         task.id,
+                    task_path:  task.task_path,
+                    label:      task.label,
+                    isDone:     task.isDone,
+                    created_at: task.created_at,
                 })
             }
             // External links — already loaded by loadExternalLinks.
@@ -1523,6 +2362,255 @@ export default {
             return out
         },
 
+        /**
+         * v4.11.19 — one spinner for the one Links section. Three fetches
+         * feed it and they finish independently, so the section says "loading"
+         * until the last of them is in rather than flickering an empty state
+         * between them.
+         */
+        linksLoading() {
+            if (this.decLinksLoading || this.externalLinksLoading || this.tasksLoading) {
+                return true
+            }
+            // v4.11.31 — and the fourth fetch, the one that resolves the
+            // Supersedes row. `supersedesId` is on the list row, so the
+            // panel knows *synchronously* that a row is coming and can say
+            // "loading" instead of rendering "Nothing linked to this
+            // decision" for as long as the request takes — which on a
+            // decision whose only link is the one it replaced would be the
+            // empty state answering a question it has the answer to.
+            const d = this.selected
+            return !!(d && d.supersedesId && this.supersedesSettledFor !== d.id)
+        },
+
+        /**
+         * v4.11.31 — is the selected decision filed in the team's archive?
+         *
+         * The archive is team-only, so this is what takes *Public decision*
+         * out of the Actions menu. Read from `is_archive` on the category
+         * rows `ensureCategoriesLoaded()` already has — the flag carries the
+         * whole lock on the server too (`DecisionCategoryService`), so there
+         * is nothing here to keep in step with a name.
+         *
+         * **Falls back to `isRetired`** while the categories are still
+         * loading, and for a row whose category name no category answers to
+         * any more. Every retired decision is in the archive — `retire()` is
+         * the only way in, and `moveToCategory()` refuses the archive as a
+         * target — so the fallback errs the safe way: it hides a checkbox
+         * the server would refuse anyway, rather than offering one.
+         */
+        selectedInArchiveCategory() {
+            const d = this.selected
+            if (!d) return false
+            if (this.approverCategoriesLoaded && d.category) {
+                const cat = this.approverCategories.find(c => c.name === d.category)
+                if (cat) return !!cat.is_archive
+            }
+            return !!d.isRetired
+        },
+
+        /**
+         * The Actions menu for this decision.
+         *
+         * The list and every gate behind it live in
+         * `decisionPanelActions()` (`src/constants/decisions.js`) — a pure
+         * function, so the gates can be read side by side and tested without
+         * a browser, the way `serviceTeams.js` does it for the catalogue.
+         * What this component contributes is the half only it knows: the
+         * viewer's level, the team's Deck boards, and whether a form or a
+         * call is already in flight.
+         */
+        panelActions() {
+            return decisionPanelActions(this.selected, {
+                canActOn:                   this.selected ? this.canActOn(this.selected) : false,
+                canApprove:                 this.selected ? this.canApprove(this.selected) : false,
+                canPerformDecisionActions:  this.canPerformDecisionActions,
+                // v4.11.31 — the archive is team-only, so it offers no
+                // *Public decision* checkbox at all.
+                inArchiveCategory:          this.selectedInArchiveCategory,
+                canScheduleApproverMeeting: this.selected ? this.canScheduleApproverMeeting(this.selected) : false,
+                hasDeckBoard:               !!(this.resources.deck && this.resources.deck.length),
+                hasOpenReview:              !!this.openReview,
+                editingProposal:            this.editingProposal,
+                finalizing:                 this.finalizingProposal,
+                talkHref:                   this.selected?.talkToken ? this.talkUrl(this.selected.talkToken) : null,
+            })
+        },
+
+        /**
+         * The *Request a review* dialog's footer, as `NcDialog` wants it.
+         *
+         * Handing the buttons to the dialog rather than drawing them in the
+         * slot is the whole reason the dialog looks like a Nextcloud dialog:
+         * it owns the row, the spacing and the order, and none of that is
+         * ours to get wrong a second time.
+         */
+        reviewRequestButtons() {
+            return [
+                {
+                    label: t('teamhub', 'Cancel'),
+                    type: 'secondary',
+                    disabled: this.requestingReview,
+                    callback: () => this.closeReviewRequest(),
+                },
+                {
+                    label: this.requestingReview ? t('teamhub', 'Submitting') : t('teamhub', 'Submit'),
+                    type: 'primary',
+                    disabled: !this.reviewMotivation.trim() || this.requestingReview,
+                    callback: () => this.submitReviewRequest(),
+                },
+            ]
+        },
+
+        /**
+         * Does the open review carry wording the approver could approve
+         * outright? (v4.11.30)
+         *
+         * Read from the server's `hasProposedWording` rather than derived
+         * from the two strings here, for the reason `isRetired` is sent on a
+         * decision: the server already answered the question, and a client
+         * that re-derived it would eventually get null-versus-empty wrong
+         * and offer an **Approve** button over no words at all.
+         */
+        openReviewHasProposal() {
+            return !!this.openReview?.hasProposedWording
+        },
+
+        /**
+         * The categories this decision could be moved into (v4.11.30).
+         *
+         * Everything the team has, minus the archive — putting a decision
+         * there is *archiving* it, which has its own verb and its own
+         * mandatory reason — and minus the one it is already in, which is
+         * not a move.
+         */
+        moveCategoryOptions() {
+            const current = (this.selected?.category || '').toLowerCase()
+            return (this.landingCategories || [])
+                .filter(c => !c.is_archive && (c.name || '').toLowerCase() !== current)
+                .map(c => ({ id: c.name, label: c.name }))
+        },
+
+        /** The *Move to another category* dialog's footer. */
+        moveCategoryButtons() {
+            return [
+                {
+                    label: t('teamhub', 'Cancel'),
+                    type: 'secondary',
+                    disabled: this.movingCategory,
+                    callback: () => this.closeMoveCategory(),
+                },
+                {
+                    label: this.movingCategory ? t('teamhub', 'Moving') : t('teamhub', 'Move decision'),
+                    type: 'primary',
+                    disabled: !this.moveCategoryChoice || this.movingCategory,
+                    callback: () => this.submitMoveCategory(),
+                },
+            ]
+        },
+
+        /**
+         * Has the approver actually altered anything? (v4.11.26)
+         *
+         * The server refuses an accept that changes nothing — a
+         * `review_accepted` line over an unchanged decision tells a later
+         * reader something was altered when nothing was. Saying so here as
+         * well means the approver reads it before they submit rather than
+         * after.
+         */
+        reviewAcceptChanged() {
+            const d = this.reviewAcceptTarget
+            if (!d) return false
+            // Trimmed on both sides, and the server compares the same way
+            // (v4.11.27). A decision proposed from an attachment usually has
+            // a stored body ending in a newline, so an untrimmed comparison
+            // here would enable the button on a dialog nobody had touched.
+            return this.reviewAcceptQuestion.trim() !== (d.question || '').trim()
+                || this.reviewAcceptAnswer.trim() !== (d.selectedAnswer || '').trim()
+        },
+
+        /** The *Accept and reword* dialog's footer. */
+        reviewAcceptButtons() {
+            return [
+                {
+                    label: t('teamhub', 'Cancel'),
+                    type: 'secondary',
+                    disabled: this.completingReview,
+                    callback: () => this.closeReviewAccept(),
+                },
+                {
+                    label: this.completingReview ? t('teamhub', 'Saving') : t('teamhub', 'Accept and reword'),
+                    type: 'primary',
+                    disabled: !this.reviewAcceptChanged
+                        || !this.reviewAcceptQuestion.trim()
+                        || !this.reviewAcceptAnswer.trim()
+                        || !this.reviewReasonValid
+                        || this.completingReview,
+                    callback: () => this.submitReviewAccept(),
+                },
+            ]
+        },
+
+        /** The Archive dialog's footer. */
+        archiveButtons() {
+            return [
+                {
+                    label: t('teamhub', 'Cancel'),
+                    type: 'secondary',
+                    disabled: this.archiving,
+                    callback: () => this.closeArchive(),
+                },
+                {
+                    label: this.archiving ? t('teamhub', 'Archiving') : t('teamhub', 'Archive decision'),
+                    // `warning`, like the Review block's Archive: retiring a
+                    // decision that has served its purpose is not a refusal.
+                    type: 'warning',
+                    disabled: !this.archiveReason.trim() || this.archiving,
+                    callback: () => this.submitArchive(),
+                },
+            ]
+        },
+
+        /**
+         * The counter under the motivation field, as `NcTextArea`'s own
+         * helper text rather than a `<p>` of ours — so it sits where every
+         * other Nextcloud field's helper sits and is announced with the
+         * field instead of after it.
+         */
+        reviewMotivationHelper() {
+            return `${this.reviewMotivation.length} / ${this.reviewMotivationMax}`
+        },
+
+        /**
+         * What being public, or not being public, means for this decision.
+         *
+         * Four sentences rather than two, because the second half of "not
+         * public" is an instruction, and an instruction is only worth giving
+         * to somebody who can follow it.
+         */
+        publicHint() {
+            if (!this.selected) return ''
+            if (this.selected.isPublic) {
+                return t('teamhub', 'Everybody signed in on this Nextcloud can read this decision and find it in a search. Only this team can act on it.')
+            }
+            return this.canPerformDecisionActions
+                ? t('teamhub', 'Only this team can read this decision. Make it public from the Actions menu to let everybody signed in on this Nextcloud read it and find it in a search.')
+                : t('teamhub', 'Only this team can read this decision.')
+        },
+
+        /**
+         * True while any menu action is in flight. One flag disables the whole
+         * menu rather than each item disabling itself: these actions all write
+         * to the same decision, and a second one fired mid-flight would race
+         * the first.
+         */
+        panelActionsBusy() {
+            return this.finalizingProposal
+                || this.completingReview
+                || this.superseding
+                || this.settingPublic
+        },
+
         statusChips() {
             return [
                 { value: null,        label: t('teamhub', 'All') },
@@ -1531,6 +2619,13 @@ export default {
                 { value: 'approved',  label: t('teamhub', 'Approved') },
                 { value: 'denied',    label: t('teamhub', 'Denied') },
                 { value: 'withdrawn', label: t('teamhub', 'Withdrawn') },
+                // v4.11.18 — retired decisions. Two chips rather than one
+                // "Retired": a decision a newer one replaced and a decision
+                // somebody retired on its own are different answers to "why
+                // doesn't this apply any more", and the filter is where that
+                // question gets asked.
+                { value: 'superseded', label: t('teamhub', 'Superseded') },
+                { value: 'archived', label: t('teamhub', 'Archived') },
             ]
         },
 
@@ -1638,7 +2733,49 @@ export default {
             if (this.filterStatus === 'approved')   return t('teamhub', 'No approved decisions')
             if (this.filterStatus === 'denied')     return t('teamhub', 'No denied decisions')
             if (this.filterStatus === 'withdrawn')  return t('teamhub', 'No withdrawn decisions')
+            if (this.filterStatus === 'superseded') return t('teamhub', 'No superseded decisions')
+            if (this.filterStatus === 'archived')   return t('teamhub', 'No archived decisions')
             return t('teamhub', 'No decisions yet')
+        },
+
+        /**
+         * v4.11.23 — may this viewer add and edit the team's decision
+         * categories?
+         *
+         * Admin or owner, the same level Manage team → Decisions requires,
+         * because this is the same form and the server applies the same
+         * gate (`requireAdminLevel`). Read from the member list rather than
+         * from a capability flag, as `canActOn()` next door does.
+         */
+        canManageCategories() {
+            const m = this.members?.find(mem => mem.userId === this.currentUserId)
+            return !!m && m.level >= 8
+        },
+
+        /** The Review block's gate, mirroring `approvalReasonValid`. */
+        reviewReasonValid() {
+            const n = this.reviewReason.trim().length
+            return n > 0 && n <= this.reviewReasonMax
+        },
+
+        /**
+         * v4.11.18 — the review that is running on the selected decision, or
+         * null. One at a time, enforced by the service, so the newest open
+         * row is the only one there can be.
+         */
+        openReview() {
+            return this.reviews.find(r => r.status === 'open') || null
+        },
+
+        /**
+         * The decision that replaced a superseded one. A computed over the
+         * data field rather than the field itself, so the template never
+         * renders the link for a decision that is not superseded — which is
+         * what a stale value from a previous selection would do.
+         */
+        supersededByRow() {
+            if (!this.selected || this.selected.status !== 'superseded') return null
+            return this.supersededBy
         },
 
         emptyDescription() {
@@ -1779,9 +2916,16 @@ export default {
             // Session B: load task links when a decision is selected.
             if (id !== this.tasksDecisionId) {
                 this.tasksDecisionId = id
-                this.showLinkTaskForm = false
+                // v4.11.19 — both inline link forms are reset here, not just
+                // the task one. They share the Links section, so a form left
+                // open on the previous decision would reappear over the next
+                // one with the previous decision's half-typed URL in it.
+                this.showLinkTaskForm     = false
+                this.showLinkExternalForm = false
                 this.linkTaskPath     = ''
                 this.linkTaskLabel    = ''
+                this.linkExternalUrl   = ''
+                this.linkExternalLabel = ''
                 if (id) {
                     this.loadTasks(id)
                 } else {
@@ -1832,6 +2976,38 @@ export default {
             if (id !== this.approvalForDecisionId) {
                 this.approvalForDecisionId = id
                 this.approvalReason = ''
+                // v4.11.23 — same rule for the Review block's reason.
+                this.reviewReason = ''
+            }
+            // v4.11.18 — the review history, and the successor of a
+            // superseded decision. Both are per-decision fetches for the
+            // same reason as the proposal body: the list endpoint omits them
+            // because only this panel reads them.
+            if (id !== this.reviewsForDecisionId) {
+                this.reviewsForDecisionId = id
+                this.reviews      = []
+                this.supersededBy = null
+                this.supersedes   = null
+                this.supersedesSettledFor = null
+                if (id) {
+                    // Only where there can be something to show. An open or
+                    // withdrawn proposal has never been reviewed, and asking
+                    // would be a request per selection that always answers
+                    // the empty list.
+                    if (newVal.status === 'approved' || newVal.isRetired) {
+                        this.loadReviews(id)
+                    }
+                    // v4.11.31 — one fetch, both directions. The old
+                    // decision needs its successor, the new one needs what
+                    // it replaced, and `GET /decisions/{id}` carries both —
+                    // so the condition is "is this row either end of a
+                    // supersede" rather than two calls to the same URL.
+                    // `supersedesId` is on the list row already, which is
+                    // why this costs no extra request to find out.
+                    if (newVal.status === 'superseded' || newVal.supersedesId) {
+                        this.loadSupersedeLinks(id)
+                    }
+                }
             }
         },
 
@@ -2102,10 +3278,11 @@ export default {
          */
         async copyDecisionLink(d) {
             try {
-                const url = window.location.origin
-                    + generateUrl('/apps/teamhub')
-                    + `?team=${encodeURIComponent(this.currentTeamId)}`
-                    + `&decision=${encodeURIComponent(d.id)}`
+                // v4.11.12 — built by `decisionUrl()`, the same helper the
+                // service desk's *Link a decision* box reads a pasted link
+                // back with (`decisionFromUrl()`). One shape, two directions,
+                // one place: a link copied here is one the desk can paste.
+                const url = window.location.origin + decisionUrl(this.currentTeamId, d.id)
                 await navigator.clipboard.writeText(url)
                 showSuccess(t('teamhub', 'Decision link copied to clipboard'))
             } catch (err) {
@@ -2138,15 +3315,649 @@ export default {
             }
         },
 
-        // ── Supersede ───────────────────────────────────────────────
+        // ── Categories, from the landing grid — v4.11.23 ────────────
 
-        openSupersede(decision) {
-            this.supersedeTarget = decision
+        /** @param cat the category to edit, or null to create one. */
+        openCategoryDialog(cat) {
+            this.categoryDialogTarget = cat
+            this.categoryDialogOpen   = true
         },
 
-        confirmSupersede() {
-            this.$emit('propose-decision-superseding', this.supersedeTarget.id)
-            this.supersedeTarget = null
+        closeCategoryDialog() {
+            this.categoryDialogOpen   = false
+            this.categoryDialogTarget = null
+        },
+
+        /**
+         * Re-read rather than splice the server's answer into the grid: a
+         * category's approver list comes back resolved (an empty list
+         * becomes the team owner), and the landing tiles are sorted with the
+         * archive last. Both are the server's and the computed's business,
+         * not this handler's.
+         */
+        async onCategorySaved() {
+            await this.fetchLandingCategories()
+        },
+
+        // ── Category approvers on the landing grid — v4.11.19 ───────
+
+        /**
+         * The approvers to show on a category card, capped.
+         *
+         * Three is where a row of avatars stops reading as "these people"
+         * and starts reading as a crowd; the rest become a `+N`. Capping in
+         * one place means the count and the list cannot disagree.
+         *
+         * The uids come from `GET /decisions/manage/categories`, which the
+         * landing grid already loads — so this costs no request.
+         */
+        categoryApprovers(cat) {
+            return (cat.approvers || []).slice(0, this.APPROVER_AVATAR_CAP)
+        },
+
+        /** How many approvers the `+N` stands for. */
+        approverOverflow(cat) {
+            return Math.max(0, (cat.approvers || []).length - this.APPROVER_AVATAR_CAP)
+        },
+
+        /**
+         * Every approver by name, for the group's accessible label and the
+         * `+N`'s tooltip.
+         *
+         * **All of them, not the three on screen.** A screen reader
+         * announcing "Approvers: Inge, Jaap, Lieke" when there are five is
+         * worse than no label — the cap is a layout decision and should not
+         * reach the reading of it.
+         */
+        approverListLabel(cat) {
+            const names = (cat.approvers || []).map(uid => this.memberDisplayName(uid))
+            if (!names.length) {
+                return ''
+            }
+            // TRANSLATORS: accessible label on the row of approver avatars on a decision-category card
+            return t('teamhub', 'Approvers: {names}', { names: names.join(', ') })
+        },
+
+        // ── The Actions menu — v4.11.19 ─────────────────────────────
+
+        /**
+         * Run one menu action.
+         *
+         * A switch rather than putting the handler on the action object: the
+         * objects come from a computed, so a function on each one would be
+         * rebuilt on every re-render, and this keeps `panelActions` a plain
+         * description of *what is offered* with nothing executable in it.
+         *
+         * `copy-link`, `public` and `discussion` never arrive here — the first
+         * two are their own item types in the template and the third is a
+         * link. `copy-link` does, because it is an ordinary button.
+         */
+        runPanelAction(key) {
+            const d = this.selected
+            if (!d) return
+
+            switch (key) {
+            case 'edit':
+                this.startEditProposal(d)
+                break
+            case 'finalize':
+                this.onFinalizeProposal(d)
+                break
+            case 'schedule-meeting':
+                this.openApproverMeetingWizard(d)
+                break
+            case 'review-request':
+                this.openReviewRequest(d)
+                break
+            // `review-keep` and `review-archive` were handled here until
+            // v4.11.26. v4.11.23 moved both answers out of the menu and onto
+            // the page (§2.159 — the menu holds what is true of the decision
+            // whatever is happening to it), so `decisionPanelActions` has not
+            // produced either key since; the arms were dead and the JS suite
+            // asserts the menu never offers them.
+            case 'supersede':
+                this.openSupersede(d)
+                break
+            case 'archive':
+                this.openArchive(d)
+                break
+            case 'move-category':
+                this.openMoveCategory(d)
+                break
+            case 'link-decision':
+                this.openDecisionPicker()
+                break
+            case 'link-task':
+                // One form at a time in the Links section: opening this one
+                // closes the other, so the two cannot both claim the slot.
+                this.showLinkExternalForm = false
+                this.showLinkTaskForm     = true
+                this.focusLinkForm('linkTaskInput')
+                break
+            case 'link-external':
+                this.showLinkTaskForm     = false
+                this.showLinkExternalForm = true
+                this.focusLinkForm('linkExternalInput')
+                break
+            case 'create-task':
+                this.showCreateTaskModal = true
+                break
+            case 'copy-link':
+                this.copyDecisionLink(d)
+                break
+            default:
+                // An action in the list with no handler is a bug, not a no-op.
+                console.error('[TeamHub][TeamDecisionsView] unhandled panel action:', key)
+            }
+        },
+
+        /**
+         * Put the cursor in the form the menu just opened.
+         *
+         * The menu closes on click, so without this the focus ring lands back
+         * on the menu trigger and a keyboard user has to tab down to a field
+         * that appeared because of something they did. `$nextTick` because the
+         * field does not exist yet at the moment the flag flips.
+         */
+        focusLinkForm(ref) {
+            this.$nextTick(() => {
+                // NcTextField is a component, so the focusable element is the
+                // `input` inside its root — not the ref itself.
+                const input = this.$refs[ref]?.$el?.querySelector?.('input')
+                input?.focus()
+            })
+        },
+
+        /**
+         * Remove one row from the Links section, whichever kind it is.
+         *
+         * The three kinds live in three tables with three endpoints, and the
+         * row carries its kind — so the dispatch is here rather than in the
+         * template, where it had grown into a ternary that would not have
+         * survived a third kind.
+         */
+        removeLink(row) {
+            switch (row.kind) {
+            case 'internal':
+                this.removeDecisionLink(row.id)
+                break
+            case 'task':
+                this.deleteTaskLink(row.id)
+                break
+            case 'external':
+                this.deleteExternalLink(row.id)
+                break
+            }
+        },
+
+        // ── Review and retirement — v4.11.18 ────────────────────────
+
+        /**
+         * The reviews of a decision, newest first. Guarded by decision id:
+         * the selection can move while the request is in flight, and showing
+         * one decision's review under another's subject is worse than
+         * showing none (DESIGN §2.79).
+         */
+        async loadReviews(decisionId) {
+            if (!decisionId) return
+            this.reviewsLoading = true
+            try {
+                const { data } = await axios.get(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.currentTeamId}/decisions/${decisionId}/reviews`),
+                )
+                if (this.reviewsForDecisionId !== decisionId) return
+                this.reviews = Array.isArray(data?.items) ? data.items : []
+            } catch (err) {
+                // Silent, like the proposal-body fetch: what is lost is a
+                // banner beside a decision that renders correctly without
+                // it, so a toast would report something nobody can act on.
+                console.error('[TeamHub][TeamDecisionsView] loadReviews error:', err)
+                if (this.reviewsForDecisionId === decisionId) this.reviews = []
+            } finally {
+                if (this.reviewsForDecisionId === decisionId) this.reviewsLoading = false
+            }
+        },
+
+        /**
+         * Both ends of a supersede, in one fetch. Same guard.
+         *
+         * v4.11.31 — was `loadSupersededBy`, and resolved only the successor
+         * of a retired decision. `GET /decisions/{id}` now carries
+         * `supersedes` as well, so the decision that *did* the superseding
+         * can name what it replaced; one response, two fields, and either
+         * can be null.
+         */
+        async loadSupersedeLinks(decisionId) {
+            if (!decisionId) return
+            try {
+                const { data } = await axios.get(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.currentTeamId}/decisions/${decisionId}`),
+                )
+                if (this.reviewsForDecisionId !== decisionId) return
+                this.supersededBy = data?.supersededBy || null
+                this.supersedes   = data?.supersedes || null
+            } catch (err) {
+                console.error('[TeamHub][TeamDecisionsView] loadSupersedeLinks error:', err)
+            } finally {
+                // Settled either way, so the Links spinner stops. A failed
+                // fetch costs the Supersedes row, not the whole section.
+                if (this.reviewsForDecisionId === decisionId) {
+                    this.supersedesSettledFor = decisionId
+                }
+            }
+        },
+
+        openReviewRequest(decision) {
+            this.reviewRequestTarget = decision
+            this.reviewMotivation    = ''
+            // v4.11.30 — prefilled with what the decision says today, so the
+            // requester edits a decision rather than facing two blank boxes
+            // and guessing what shape an answer takes. The same choice the
+            // approver's dialog made in v4.11.26, for the same reason. An
+            // empty proposal is then one they deliberately cleared, which
+            // the server reads as "nothing proposed".
+            this.reviewProposedQuestion   = decision?.question || ''
+            this.reviewProposedAnswer     = decision?.selectedAnswer || ''
+            this.reviewProposedAttachment = null
+        },
+
+        closeReviewRequest() {
+            this.reviewRequestTarget      = null
+            this.reviewMotivation         = ''
+            this.reviewProposedQuestion   = ''
+            this.reviewProposedAnswer     = ''
+            this.reviewProposedAttachment = null
+        },
+
+        async submitReviewRequest() {
+            const decision   = this.reviewRequestTarget
+            const motivation = this.reviewMotivation.trim()
+            if (!decision || !motivation || this.requestingReview) return
+
+            // v4.11.30 — only sent when they differ from what the decision
+            // already says. A prefilled box the requester never touched is
+            // not a proposal, and sending it would hand the approver an
+            // *Approve as proposed* button that changes nothing — which the
+            // server then refuses, after they had clicked it.
+            const proposedQuestion = this.reviewProposedQuestion.trim()
+            const proposedAnswer   = this.reviewProposedAnswer.trim()
+            const payload = { motivation }
+            if (proposedQuestion && proposedQuestion !== (decision.question || '').trim()) {
+                payload.proposed_question = proposedQuestion
+            }
+            if (proposedAnswer && proposedAnswer !== (decision.selectedAnswer || '').trim()) {
+                payload.proposed_answer = proposedAnswer
+            }
+            if (this.reviewProposedAttachment?.fileId) {
+                payload.attachment_file_id = this.reviewProposedAttachment.fileId
+                payload.attachment_name    = this.reviewProposedAttachment.name
+            }
+
+            this.requestingReview = true
+            try {
+                await axios.post(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.currentTeamId}/decisions/${decision.id}/reviews`),
+                    payload,
+                )
+                showSuccess(t('teamhub', 'Review requested. The approvers have it in My Work.'))
+                this.closeReviewRequest()
+                // Re-read rather than push a row we built ourselves: the
+                // server decides what the review looks like, including the
+                // requester's display name.
+                //
+                // v4.11.21 — **and the audit trail.** The `review_requested`
+                // line was written server-side all along; this panel simply
+                // never re-read it, so requesting a review looked as though
+                // it had not been recorded. Every other write on this panel
+                // goes through `applyDecisionUpdate()`, which reloads the
+                // audit for you — this one returns a review rather than a
+                // decision and so had nothing to route through it.
+                await Promise.all([
+                    this.loadReviews(decision.id),
+                    this.loadAudit(decision.id),
+                    // v4.11.30 — an attachment on the request is copied into
+                    // the decision's proposal folder, so the Source list has
+                    // a file in it that was not there a second ago.
+                    payload.attachment_file_id ? this.loadSources(decision.id) : null,
+                ])
+            } catch (err) {
+                console.error('[TeamHub][TeamDecisionsView] submitReviewRequest error:', err)
+                showError(err?.response?.data?.error || t('teamhub', 'Could not request a review'))
+                // A 409 means somebody asked first. Re-read so the banner
+                // replaces the button instead of offering it again.
+                if (err?.response?.status === 409) {
+                    this.closeReviewRequest()
+                    await this.loadReviews(decision.id)
+                }
+            } finally {
+                this.requestingReview = false
+            }
+        },
+
+        /**
+         * Answer the open review from the decision panel. The same call the
+         * My Work row makes — an approver looking at the decision should not
+         * have to go to a queue to act on what is in front of them.
+         *
+         * `archived` retires the decision, so it confirms first: the
+         * consequence is a read-only record in another category, and nothing
+         * on the button says that.
+         *
+         * v4.11.26 — `wording` carries the new question and decision text
+         * for `accepted`, which the *Accept and reword* dialog collects.
+         * Every other outcome passes nothing and the server writes nothing
+         * from it.
+         *
+         * @param {string} outcome  'denied' | 'accepted' | 'kept' | 'archived'
+         * @param {?object} wording { question, answer } for `accepted`
+         * @return {Promise<boolean>} whether the server accepted it — the
+         *         dialog needs to know, because it stays open on a refusal
+         *         so the approver can fix the wording rather than retype it.
+         */
+        async onCompleteReview(outcome, wording = null) {
+            const decision = this.selected
+            const reason   = this.reviewReason.trim()
+            if (!decision || this.completingReview || !reason) return false
+
+            if (outcome === 'archived'
+                && !window.confirm(t('teamhub', 'Archive this decision? It moves to the team archive and becomes read-only. The record and its audit trail are kept.'))
+            ) {
+                return false
+            }
+
+            this.completingReview = true
+            try {
+                const { data } = await axios.post(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.currentTeamId}/decisions/${decision.id}/reviews/complete`),
+                    wording
+                        ? { outcome, reason, question: wording.question, answer: wording.answer }
+                        : { outcome, reason },
+                )
+                showSuccess(this.reviewOutcomeMessage(outcome))
+                this.reviewReason = ''
+                this.applyDecisionUpdate(data)
+                await this.loadReviews(decision.id)
+                return true
+            } catch (err) {
+                console.error('[TeamHub][TeamDecisionsView] onCompleteReview error:', err)
+                showError(err?.response?.data?.error || t('teamhub', 'Could not complete the review'))
+                return false
+            } finally {
+                this.completingReview = false
+            }
+        },
+
+        /**
+         * What to tell the approver afterwards. Four outcomes, and three of
+         * them leave the decision in force — but not in the same way, and
+         * "the decision stands" over a decision whose wording just changed
+         * would be the panel contradicting itself.
+         */
+        reviewOutcomeMessage(outcome) {
+            if (outcome === 'archived') return t('teamhub', 'Decision archived')
+            if (outcome === 'accepted') return t('teamhub', 'Decision reworded. It stays in force with its original approval.')
+            if (outcome === 'denied')   return t('teamhub', 'Review denied. The decision stands unchanged.')
+            return t('teamhub', 'Review completed. The decision stands.')
+        },
+
+        // ── Accept a review request, with the rewording — v4.11.26 ───
+
+        /**
+         * Open the rewording dialog, prefilled with what the decision says
+         * now.
+         *
+         * `selectedAnswer` is on the decision the panel already has — it is
+         * the wording the Final proposal block is rendering a few
+         * centimetres away — so there is nothing to fetch and no window in
+         * which the dialog could open empty and be saved over the top of.
+         */
+        openReviewAccept(decision) {
+            if (!decision) return
+            this.reviewAcceptTarget = decision
+            // v4.11.30 — **the requester's proposal is the starting point
+            // when there is one.** An approver who opens this dialog on a
+            // request that came with wording is editing that wording, not
+            // starting from the decision as it stands and retyping what they
+            // have already been handed. Field by field, because a request
+            // may propose new wording and leave the question alone.
+            const review = this.openReview
+            this.reviewAcceptQuestion = review?.proposedQuestion || decision.question || ''
+            this.reviewAcceptAnswer   = review?.proposedAnswer || decision.selectedAnswer || ''
+        },
+
+        /**
+         * Open the file a review requester put forward (v4.11.30).
+         *
+         * The same read-only viewer the Source list uses — it is the same
+         * kind of thing, a document belonging to this decision, and the
+         * review's copy lives in the same `.proposals/{id}/` folder. The
+         * mime type is not on the review row, so the viewer works it out
+         * from the name, which is what it already falls back to for a source
+         * file with no mime.
+         */
+        openReviewAttachment(review) {
+            if (!review?.attachmentFileId) return
+            this.openSourceFile({
+                file_id: review.attachmentFileId,
+                name:    review.attachmentName || String(review.attachmentFileId),
+                mime:    '',
+                size:    0,
+                is_proposal: false,
+            })
+        },
+
+        closeReviewAccept() {
+            this.reviewAcceptTarget   = null
+            this.reviewAcceptQuestion = ''
+            this.reviewAcceptAnswer   = ''
+        },
+
+        async submitReviewAccept() {
+            const question = this.reviewAcceptQuestion.trim()
+            const answer   = this.reviewAcceptAnswer.trim()
+            if (!this.reviewAcceptTarget || !question || !answer) return
+
+            const ok = await this.onCompleteReview('accepted', { question, answer })
+            // Left open on a refusal: the approver's new wording is in these
+            // two boxes and nowhere else, and closing the dialog would make
+            // them type it again to find out what was wrong with it.
+            if (ok) this.closeReviewAccept()
+        },
+
+        // ── Move to another category, from the Actions menu — v4.11.30 ──
+
+        /**
+         * Open the picker.
+         *
+         * The category list is fetched when it is not already here: the
+         * landing grid loads it, but an approver who followed a deep link
+         * straight to a decision never passed through the landing grid, and
+         * a dialog whose only control is an empty dropdown is worse than a
+         * moment's wait.
+         */
+        async openMoveCategory(decision) {
+            this.moveCategoryTarget = decision
+            this.moveCategoryChoice = null
+            if (!this.landingCategories.length) {
+                await this.fetchLandingCategories()
+            }
+        },
+
+        closeMoveCategory() {
+            this.moveCategoryTarget = null
+            this.moveCategoryChoice = null
+        },
+
+        async submitMoveCategory() {
+            const decision = this.moveCategoryTarget
+            // `:reduce` on the select, as the composer's category picker does,
+            // so the model is the category's name and not an option object.
+            const category = this.moveCategoryChoice
+            if (!decision || !category || this.movingCategory) return
+
+            this.movingCategory = true
+            try {
+                const { data } = await axios.post(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.currentTeamId}/decisions/${decision.id}/category`),
+                    { category },
+                )
+                showSuccess(t('teamhub', 'Decision moved to {category}', { category }))
+                this.closeMoveCategory()
+                // `applyDecisionUpdate` reloads the audit as a side effect,
+                // which is where the *Moved to another category* line is —
+                // the mistake v4.11.21 made by not routing a write through
+                // it, and v4.11.25 made by misspelling it.
+                this.applyDecisionUpdate(data)
+                // The decision has left the category the list is showing, so
+                // its row has to go with it. The detail panel stays open —
+                // the approver just moved this decision and the result of
+                // that is what they want to look at.
+                this.decisions = []
+                await this.loadPage(null)
+            } catch (err) {
+                console.error('[TeamHub][TeamDecisionsView] submitMoveCategory error:', err)
+                showError(err?.response?.data?.error || t('teamhub', 'Could not move this decision'))
+            } finally {
+                this.movingCategory = false
+            }
+        },
+
+        // ── Archive, from the Actions menu — v4.11.24 ───────────────
+
+        openArchive(decision) {
+            this.archiveTarget = decision
+            this.archiveReason = ''
+        },
+
+        closeArchive() {
+            this.archiveTarget = null
+            this.archiveReason = ''
+        },
+
+        async submitArchive() {
+            const decision = this.archiveTarget
+            const reason   = this.archiveReason.trim()
+            if (!decision || !reason || this.archiving) return
+
+            this.archiving = true
+            try {
+                const { data } = await axios.post(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.currentTeamId}/decisions/${decision.id}/archive`),
+                    { reason },
+                )
+                showSuccess(t('teamhub', 'Decision archived'))
+                this.closeArchive()
+                this.applyDecisionUpdate(data)
+            } catch (err) {
+                console.error('[TeamHub][TeamDecisionsView] submitArchive error:', err)
+                showError(err?.response?.data?.error || t('teamhub', 'Could not archive this decision'))
+            } finally {
+                this.archiving = false
+            }
+        },
+
+        // ── Supersede ───────────────────────────────────────────────
+
+        /**
+         * Open the picker, with the four most recent approved decisions
+         * already in it.
+         *
+         * Fetched rather than taken from the list on screen, because "the
+         * team's approved decisions" is not what the list is showing — that
+         * is filtered by whatever the viewer chose.
+         */
+        openSupersede(decision) {
+            this.supersedeTarget  = decision
+            this.supersedeQuery   = ''
+            this.supersedeOptions = []
+            this.supersedeError   = ''
+            this.searchSupersedeCandidates()
+            this.$nextTick(() => {
+                this.$refs.supersedeSearch?.$el?.querySelector?.('input')?.focus()
+            })
+        },
+
+        /**
+         * Debounced, like every other search-as-you-type in this app: one
+         * request per pause, not one per keystroke.
+         */
+        onSupersedeSearch() {
+            if (this.supersedeSearchId) clearTimeout(this.supersedeSearchId)
+            this.supersedeSearchId = setTimeout(() => {
+                this.supersedeSearchId = null
+                this.searchSupersedeCandidates()
+            }, 300)
+        },
+
+        /**
+         * Ask the server for at most four matches.
+         *
+         * Guarded by the dialog's own target: the dialog can be closed while
+         * a request is in flight, and writing results into a picker that is
+         * gone — or worse, into the next one — is the bug §2.79 recorded for
+         * the proposal body.
+         */
+        async searchSupersedeCandidates() {
+            const decision = this.supersedeTarget
+            if (!decision) return
+
+            const term = this.supersedeQuery.trim()
+            this.supersedeLoading = true
+            this.supersedeError   = ''
+            try {
+                const { data } = await axios.get(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.currentTeamId}/decisions/${decision.id}/supersede-options`),
+                    { params: term ? { q: term } : {} },
+                )
+                if (this.supersedeTarget?.id !== decision.id || this.supersedeQuery.trim() !== term) return
+                this.supersedeOptions = Array.isArray(data?.items) ? data.items : []
+            } catch (err) {
+                console.error('[TeamHub][TeamDecisionsView] searchSupersedeCandidates error:', err)
+                if (this.supersedeTarget?.id === decision.id) {
+                    this.supersedeOptions = []
+                    this.supersedeError = err?.response?.data?.error
+                        || t('teamhub', 'Could not search the approved decisions')
+                }
+            } finally {
+                if (this.supersedeTarget?.id === decision.id) this.supersedeLoading = false
+            }
+        },
+
+        closeSupersede() {
+            if (this.supersedeSearchId) {
+                clearTimeout(this.supersedeSearchId)
+                this.supersedeSearchId = null
+            }
+            this.supersedeTarget  = null
+            this.supersedeQuery   = ''
+            this.supersedeOptions = []
+            this.supersedeError   = ''
+        },
+
+        async confirmSupersede(supersededById) {
+            const decision = this.supersedeTarget
+            if (!decision || !supersededById || this.superseding) return
+
+            this.superseding = true
+            try {
+                const { data } = await axios.post(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.currentTeamId}/decisions/${decision.id}/supersede`),
+                    { supersededById },
+                )
+                showSuccess(t('teamhub', 'Decision superseded and moved to the archive'))
+                this.closeSupersede()
+                this.applyDecisionUpdate(data)
+                this.supersededBy = data?.supersededBy || null
+                this.supersedes   = data?.supersedes || null
+                // The response is this decision's own, so the Supersedes
+                // fetch is settled without making it.
+                this.supersedesSettledFor = decision.id
+            } catch (err) {
+                console.error('[TeamHub][TeamDecisionsView] confirmSupersede error:', err)
+                showError(err?.response?.data?.error || t('teamhub', 'Could not supersede this decision'))
+            } finally {
+                this.superseding = false
+            }
         },
 
         // ── Approve / Deny — Session H ──────────────────────────────
@@ -2603,6 +4414,40 @@ export default {
             }
         },
 
+        /**
+         * v4.11.12 — publish this decision to everybody signed in on this
+         * Nextcloud, or take it back into the team.
+         *
+         * The server is the authority on whether this account may: the
+         * checkbox is only rendered for somebody who holds the team's action
+         * level, and a 403 puts the switch back where it was rather than
+         * leaving the panel claiming something that did not happen.
+         */
+        async setPublic(value) {
+            if (!this.selected || this.settingPublic) return
+            const before = !!this.selected.isPublic
+            this.settingPublic = true
+            this.selected.isPublic = value
+            try {
+                const { data } = await axios.put(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.currentTeamId}/decisions/${this.selected.id}/public`),
+                    { public: value },
+                )
+                this.selected.isPublic = !!data?.isPublic
+                showSuccess(value
+                    ? t('teamhub', 'Decision published')
+                    : t('teamhub', 'Decision is team only again'))
+            } catch (err) {
+                console.error('[TeamHub][TeamDecisionsView] setPublic error:', err)
+                this.selected.isPublic = before
+                showError(t('teamhub', 'Failed to change who can read this decision: {error}', {
+                    error: err?.response?.data?.error || err.message,
+                }))
+            } finally {
+                this.settingPublic = false
+            }
+        },
+
         async deleteExternalLink(linkId) {
             if (!this.selected) return
             try {
@@ -3049,6 +4894,50 @@ export default {
                 proposal_updated:  t('teamhub', 'Edited proposal'),
                 // TRANSLATORS: audit event verb — the proposal was opened for discussion in Talk
                 shared_for_discussion: t('teamhub', 'Opened for discussion'),
+                // v4.11.18 — the review and retirement cycle. Justin: every
+                // step of a review is in the audit stream, so every one of
+                // them has a label here.
+                // TRANSLATORS: audit event verb — a team member asked the approvers to review the decision
+                review_requested: t('teamhub', 'Review requested'),
+                // TRANSLATORS: audit event verb — the category's review period came round
+                review_due:       t('teamhub', 'Review date reached'),
+                // TRANSLATORS: audit event verb — a reviewer looked and let the decision stand
+                review_kept:      t('teamhub', 'Kept after review'),
+                // v4.11.24 — the two answers to a *requested* review.
+                // TRANSLATORS: audit event verb — the approvers refused a review request; the decision stands
+                review_denied:    t('teamhub', 'Review denied'),
+                // TRANSLATORS: audit event verb — the approvers agreed the decision needs altering
+                review_accepted:  t('teamhub', 'Review accepted'),
+                // TRANSLATORS: audit event verb — the decision's wording was rewritten in place; it stayed approved throughout
+                revised:          t('teamhub', 'Wording revised'),
+                // v4.11.24 only, and nothing writes it any more (v4.11.26).
+                // The label stays so rows already in the trail still read as
+                // sentences — the same reason the panel still reads the old
+                // `note` key from before the reason was required.
+                // TRANSLATORS: audit event verb — the decision went back to open so its wording could be brought up to date
+                reopened:         t('teamhub', 'Reopened for redrafting'),
+                // TRANSLATORS: audit event verb — a reviewer retired the decision
+                review_archived:  t('teamhub', 'Archived after review'),
+                // TRANSLATORS: audit event verb — a newer decision took over
+                superseded:       t('teamhub', 'Superseded'),
+                // v4.11.31 — the same act read from the decision that did
+                // it. Justin: a supersede was visible on the superseded
+                // decision and nowhere on the one that superseded it.
+                // TRANSLATORS: audit event verb — this decision took over from an older one
+                supersedes:       t('teamhub', 'Superseded an earlier decision'),
+                // v4.11.31 — publishing, which `setPublic` has written since
+                // v4.11.12 into a vocabulary that did not list it, so every
+                // one of these rows was dropped. Labelled now that they land.
+                // TRANSLATORS: audit event verb — the decision was made readable by everyone on this Nextcloud
+                published:        t('teamhub', 'Made public'),
+                // TRANSLATORS: audit event verb — the decision was taken back out of public and is team-only again
+                unpublished:      t('teamhub', 'Made team-only'),
+                // TRANSLATORS: audit event verb — the record moved into the team archive
+                archived:         t('teamhub', 'Moved to archive'),
+                // v4.11.30 — refiled under a different category by an
+                // approver of the one it was in.
+                // TRANSLATORS: audit event verb — the decision was refiled under a different decision category
+                category_moved:   t('teamhub', 'Moved to another category'),
             }
             return map[ev.transition] || ev.transition
         },
@@ -3075,6 +4964,104 @@ export default {
             }
             if ((ev.transition === 'decision_linked' || ev.transition === 'decision_unlinked') && p.peer_title) {
                 return p.peer_title
+            }
+            // v4.11.18 — a review request carries the member's reasons, and a
+            // completion carries the reviewer's optional note. Both are the
+            // words somebody wrote, which is the whole value of the line.
+            if (ev.transition === 'review_requested' && (p.motivation || p.attachment_name)) {
+                // v4.11.30 — the file joins the motivation on the same line.
+                // A request that put a document forward said something the
+                // prose alone does not, and the motivation is required, so
+                // there is no row where the file would get a line of its own.
+                const parts = []
+                if (p.motivation) {
+                    parts.push(p.motivation)
+                }
+                if (p.attachment_name) {
+                    // TRANSLATORS: audit line — names the file the review requester attached
+                    parts.push(t('teamhub', 'Attached: {name}', { name: p.attachment_name }))
+                }
+                return parts.join(' · ')
+            }
+            if (['review_kept', 'review_archived', 'review_denied', 'review_accepted'].includes(ev.transition)
+                && (p.reason || p.note)) {
+                // v4.11.23 — the payload key became `reason` when it became
+                // required. `note` is still read so the rows written while
+                // it was optional keep rendering their text.
+                return t('teamhub', 'Reason: {reason}', { reason: p.reason || p.note })
+            }
+            if (ev.transition === 'revised') {
+                // v4.11.26 — the line that says what accepting did. The
+                // previous wording is only here: the decision row now holds
+                // the new text, so a trail that said "revised" and no more
+                // could not answer the question it invites.
+                const parts = []
+                if (p.previous_question) {
+                    // TRANSLATORS: audit line — what the decision's question said before it was reworded
+                    parts.push(t('teamhub', 'Previously: {question}', { question: p.previous_question }))
+                }
+                if (p.previous_answer) {
+                    parts.push(p.previous_answer)
+                }
+                // v4.11.30 — whose words these are, and the file they came
+                // from. *Reworded as proposed* is a different act from an
+                // approver writing their own text over a request, and the
+                // trail is the only place that distinction survives.
+                if (p.as_proposed) {
+                    // TRANSLATORS: audit line — the approver accepted the requester's wording without changing it
+                    parts.push(t('teamhub', 'As proposed in the review'))
+                }
+                if (p.attachment_name) {
+                    // TRANSLATORS: audit line — names the file the new wording came from
+                    parts.push(t('teamhub', 'From file: {name}', { name: p.attachment_name }))
+                }
+                return parts.join(' · ')
+            }
+            // v4.11.30 — both category names, because `category` on the row
+            // now holds only the second of the two and "moved" without them
+            // cannot answer the question it invites.
+            if (ev.transition === 'category_moved') {
+                if (p.from && p.to) {
+                    // TRANSLATORS: audit line — the decision was refiled from one category into another
+                    return t('teamhub', 'From {from} to {to}', { from: p.from, to: p.to })
+                }
+                if (p.to) {
+                    // TRANSLATORS: audit line — the decision had no category before it was refiled
+                    return t('teamhub', 'Moved into {to}', { to: p.to })
+                }
+                return ''
+            }
+            if (ev.transition === 'superseded' && p.superseded_by_title) {
+                // TRANSLATORS: audit line — names the decision that took over
+                return t('teamhub', 'Superseded by: {question}', { question: p.superseded_by_title })
+            }
+            // v4.11.31 — and the other end: what this decision replaced.
+            if (ev.transition === 'supersedes' && p.supersedes_title) {
+                // TRANSLATORS: audit line — names the older decision this one replaced
+                return t('teamhub', 'Supersedes: {question}', { question: p.supersedes_title })
+            }
+            // v4.11.31 — a decision reaching the archive is taken back out
+            // of public, and the line says it was the archiving that did it
+            // rather than somebody unticking the box.
+            if (ev.transition === 'unpublished' && p.reason === 'archived') {
+                // TRANSLATORS: audit line — the decision stopped being public because it was moved into the team archive, which is team-only
+                return t('teamhub', 'The archive is team-only')
+            }
+            if (ev.transition === 'archived') {
+                // v4.11.24 — an archive straight from the Actions menu
+                // carries a reason and no review beside it to explain
+                // itself, so both facts go on the line: why, and where
+                // from. A review's archive has its reason on its own
+                // `review_archived` line above.
+                const parts = []
+                if (p.reason) {
+                    parts.push(t('teamhub', 'Reason: {reason}', { reason: p.reason }))
+                }
+                if (p.from_category) {
+                    // TRANSLATORS: audit line — the category the decision was decided under before it was archived
+                    parts.push(t('teamhub', 'Archived from {category}', { category: p.from_category }))
+                }
+                return parts.join(' · ')
             }
             return ''
         },
@@ -3291,6 +5278,9 @@ export default {
                 approved:   t('teamhub', 'Approved'),
                 denied:     t('teamhub', 'Denied'),
                 withdrawn:  t('teamhub', 'Withdrawn'),
+                // v4.11.18 — the two retirement states.
+                superseded: t('teamhub', 'Superseded'),
+                archived:   t('teamhub', 'Archived'),
                 // Legacy values that may still appear in DB for old rows
                 proposed:   t('teamhub', 'Open'),
                 decided:    t('teamhub', 'Approved'),
@@ -3568,7 +5558,13 @@ export default {
 }
 
 /* Category card — horizontal list item */
+/* v4.11.19 — the card is the <li> now, not the button inside it: its
+   approver avatars are their own interactive elements and could not live
+   inside one. The button stretches over the whole card through an ::after,
+   so the click target is unchanged, and hover and focus moved up here with
+   the border they were drawing. */
 .th-dv__cat-card {
+    position: relative;
     display: flex;
     align-items: center;
     gap: 12px;
@@ -3577,17 +5573,114 @@ export default {
     background: var(--color-main-background);
     border: 1px solid var(--color-border);
     border-radius: var(--border-radius-element);
-    cursor: pointer;
-    text-align: start;
-    transition: border-color var(--animation-quick), background var(--animation-quick);
 }
+
+/* The open action. Transparent and unpadded — the card draws the surface;
+   this only has to be the thing you click and the thing you tab to. */
+.th-dv__cat-card-main {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 0;
+    background: none;
+    border: none;
+    text-align: start;
+    cursor: pointer;
+    color: inherit;
+    font: inherit;
+}
+
+/* Stretched over the card, so the padding and the chevron are clickable
+   too. The avatars sit above it — see below. */
+.th-dv__cat-card-main::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+}
+/* Hover follows the pointer anywhere on the card; the focus ring follows
+   the button, because that is what the keyboard actually lands on. */
 .th-dv__cat-card:hover {
     border-color: var(--color-primary-element);
     background: var(--color-background-hover);
 }
-.th-dv__cat-card:focus-visible {
+.th-dv__cat-card:focus-within {
+    border-color: var(--color-primary-element);
+}
+.th-dv__cat-card-main:focus-visible::after {
     outline: 2px solid var(--color-primary-element);
     outline-offset: 2px;
+}
+
+/* v4.11.24 — the search field and Add category share one line. The field
+   takes the space; the button keeps its own width and does not shrink into
+   an ellipsis on a narrow panel. */
+.th-dv__landing-top {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.th-dv__landing-top .th-dv__landing-search-wrap {
+    flex: 1 1 220px;
+    min-width: 0;
+}
+
+.th-dv__landing-add {
+    flex: 0 0 auto;
+}
+
+/* ── Approvers on the card, and the card's own menu ──
+   Both sit above the stretched overlay, or clicking either would open the
+   category instead. */
+.th-dv__cat-card-menu {
+    position: relative;
+    z-index: 1;
+    flex: 0 0 auto;
+}
+
+.th-dv__cat-card-approvers {
+    position: relative;
+    z-index: 1;
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+}
+
+/* Overlapped, so four avatars cost the width of about two and a half and
+   the row still reads as one group. The inline-start margin is logical, so
+   the overlap falls the right way in RTL. */
+.th-dv__cat-card-avatar + .th-dv__cat-card-avatar,
+.th-dv__cat-card-avatar + .th-dv__cat-card-more {
+    margin-inline-start: -6px;
+}
+
+/* A ring in the card's own background separates overlapping avatars
+   without a border that would change their size. */
+.th-dv__cat-card-avatar,
+.th-dv__cat-card-more {
+    box-shadow: 0 0 0 2px var(--color-main-background);
+    border-radius: 50%;
+}
+.th-dv__cat-card:hover .th-dv__cat-card-avatar,
+.th-dv__cat-card:hover .th-dv__cat-card-more {
+    box-shadow: 0 0 0 2px var(--color-background-hover);
+}
+
+.th-dv__cat-card-more {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    background: var(--color-background-dark);
+    color: var(--color-text-maxcontrast);
+    font-size: var(--th-font-meta);
+    line-height: 1;
 }
 
 /* Icon bubble — decorative surface, primary icon inside carries the
@@ -3635,7 +5728,11 @@ export default {
     opacity: 0;
     transition: opacity var(--animation-quick);
 }
-.th-dv__cat-card:hover .th-dv__cat-card-chevron { opacity: 1; }
+.th-dv__cat-card:hover .th-dv__cat-card-chevron,
+/* v4.11.19 — and on keyboard focus, which it never did. The chevron is the
+   only thing saying the card opens, and somebody tabbing through had no
+   way to know. */
+.th-dv__cat-card:focus-within .th-dv__cat-card-chevron { opacity: 1; }
 
 /* Decision search-result category tag (inline on card meta)
    v3.100.14: full-saturation category tag per SKILLS.md (was 10% mix). */
@@ -4002,15 +6099,38 @@ export default {
     margin-inline-start: 0; /* spacing now handled by parent gap */
 }
 
-.th-dv__detail-share {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 32px;
+/* v4.11.19 — .th-dv__detail-share is gone with the standalone copy-link
+   icon button; Copy link is a menu item. The menu itself needs no geometry —
+   NcActions brings its own trigger — only the guarantee that it does not get
+   squeezed by a long status pill. */
+.th-dv__detail-menu {
     flex-shrink: 0;
 }
 
 /* Question heading */
+/* v4.11.12 — the public-record row */
+.th-dv__detail-public {
+    display: flex;
+    flex-direction: column;
+    gap: var(--th-space-xs, 4px);
+    margin-block: var(--th-space-md, 12px);
+    padding: var(--th-space-sm, 8px) var(--th-space-lg, 16px);
+    background: var(--color-background-dark);
+    border-radius: var(--border-radius-element);
+}
+
+.th-dv__detail-public-state {
+    margin: 0;
+    font-size: var(--th-font-body);
+    font-weight: 600;
+}
+
+.th-dv__detail-public-hint {
+    margin: 0;
+    color: var(--color-text-maxcontrast);
+    font-size: var(--th-font-meta);
+}
+
 .th-dv__detail-question {
     font-size: var(--th-font-body);
     font-weight: 600;
@@ -4206,6 +6326,95 @@ export default {
     gap: 4px;
 }
 
+/* ── v4.11.18 — retirement and review ──
+   Both blocks are NcNoteCards, so the card's own padding, border and colour
+   come from Nextcloud. What is left is the spacing between the lines inside
+   one, which the component does not and should not decide. */
+.th-dv__detail-retired,
+.th-dv__detail-review {
+    margin: 0 0 16px;
+}
+
+.th-dv__detail-retired-line,
+.th-dv__detail-review-line {
+    margin: 0;
+    line-height: 1.4;
+}
+
+.th-dv__detail-retired-line + .th-dv__detail-retired-line {
+    margin-block-start: 4px;
+}
+
+/* A raw <button> that reads as a link: the documented carve-out in
+   /ui-standards is for exactly this — an inline affordance inside a sentence,
+   where NcButton's chrome would break the line. Focus ring kept. */
+.th-dv__detail-retired-link {
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--color-primary-element);
+    font: inherit;
+    text-align: start;
+    text-decoration: underline;
+    cursor: pointer;
+}
+
+.th-dv__detail-retired-link:hover {
+    color: var(--color-primary-element-hover);
+}
+
+.th-dv__detail-retired-link:focus-visible {
+    outline: 2px solid var(--color-primary-element);
+    outline-offset: 2px;
+    border-radius: var(--border-radius-small);
+}
+
+.th-dv__detail-review-quote {
+    margin: 8px 0 0;
+    padding-inline-start: 12px;
+    border-inline-start: 2px solid var(--color-border-dark);
+    color: var(--color-text-maxcontrast);
+    white-space: pre-wrap;
+}
+
+/* v4.11.30 — what the requester is asking the decision to say, inside the
+   running-review banner. Set apart from the motivation above it by a label
+   and a rule, because the two are different kinds of statement: one is why
+   somebody asked, the other is what they want it to say. */
+.th-dv__review-proposal {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--th-space-xs);
+    margin-block-start: var(--th-space-md);
+    padding-block-start: var(--th-space-sm);
+    border-block-start: 1px solid var(--color-border);
+}
+
+.th-dv__review-proposal-label {
+    font-size: var(--th-font-meta);
+    font-weight: 600;
+    color: var(--color-text-maxcontrast);
+}
+
+.th-dv__review-proposal-question {
+    margin: 0;
+    font-weight: 600;
+}
+
+/* v4.11.19 — .th-dv__detail-review-actions is gone: Keep and Archive moved
+   into the Actions menu, and the note card is prose again. */
+
+.th-dv__detail-review-line + .th-dv__detail-review-line {
+    margin-block-start: 4px;
+}
+
+.th-dv__detail-review-due {
+    margin: 0 0 16px;
+    font-size: var(--th-font-meta);
+    color: var(--color-text-maxcontrast);
+}
+
 .th-dv__detail-section-label {
     font-size: var(--th-font-micro);
     font-weight: 700;
@@ -4378,6 +6587,16 @@ export default {
     margin: 0;
 }
 
+/* v4.11.19 — the one line that replaced the Schedule meeting button, telling
+   an approver where it went. Meta weight, because it is an aside beside two
+   buttons that are not. */
+.th-dv__approval-hint {
+    margin: 8px 0 0;
+    font-size: var(--th-font-meta);
+    color: var(--color-text-maxcontrast);
+    line-height: 1.4;
+}
+
 .th-dv__approval-counter--warn {
     color: var(--color-warning-text);
     font-weight: 600;
@@ -4433,8 +6652,9 @@ export default {
    Pills are solid-filled (no transparency / soft tints) per design.
    ────────────────────────────────────────────────────────────────────── */
 
-/* Container blocks reuse one shared geometry. */
-.th-dv__detail-tasks,
+/* Container blocks reuse one shared geometry. v4.11.19 — .th-dv__detail-tasks
+   went with the separate Linked-tasks section; its rows live in the Links
+   list now and use .th-dv__link-* like every other kind. */
 .th-dv__detail-dec-links,
 .th-dv__detail-meetings {
     display: flex;
@@ -4458,35 +6678,11 @@ export default {
     gap: 8px;
 }
 
-/* ── Task completion status pill ─────────────────────────────────────────
-   Shown only for Deck card links where isDone is non-null.
-   "Open" = grey neutral; "Complete" = green success tone.
-   Hard-contrast text ensures WCAG AA against white pill backgrounds. */
-.th-dv__task-status-pill {
-    flex: 0 0 auto;
-    display: inline-flex;
-    align-items: center;
-    padding: 1px 8px;
-    border-radius: var(--border-radius-container);
-    font-size: var(--th-font-micro);
-    font-weight: 600;
-    line-height: 1.6;
-    white-space: nowrap;
-}
-
-.th-dv__task-status-pill--open {
-    background: var(--color-background-dark);
-    color: var(--color-text-maxcontrast);
-    border: 1px solid var(--color-border);
-}
-
-/* v3.100.16: full-saturation success pill per SKILLS.md (was raw hex
-   #e6f4ec/#1a6633/#b3dcc4 — a soft green tint that ignored the theme). */
-.th-dv__task-status-pill--done {
-    background: var(--color-success);
-    color: var(--color-success-text);
-    border: 1px solid var(--color-success);
-}
+/* v4.11.19 — .th-dv__task-status-pill* is gone. A linked Deck card's
+   Complete / Open state is a status pill now, reusing
+   .th-dv__link-pill--status-approved and --status-open: it sits in the same
+   row as a linked decision's status and had no business carrying a second
+   shape and a second pair of colours for the same idea. */
 
 .th-dv__link-row {
     flex: 1 1 auto;
@@ -4601,13 +6797,45 @@ export default {
 .th-dv__link-pill--kind-internal {
     background: var(--color-primary-element);
 }
+/* v4.11.19 — a task. `--color-primary-element-hover` rather than a new
+   colour: the three kind pills have to be told apart at a glance, and this is
+   a shade of the same primary the Decision pill uses, which reads as "also in
+   this Nextcloud" next to the neutral External pill. Deliberately not
+   `--color-warning` or `--color-success` — a task is neither good news nor
+   bad, and a state colour here would compete with the status pill beside it.
+   Light pill text (`--color-main-background`, from the base rule) holds on
+   it, which is why a `-light` shade was not an option. */
+.th-dv__link-pill--kind-task {
+    background: var(--color-primary-element-hover);
+}
 .th-dv__link-pill--kind-external {
     background: var(--color-text-maxcontrast);
 }
+/* v4.11.31 — the Supersedes pill. `--color-main-text`, the strongest neutral
+   NC has, with the base rule's `--color-main-background` ink: it inverts in
+   dark mode like the External pill does, and it is the one fill that reads as
+   *structural* beside three pills that name a kind of thing linked. This row
+   is not a kind of attachment — it is the lifecycle — so it must not look
+   like a fourth sibling of Decision / Task / External.
+   Deliberately not a state colour: replacing a decision is neither good news
+   nor bad, and a state fill here would compete with the status pill next to
+   it (the same reasoning as the Task pill above). */
+.th-dv__link-pill--kind-supersedes {
+    background: var(--color-main-text);
+}
+/* v4.11.31 — the two retired statuses, written out rather than left to the
+   base rule's neutral. They are reachable on a link row now that the
+   Supersedes row points at a superseded decision, and `decisionStatusTone()`
+   spells them out for the same reason: a retired decision is a record and not
+   a problem, so it must not pick up `--color-error` if somebody later
+   reorders these rules. */
+.th-dv__link-pill--status-superseded,
+.th-dv__link-pill--status-archived {
+    background: var(--color-text-maxcontrast);
+}
 
-/* Actions row in the Linked decisions section: holds both
-   "Link decision" and "Link external decision" side by side, and the
-   inline external-link form when open. */
+/* v4.11.19 — holds only the inline form a menu item opened; the four
+   *Link …* buttons are in the Actions menu. */
 .th-dv__link-actions-row {
     display: flex;
     flex-direction: column;
@@ -4643,12 +6871,6 @@ export default {
     font-size: var(--th-font-meta);
 }
 
-.th-dv__link-actions {
-    margin-top: 4px;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-}
 
 /* Tasks-specific loading + inline form (Session B) — kept */
 .th-dv__tasks-loading,
@@ -4679,114 +6901,162 @@ export default {
 .th-dv__tasks-link-btns { display: flex; gap: 6px; }
 
 /* ── Session C: decision picker modal ── */
-.th-dv__dec-picker {
-    padding: 16px;
+/* ── Dialogs (v4.11.19) ──
+   One set of rules for the three dialogs on this panel: Request a review,
+   Supersede, and Link a decision. They replaced `.th-dv__dec-picker*` and a
+   `.th-dv-modal*` set that had **no rules at all** — four class names used
+   in a template and defined nowhere, which is why 4.11.18's review form
+   rendered as a stack of unstyled elements.
+
+   `NcDialog` owns the frame: the heading, the padding around the content,
+   the scrolling and the button row. What is left here is the inside of the
+   slot, and deliberately nothing that the dialog already decides. */
+.th-dv-dialog {
     display: flex;
     flex-direction: column;
     gap: 12px;
-    min-width: 360px;
-    max-width: 520px;
 }
 
-.th-dv__dec-picker-hint {
+.th-dv-dialog__intro {
     margin: 0;
+    line-height: 1.4;
+}
+
+/* v4.11.21 — `.th-dv-dialog__quote` is gone with the quoted question. You
+   opened the dialog from the decision, so repeating its wording back was a
+   paragraph telling you something you had just clicked on. */
+
+.th-dv-dialog__field {
+    width: 100%;
+}
+
+/* v4.11.30 — the optional proposal inside the review-request dialog. A
+   fieldset because the three controls answer one question together, and a
+   border because it is the part of the dialog the requester may skip: a
+   boundary says "this is a section" where whitespace alone reads as more of
+   the same form. */
+.th-dv-dialog__fieldset {
+    display: flex;
+    flex-direction: column;
+    gap: var(--th-space-sm);
+    margin: 0;
+    padding: var(--th-space-md);
+    border: 2px solid var(--color-border);
+    border-radius: var(--th-radius-card);
+}
+
+.th-dv-dialog__legend {
+    padding-inline: var(--th-space-xs);
+    font-size: var(--th-font-body);
+    font-weight: 600;
+}
+
+.th-dv-dialog__legend-hint,
+.th-dv-dialog__hint {
+    margin: 0;
+    font-size: var(--th-font-meta);
+    line-height: var(--th-line-height-body);
     color: var(--color-text-maxcontrast);
-    font-size: 0.9em;
 }
 
-.th-dv__dec-picker-search {
+.th-dv-dialog__label {
+    font-size: var(--th-font-meta);
+    font-weight: 500;
+    color: var(--color-text-maxcontrast);
+}
+
+.th-dv-dialog__loading {
     display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 0;
+    color: var(--color-text-maxcontrast);
+    font-size: var(--th-font-meta);
 }
 
-.th-dv__dec-picker-input {
-    flex: 1 1 auto;
-}
-
-.th-dv__dec-picker-loading {
-    display: flex;
-    justify-content: center;
-    padding: 16px 0;
-}
-
-.th-dv__dec-picker-list {
+/* At most four results, so no scroller and no max-height: a list that
+   cannot overflow should not look as though it might. */
+.th-dv-dialog__results {
     list-style: none;
     padding: 0;
     margin: 0;
-    max-height: 320px;
-    overflow-y: auto;
     display: flex;
     flex-direction: column;
     gap: 4px;
 }
 
-.th-dv__dec-picker-item-btn {
+/* A raw <button> rather than NcButton: this is a list row, which is the
+   documented carve-out in /ui-standards — NcButton's chrome would make four
+   results look like four primary actions. Focus ring kept. */
+.th-dv-dialog__result {
     width: 100%;
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 8px 8px;
+    gap: 12px;
+    padding: 8px;
     background: transparent;
     border: 1px solid transparent;
-    border-radius: var(--border-radius-small);
+    border-radius: var(--border-radius-element);
     text-align: start;
     cursor: pointer;
     color: var(--color-main-text);
+    font: inherit;
 }
 
-.th-dv__dec-picker-item-btn:hover {
+.th-dv-dialog__result:hover {
     background: var(--color-background-hover);
     border-color: var(--color-border);
 }
 
-.th-dv__dec-picker-item-btn:focus-visible {
+.th-dv-dialog__result:focus-visible {
     background: var(--color-background-hover);
-    border-color: var(--color-border);
     outline: 2px solid var(--color-primary-element);
     outline-offset: 1px;
 }
 
-.th-dv__dec-picker-item-btn[disabled] {
+.th-dv-dialog__result[disabled] {
     opacity: 0.6;
     cursor: progress;
 }
 
-.th-dv__dec-picker-item-title {
+.th-dv-dialog__result-icon {
+    flex: 0 0 auto;
+    color: var(--color-text-maxcontrast);
+}
+
+.th-dv-dialog__result-text {
     flex: 1 1 auto;
     min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.th-dv-dialog__result-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    line-height: 1.3;
+}
+
+.th-dv-dialog__result-meta {
+    font-size: var(--th-font-meta);
+    color: var(--color-text-maxcontrast);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
-.th-dv__dec-picker-item-status {
-    flex: 0 0 auto;
-    font-size: 0.75em;
-    padding: 1px 8px;
-    border-radius: var(--border-radius-element);
-    background: var(--color-background-darker);
-    color: var(--color-text-maxcontrast);
-    text-transform: capitalize;
-}
-
-.th-dv__dec-picker-item-status--approved,
-.th-dv__dec-picker-item-status--decided {
-    background: var(--color-success);
-    color: var(--color-success-text);
-}
-
-.th-dv__dec-picker-item-status--denied,
-.th-dv__dec-picker-item-status--withdrawn {
-    background: var(--color-error);
-    color: var(--color-error-text);
-}
-
-.th-dv__dec-picker-empty {
+/* NcEmptyContent sizes itself for a page; inside a dialog it needs reining
+   in or it pushes the buttons off the bottom. */
+.th-dv-dialog__empty {
     margin: 0;
-    padding: 16px 0;
-    text-align: center;
-    color: var(--color-text-maxcontrast);
-    font-size: 0.9em;
+    padding: 8px 0;
 }
+
+/* v4.11.21 — `.th-dv-dialog__hint` went with the "showing the four best
+   matches" line. A list of four with a search box above it does not need a
+   sentence explaining that it is a list of four. */
 
 /* ── Audit timeline (Session J) ── */
 .th-dv__detail-audit {
@@ -4867,6 +7137,12 @@ export default {
 .th-dv__audit-item--approved  .th-dv__audit-dot { background: var(--color-success-text); }
 .th-dv__audit-item--denied    .th-dv__audit-dot { background: var(--color-error-text); }
 .th-dv__audit-item--withdrawn .th-dv__audit-dot { background: var(--color-text-maxcontrast); opacity: 0.6; }
+/* v4.11.26 — the decision was reworded and stayed in force, so the dot is
+   the primary element's: something happened to the record, and it was
+   neither an approval nor a refusal. Every transition without a rule of its
+   own falls back to the default dot, which is why only the ones that mean
+   something different are listed here. */
+.th-dv__audit-item--revised   .th-dv__audit-dot { background: var(--color-primary-element); }
 
 .th-dv__audit-body {
     flex: 1;

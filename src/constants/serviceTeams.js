@@ -472,6 +472,15 @@ export const QUEUE_TAB = {
 
 export const QUEUE_TABS = [QUEUE_TAB.NEW, QUEUE_TAB.CLAIMED, QUEUE_TAB.WITH_REQUESTER, QUEUE_TAB.CLOSED]
 
+/**
+ * How many closed requests the widget shows (v4.11.7, Justin 2026-09-30).
+ * *Closed* is a glance at what the desk just finished, not its history: the
+ * rest is in the grid behind *View all requests*. The server still bounds
+ * the list by `WorkflowEngine::CLOSED_WINDOW_DAYS`, so this only trims what
+ * arrives.
+ */
+export const CLOSED_PREVIEW = 5
+
 export function queueTabLabel(tab) {
 	switch (tab) {
 	case QUEUE_TAB.NEW:
@@ -484,8 +493,8 @@ export function queueTabLabel(tab) {
 		// TRANSLATORS: queue widget tab - the team's open requests that wait for the person who asked (a step of theirs, or their confirmation)
 		return t('teamhub', 'With requester')
 	default:
-		// TRANSLATORS: queue widget tab - requests the team finished in the last 30 days
-		return t('teamhub', 'Closed')
+		// TRANSLATORS: queue widget tab - the handful of requests the team finished most recently
+		return t('teamhub', 'Recently closed')
 	}
 }
 
@@ -516,7 +525,9 @@ export function queueTabRows(queue, tab) {
 	case QUEUE_TAB.WITH_REQUESTER:
 		return queue?.[QUEUE_WITH_OTHERS] || []
 	default:
-		return queue?.closed || []
+		// The most recently closed few; `closedForDesk()` already sorts
+		// newest first.
+		return (queue?.closed || []).slice(0, CLOSED_PREVIEW)
 	}
 }
 

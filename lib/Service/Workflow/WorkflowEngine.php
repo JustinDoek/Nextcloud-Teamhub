@@ -9,6 +9,8 @@ use OCA\TeamHub\Db\WorkflowInstanceMapper;
 use OCA\TeamHub\Db\WorkflowParticipant;
 use OCA\TeamHub\Db\WorkflowParticipantMapper;
 use OCA\TeamHub\Db\WorkflowAttachmentMapper;
+use OCA\TeamHub\Db\WorkflowDecision;
+use OCA\TeamHub\Db\WorkflowDecisionMapper;
 use OCA\TeamHub\Db\WorkflowStep;
 use OCA\TeamHub\Db\WorkflowStepMapper;
 use OCA\TeamHub\Exception\AccessDeniedException;
@@ -18,12 +20,15 @@ use OCA\TeamHub\Exception\ValidationException;
 use OCA\TeamHub\Exception\WorkflowRateLimitException;
 use OCA\TeamHub\Exception\WorkflowTransitionException;
 use OCA\TeamHub\Service\AuditService;
+use OCA\TeamHub\Service\DecisionService;
 use OCA\TeamHub\Service\ServiceTeam\ServiceTeamService;
 use OCA\TeamHub\Workflow\IWorkflowDefinition;
+use OCA\TeamHub\Workflow\IWorkflowDefinitionActionPolicy;
 use OCA\TeamHub\Workflow\IWorkflowDefinitionHooks;
 use OCA\TeamHub\Workflow\IWorkflowClosableByDesk;
 use OCA\TeamHub\Workflow\IWorkflowDefinitionEndHook;
 use OCA\TeamHub\Workflow\IWorkflowDefinitionReference;
+use OCA\TeamHub\Workflow\IWorkflowDefinitionSource;
 use OCA\TeamHub\Workflow\IWorkflowSystemStarted;
 use OCA\TeamHub\Workflow\WorkflowActor;
 use OCA\TeamHub\Workflow\WorkflowAttachmentVisibility;
@@ -224,6 +229,15 @@ class WorkflowEngine {
         // Optional so an engine built without it (the unit tests) simply
         // takes no files.
         private ?WorkflowShareService       $shares = null,
+        // v4.11.12 — the decisions a service request points at. Optional for
+        // the same reason as the paperclip: an engine built without them
+        // simply reports no decisions and refuses to link one, which is what
+        // a caller that never configured them should get.
+        private ?WorkflowDecisionMapper     $decisionLinks = null,
+        // Asked, never told. The engine stores that a request points at a
+        // decision; whether a given reader may open it, and what its question
+        // is, are answered by the Decisions module against that reader.
+        private ?DecisionService            $decisions = null,
     ) {
     }
 
@@ -1003,6 +1017,259 @@ class WorkflowEngine {
     }
 
     /**
+     * The decisions one request points at (v4.11.12) — the Decisions column
+     * of the desk's request grid, and what the two verbs below return.
+     *
+     * Every eligible agent of the desk may read the list: the team is the
+     * desk. **Reading a link is not reading the decision** — each row says
+     * whether this reader may open it (`canOpen`) and carries the question
+     * only when they may, so an agent who is not a member of the team can see
+     * that a request was decided without being handed the decision's words.
+     * A link to a decision that has been deleted since resolves to nothing
+     * and is left out.
+     *
+     * Closed requests included on purpose: the grid is the desk's whole
+     * history, and the decision behind a request answered last March is
+     * exactly what somebody looking that far back came for.
+     *
+     * @return array<int, array<string, mixed>>
+     * @throws AccessDeniedException|NotFoundException
+     */
+    public function listRequestDecisions(int $id, string $uid): array {
+        $this->serviceTeams->requireLicence();
+        $instance = $this->loadVisible($id);
+        $this->requireDeskMember($uid, $this->steps->findByInstance($id));
+        return $this->decisionsOf([(int)$instance->getId()], $uid)[(int)$instance->getId()] ?? [];
+    }
+
+    /**
+     * Point a request at a decision of the desk's own, in the conversation
+     * (v4.11.12, Justin 2026-09-30).
+     *
+     * **This is something the desk says to the requester**, not a note it
+     * keeps: the link is posted into the request's conversation, beside the
+     * messages, so it is read where the work is being done. Three rules
+     * follow from that, and each is checked here rather than in the client:
+     *
+     *   - **The desk's own decision.** It lives in the *service team's*
+     *     Decisions module; any other team's is refused. A request is worked
+     *     by the desk, so the desk is the team that can be held to the
+     *     decision, and a link to somebody else's record would put a record
+     *     the desk does not own on its own queue.
+     *   - **Approved only** (Justin). A proposal still being argued is not an
+     *     answer to a request, and a request pointed at one would have to be
+     *     re-read every time the argument moved.
+     *   - **Public only.** The requester reads this conversation, and a
+     *     public decision is precisely the one they may open — the whole
+     *     reason the flag exists. Linking a team-internal decision would put
+     *     a pill in front of somebody who cannot follow it.
+     *
+     * Who may link: **whoever is writing to the requester** — the claimant,
+     * or an admin of the desk (`messageSide() === 'desk'`, the same answer
+     * that decides whether the message box is there at all). An unclaimed
+     * request is claimed first, as it is before any other word to the
+     * requester.
+     *
+     * Linking grants nobody anything: what makes the decision readable is its
+     * own `is_public` flag, set in the Decisions module.
+     *
+     * @return array<int, array<string, mixed>> the request's decisions after the link
+     * @throws AccessDeniedException|NotFoundException|ValidationException|WorkflowTransitionException
+     */
+    public function linkDecision(int $id, string $uid, int $decisionId): array {
+        $this->serviceTeams->requireLicence();
+        if ($this->decisionLinks === null || $this->decisions === null) {
+            throw new WorkflowTransitionException($this->l->t('Decisions are not available on this instance.'));
+        }
+        if ($decisionId < 1) {
+            throw new ValidationException($this->l->t('Name the decision to link.'));
+        }
+        return $this->transactional(function () use ($id, $uid, $decisionId): array {
+            [$instance, $steps] = $this->loadOpen($id);
+            $deskId = $this->serviceTeamOf($steps);
+            if ($deskId === '' || $this->messageSide($uid, $instance, $steps) !== 'desk') {
+                throw new AccessDeniedException($this->l->t('Only the team member who claimed the request can link a decision to it.'));
+            }
+            $step = $this->conversationStep($steps) ?? $this->requireServiceStep($uid, $instance, $steps);
+
+            $summary = $this->decisions->summariesForReader([$decisionId], $uid)[$decisionId] ?? null;
+            if ($summary === null) {
+                throw new NotFoundException($this->l->t('That decision no longer exists.'));
+            }
+            if ((string)($summary['teamId'] ?? '') !== $deskId) {
+                throw new ValidationException($this->l->t('A request can only point at a decision of the service team handling it.'));
+            }
+            if (($summary['canOpen'] ?? false) !== true) {
+                throw new AccessDeniedException($this->l->t('You cannot open that decision, so you cannot link it.'));
+            }
+            // 'decided' is the pre-4.5.x spelling of 'approved' and means the
+            // same thing; a row that still says it is approved.
+            if (!in_array((string)($summary['status'] ?? ''), ['approved', 'decided'], true)) {
+                throw new ValidationException($this->l->t('Only an approved decision can be linked to a request.'));
+            }
+            if (($summary['isPublic'] ?? false) !== true) {
+                throw new ValidationException($this->l->t('Publish the decision first. The requester reads this conversation, and only a public decision opens for them.'));
+            }
+
+            if ($this->decisionLinks->findLink((int)$instance->getId(), $decisionId) === null) {
+                $link = new WorkflowDecision();
+                $link->setInstanceId((int)$instance->getId());
+                $link->setDecisionId($decisionId);
+                $link->setTeamId($deskId);
+                $link->setAddedBy($uid);
+                $link->setAddedAt($this->timeFactory->getTime());
+                $this->decisionLinks->insert($link);
+
+                // `visibility: all`, and the question is **snapshotted** into
+                // the payload — the same reasoning as an attachment's
+                // `fileName`: the conversation is a record of what was said at
+                // the time, and it must still read correctly after the
+                // decision is renamed, unpublished or deleted. Whether the
+                // pill still *opens* is asked live, per reader.
+                $this->events->record(
+                    (int)$instance->getId(),
+                    WorkflowEventType::DECISION_LINKED,
+                    $uid,
+                    $step,
+                    [
+                        'decisionId' => $decisionId,
+                        'teamId'     => $deskId,
+                        'question'   => (string)($summary['question'] ?? ''),
+                        'status'     => (string)($summary['status'] ?? ''),
+                    ],
+                    WorkflowEventType::VISIBILITY_ALL,
+                );
+                // Audited without the question: an audit line is read by
+                // people who are on neither side of this request.
+                $this->audit($instance, 'decision_linked', $uid, ['decision' => $decisionId]);
+
+                $instance->setUpdatedAt($this->timeFactory->getTime());
+                $this->instances->update($instance);
+            }
+
+            return $this->decisionsOf([(int)$instance->getId()], $uid)[(int)$instance->getId()] ?? [];
+        });
+    }
+
+    /**
+     * Take a decision off a request (v4.11.12) — the same gate as linking
+     * one, and the same reason for it. Removing a link removes nothing from
+     * the Decisions module: the decision itself is untouched.
+     *
+     * @return array<int, array<string, mixed>> the request's decisions after the removal
+     * @throws AccessDeniedException|NotFoundException|WorkflowTransitionException
+     */
+    public function unlinkDecision(int $id, string $uid, int $decisionId): array {
+        $this->serviceTeams->requireLicence();
+        if ($this->decisionLinks === null || $this->decisions === null) {
+            throw new WorkflowTransitionException($this->l->t('Decisions are not available on this instance.'));
+        }
+        return $this->transactional(function () use ($id, $uid, $decisionId): array {
+            [$instance, $steps] = $this->loadOpen($id);
+            $deskId = $this->serviceTeamOf($steps);
+            if ($deskId === '' || $this->messageSide($uid, $instance, $steps) !== 'desk') {
+                throw new AccessDeniedException($this->l->t('Only the team member who claimed the request can link a decision to it.'));
+            }
+            $step = $this->conversationStep($steps) ?? $this->requireServiceStep($uid, $instance, $steps);
+
+            if ($this->decisionLinks->findLink((int)$instance->getId(), $decisionId) !== null) {
+                $this->decisionLinks->deleteLink((int)$instance->getId(), $decisionId);
+                // Also `all`: the conversation said the decision was linked,
+                // so it has to be able to say it was taken off again. The
+                // entry that announced it stays where it was — a conversation
+                // is a record, not a current state.
+                $this->events->record(
+                    (int)$instance->getId(),
+                    WorkflowEventType::DECISION_UNLINKED,
+                    $uid,
+                    $step,
+                    ['decisionId' => $decisionId, 'teamId' => $deskId],
+                    WorkflowEventType::VISIBILITY_ALL,
+                );
+                $this->audit($instance, 'decision_unlinked', $uid, ['decision' => $decisionId]);
+
+                $instance->setUpdatedAt($this->timeFactory->getTime());
+                $this->instances->update($instance);
+            }
+
+            return $this->decisionsOf([(int)$instance->getId()], $uid)[(int)$instance->getId()] ?? [];
+        });
+    }
+
+    /**
+     * The decisions of several requests, resolved for one reader, keyed by
+     * instance id (v4.11.12).
+     *
+     * Two queries for a whole page of grid rows — the links, then the
+     * decisions they name — rather than two per row. A decision linked to
+     * more than one request on the page is resolved once.
+     *
+     * Never throws: a Decisions module that is switched off, or a lookup that
+     * fails, costs the column its pills and nothing else.
+     *
+     * @param int[] $instanceIds
+     * @return array<int, array<int, array<string, mixed>>>
+     */
+    private function decisionsOf(array $instanceIds, string $uid): array {
+        if ($this->decisionLinks === null || $this->decisions === null || $instanceIds === []) {
+            return [];
+        }
+        try {
+            $links = $this->decisionLinks->findByInstances($instanceIds);
+            if ($links === []) {
+                return [];
+            }
+            $ids = [];
+            foreach ($links as $rows) {
+                foreach ($rows as $row) {
+                    $ids[] = $row->getDecisionId();
+                }
+            }
+            $summaries = $this->decisions->summariesForReader($ids, $uid);
+
+            $out = [];
+            foreach ($links as $instanceId => $rows) {
+                foreach ($rows as $row) {
+                    $summary = $summaries[$row->getDecisionId()] ?? null;
+                    if ($summary === null) {
+                        continue; // deleted in the Decisions module since
+                    }
+                    $out[$instanceId][] = $summary + [
+                        'addedBy' => $row->getAddedBy(),
+                        'addedAt' => $row->getAddedAt(),
+                    ];
+                }
+            }
+            return $out;
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][WorkflowEngine] decisionsOf failed', [
+                'error' => $e->getMessage(),
+            ]);
+            return [];
+        }
+    }
+
+    /**
+     * An eligible agent of the desk that handles this request — the read
+     * gate for its decisions (v4.11.12).
+     *
+     * Deliberately not `requireServiceStep()`: that one answers "may this
+     * person act on a task", which needs an *active* desk step and therefore
+     * refuses every closed request. Reading the desk's own record of a
+     * request it finished last year is not acting on it.
+     *
+     * @param WorkflowStep[] $steps
+     * @throws AccessDeniedException
+     */
+    private function requireDeskMember(string $uid, array $steps): string {
+        $serviceTeamId = $this->serviceTeamOf($steps);
+        if ($serviceTeamId === '' || !$this->serviceTeams->isEligibleAgent($uid, $serviceTeamId)) {
+            throw new AccessDeniedException($this->l->t('You are not an agent of the service team handling this request.'));
+        }
+        return $serviceTeamId;
+    }
+
+    /**
      * The requester and the person who claimed the request write to each
      * other (v4.11.0; Justin, 2026-09-28).
      *
@@ -1352,6 +1619,222 @@ class WorkflowEngine {
     }
 
     /**
+     * How many of a desk's requests the grid reads before it filters
+     * (v4.11.7). The widget is a glance at now; the grid is the desk's whole
+     * history, and a desk that has answered tens of thousands of requests
+     * must not build a workflow view for every one of them to show a page of
+     * twenty-five. Newest first, so the cap drops the oldest — and the answer
+     * says `truncated` when it did, rather than quietly lying about `total`.
+     */
+    public const DESK_GRID_MAX = 500;
+
+    /** One page of the grid. */
+    public const DESK_GRID_PAGE = 25;
+
+    /**
+     * The desk's requests, all of them, filtered (v4.11.7, Justin
+     * 2026-09-30) — what *View all requests* opens in the service team's own
+     * tab.
+     *
+     * The queue widget answers "what is on the desk now" and is bounded by
+     * `CLOSED_WINDOW_DAYS`; this answers "what has this desk ever handled",
+     * which is the question a member could not ask at all before: a request
+     * older than thirty days that they did not personally work was
+     * unreachable.
+     *
+     * `$filters` takes `state` (`open` | `closed` | `all`), `assignee` (a
+     * uid, or `''` for nobody), `requester` (a uid), `q` (free text over the
+     * title and the request's own words), `offset` and `limit`.
+     *
+     * `agents` and `requesters` are the values the two pickers offer — the
+     * desk's own people, and everybody who has ever asked it something. They
+     * are computed over the whole (capped) set, not over the filtered page,
+     * so narrowing by one picker does not empty the other.
+     *
+     * @param array<string, mixed> $filters
+     * @return array<string, mixed>
+     * @throws AccessDeniedException|\OCA\TeamHub\Exception\LicenseGateException
+     */
+    public function listDeskRequests(string $serviceTeamId, string $uid, array $filters = []): array {
+        $this->serviceTeams->requireLicence();
+        if (!$this->serviceTeams->isEligibleAgent($uid, $serviceTeamId)) {
+            throw new AccessDeniedException($this->l->t('You are not an agent of this service team.'));
+        }
+
+        $empty = [
+            'requests'   => [],
+            'total'      => 0,
+            'truncated'  => false,
+            'agents'     => [],
+            'requesters' => [],
+        ];
+
+        $ids = $this->participants->findInstanceIdsForActors([[WorkflowActor::TYPE_SERVICE_AGENT, $serviceTeamId]]);
+        if ($ids === []) {
+            return $empty;
+        }
+
+        // Newest first before the cap: the oldest is what a desk can afford
+        // to lose sight of, never the newest.
+        $instances = $this->instances->findByIds($ids);
+        usort($instances, static fn (WorkflowInstance $a, WorkflowInstance $b): int
+            => (int)$b->getStartedAt() <=> (int)$a->getStartedAt());
+        $truncated = count($instances) > self::DESK_GRID_MAX;
+        if ($truncated) {
+            $instances = array_slice($instances, 0, self::DESK_GRID_MAX);
+        }
+
+        // The pickers' values, over everything the grid can see.
+        $requesters = [];
+        foreach ($instances as $instance) {
+            $requesters[$instance->getStartedBy()] = true;
+        }
+        $requesters = array_values(array_filter(array_keys($requesters), static fn (string $u): bool => $u !== ''));
+
+        $state     = (string)($filters['state'] ?? 'all');
+        $requester = (string)($filters['requester'] ?? '');
+        $needle    = mb_strtolower(trim((string)($filters['q'] ?? '')));
+        $assignee  = $filters['assignee'] ?? null;
+
+        // What the instance row alone can decide, before a single step or
+        // participant is loaded. The state is **not** here: open and closed
+        // are the desk's point of view, not the workflow's — a request whose
+        // desk step is done is closed for the desk while the workflow is
+        // still open waiting for the requester to confirm. The queue widget's
+        // Closed tab means the same thing, and the two must agree.
+        $kept = [];
+        foreach ($instances as $instance) {
+            if ($requester !== '' && $instance->getStartedBy() !== $requester) {
+                continue;
+            }
+            $kept[(int)$instance->getId()] = $instance;
+        }
+        if ($kept === []) {
+            return ['requests' => [], 'total' => 0, 'truncated' => $truncated, 'agents' => $this->serviceTeams->eligibleAgents($serviceTeamId), 'requesters' => $requesters];
+        }
+
+        $keptIds   = array_keys($kept);
+        $stepsById = $this->steps->findByInstances($keptIds);
+        $partsById = $this->participants->findByInstances($keptIds);
+
+        $rows = [];
+        foreach ($kept as $instanceId => $instance) {
+            $steps = $stepsById[$instanceId] ?? [];
+            $desk  = $this->deskStateOf($steps, $serviceTeamId);
+            if (($state === 'open' && !$desk['open']) || ($state === 'closed' && $desk['open'])) {
+                continue;
+            }
+            if ($assignee !== null && ($desk['assignee'] ?? '') !== (string)$assignee) {
+                continue;
+            }
+            $view = $this->viewOf($instance, $steps, $partsById[$instanceId] ?? [], $uid, []);
+            if ($needle !== '' && !$this->deskRowMatches($view, $needle)) {
+                continue;
+            }
+            $view['desk'] = $desk;
+            $rows[] = $view;
+        }
+
+        usort($rows, static fn (array $a, array $b): int
+            => (int)($b['startedAt'] ?? 0) <=> (int)($a['startedAt'] ?? 0));
+
+        $total  = count($rows);
+        $offset = max(0, (int)($filters['offset'] ?? 0));
+        $limit  = (int)($filters['limit'] ?? self::DESK_GRID_PAGE);
+        $limit  = $limit < 1 || $limit > 100 ? self::DESK_GRID_PAGE : $limit;
+        $page   = array_slice($rows, $offset, $limit);
+
+        // v4.11.12 — the Decisions column. Resolved for the page and not for
+        // the whole filtered set: two queries for twenty-five rows, and none
+        // at all for the hundreds the reader is not looking at.
+        $decisions = $this->decisionsOf(array_map(static fn (array $r): int => (int)$r['id'], $page), $uid);
+        foreach ($page as $i => $row) {
+            $page[$i]['decisions'] = $decisions[(int)$row['id']] ?? [];
+        }
+
+        return [
+            'requests'   => $page,
+            'total'      => $total,
+            'truncated'  => $truncated,
+            'agents'     => $this->serviceTeams->eligibleAgents($serviceTeamId),
+            'requesters' => $requesters,
+        ];
+    }
+
+    /**
+     * Where one request stands **from this desk's point of view**: who holds
+     * it if a desk step is still active, or how and when the desk's part
+     * ended if none is.
+     *
+     * The queue's Closed tab asks the same question over a time window
+     * (`closedForDesk()`); this asks it per request, for the grid.
+     *
+     * @param WorkflowStep[] $steps
+     * @return array<string, mixed>
+     */
+    private function deskStateOf(array $steps, string $serviceTeamId): array {
+        $active   = null;
+        $finished = null;
+        foreach ($steps as $step) {
+            if ($step->getActorType() !== WorkflowActor::TYPE_SERVICE_AGENT || $step->getActorId() !== $serviceTeamId) {
+                continue;
+            }
+            if (in_array($step->getStepStatus(), WorkflowStepStatus::ACTIVE, true)) {
+                $active = $step;
+                continue;
+            }
+            $completedAt = $step->getCompletedAt();
+            if ($completedAt === null) {
+                continue;
+            }
+            if ($finished === null
+                || [$completedAt, $step->getStepOrder()] > [(int)$finished->getCompletedAt(), $finished->getStepOrder()]
+            ) {
+                $finished = $step;
+            }
+        }
+        if ($active !== null) {
+            return [
+                'open'     => true,
+                'assignee' => (string)$active->getAssignee(),
+                'status'   => $active->getStepStatus(),
+                'closedAt' => 0,
+                'closedBy' => '',
+            ];
+        }
+        return [
+            'open'     => false,
+            'assignee' => $finished !== null ? (string)($finished->getCompletedBy() ?? '') : '',
+            'status'   => $finished !== null ? $finished->getStepStatus() : '',
+            'closedAt' => $finished !== null ? (int)$finished->getCompletedAt() : 0,
+            'closedBy' => $finished !== null ? (string)($finished->getCompletedBy() ?? '') : '',
+        ];
+    }
+
+    /**
+     * Whether a grid row answers the search box: its title, and the words the
+     * requester wrote. Matched on the built view rather than on the stored
+     * JSON, so a search never hits a key name or an internal value nobody
+     * sees.
+     *
+     * @param array<string, mixed> $view
+     */
+    private function deskRowMatches(array $view, string $needle): bool {
+        $haystack = [(string)($view['title'] ?? ''), (string)($view['description'] ?? '')];
+        foreach ((array)($view['data'] ?? []) as $value) {
+            if (is_string($value)) {
+                $haystack[] = $value;
+            }
+        }
+        foreach ($haystack as $field) {
+            if ($field !== '' && str_contains(mb_strtolower($field), $needle)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * How many requests wait in a desk's queue with nobody on them
      * (v4.10.27) — the badge behind the service team's name in the
      * navigation. A count, not a list: it is asked on every page load for
@@ -1437,6 +1920,14 @@ class WorkflowEngine {
     public function requestInformation(int $id, string $uid, string $note, ?string $stepKey = null, mixed $fileIds = []): array {
         return $this->transactional(function () use ($id, $uid, $note, $stepKey, $fileIds): array {
             [$instance, $steps, $participants] = $this->loadOpen($id);
+            // v4.11.41 — a definition whose initiator is not a person has
+            // nobody to ask, and asking would leave the step waiting for an
+            // answer that cannot come. Refused here and not merely hidden,
+            // because the effect outlives the request.
+            if (!$this->allowsInformationRequest($instance)) {
+                throw new WorkflowTransitionException(
+                    $this->l->t('There is nobody to ask for information on this request.'));
+            }
             $step = $this->pickStep($instance, $steps, $uid, $stepKey);
             $this->assertHolder($uid, $step, $instance);
             $this->assertNotBlocked($instance);
@@ -1615,6 +2106,14 @@ class WorkflowEngine {
             [$instance, $steps] = $this->loadOpen($id);
             if ($instance->getStartedBy() !== $uid && !$this->resolver->isNextcloudAdmin($uid)) {
                 throw new AccessDeniedException($this->l->t('Only the person who started this workflow, or an administrator, can cancel it.'));
+            }
+            // v4.11.41 — a definition may refuse withdrawal by a *person*
+            // while its own owner service still retires its requests: the
+            // initiator is exempt, and for a system-started definition the
+            // initiator is TeamHub. See IWorkflowDefinitionActionPolicy.
+            if ($instance->getStartedBy() !== $uid && !$this->allowsWithdrawal($instance)) {
+                throw new WorkflowTransitionException(
+                    $this->l->t('This request cannot be withdrawn. Decline it instead, which records the decision.'));
             }
             $reason = $this->text($reason);
 
@@ -2014,6 +2513,10 @@ class WorkflowEngine {
         // pointing at rows that no longer exist is worse than no record.
         $this->archive->removeForInstance($id);
         $this->attachments->deleteByInstance($id);
+        // v4.11.12 — the links go with it; the decisions they pointed at do
+        // not. A decision is the team's own record in the Decisions module and
+        // has nothing to do with this workflow's licence.
+        $this->decisionLinks?->deleteByInstance($id);
         $this->events->deleteForInstance($id);
         $this->participants->deleteByInstance($id);
         $this->steps->deleteByInstance($id);
@@ -2263,6 +2766,26 @@ class WorkflowEngine {
             return false;
         }
         return $assignee === $uid || $this->serviceTeams->isServiceOwner($uid, $step->getActorId());
+    }
+
+    /**
+     * May a holder ask the initiator for information on this request?
+     *
+     * True for every definition that does not say otherwise — see
+     * {@see IWorkflowDefinitionActionPolicy}, which exists for the one whose
+     * initiator is TeamHub rather than a person.
+     */
+    private function allowsInformationRequest(WorkflowInstance $instance): bool {
+        $definition = $this->registry->get($instance->getDefinitionKey());
+        return !$definition instanceof IWorkflowDefinitionActionPolicy
+            || $definition->allowsInformationRequest();
+    }
+
+    /** May a person withdraw this request? Same default, same reason. */
+    private function allowsWithdrawal(WorkflowInstance $instance): bool {
+        $definition = $this->registry->get($instance->getDefinitionKey());
+        return !$definition instanceof IWorkflowDefinitionActionPolicy
+            || $definition->allowsWithdrawal();
     }
 
     /**
@@ -2999,6 +3522,14 @@ class WorkflowEngine {
             // handling it (TeamServiceDefinition), so "Requested from" has no team to name.
             'personal'          => $serviceTeamId !== '' && $instance->getTeamId() === $serviceTeamId,
             'subject'           => ['type' => $instance->getSubjectType(), 'id' => $instance->getSubjectId()],
+            // v4.11.41 — which My Work source chip this request appears
+            // under, as a `SourceGroup` key; '' for the ones whose home is
+            // the Services chip. Sent rather than derived from the
+            // definition key, so the client needs no table of its own
+            // (`/mywork-workflows`: nothing per workflow in the frontend).
+            'sourceGroup'       => $definition instanceof IWorkflowDefinitionSource
+                ? $definition->sourceGroup()
+                : '',
             'status'            => $instance->getStatus(),
             'outcome'           => $instance->getOutcome(),
             'currentStep'       => $showSteps ? $instance->getCurrentStep() : null,
@@ -3054,7 +3585,13 @@ class WorkflowEngine {
                 'isParticipant'    => $isParticipant,
                 'isResponsible'    => $open && $holds,
                 'canAct'           => $canAct,
-                'canCancel'        => $open && ($instance->getStartedBy() === $viewerUid || $isAdmin),
+                // v4.11.41 — the two verbs a definition may not offer. The
+                // client draws no button for either; the engine refuses both
+                // as well, because hiding is not a boundary.
+                'canRequestInformation' => $canAct && $this->allowsInformationRequest($instance),
+                'canCancel'        => $open
+                    && ($instance->getStartedBy() === $viewerUid || $isAdmin)
+                    && $this->allowsWithdrawal($instance),
                 // v4.10.31 — see mayCloseForDesk() and closeRequest().
                 'canClose'         => $canClose,
                 // v4.10.31 — this viewer's action is required (see above).

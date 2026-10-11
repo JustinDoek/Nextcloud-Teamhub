@@ -246,6 +246,12 @@ return [
         ['name' => 'teamAdoption#update',      'url' => '/api/v1/team-adoptions/{id}',                 'verb' => 'PUT'],
         ['name' => 'teamAdoption#accept',      'url' => '/api/v1/team-adoptions/{id}/accept',          'verb' => 'POST'],
         ['name' => 'teamAdoption#decline',     'url' => '/api/v1/team-adoptions/{id}/decline',         'verb' => 'POST'],
+        // v4.11.32 — directory groups waiting for a team (DESIGN §2.166).
+        // Admin-only, one home; see IdpGroupController's note on why these
+        // are not #[NoAdminRequired] the way the adoption routes are.
+        ['name' => 'idpGroup#index',           'url' => '/api/v1/admin/idp-groups',                    'verb' => 'GET'],
+        ['name' => 'idpGroup#create',          'url' => '/api/v1/admin/idp-groups/{id}/create',        'verb' => 'POST'],
+        ['name' => 'idpGroup#decline',         'url' => '/api/v1/admin/idp-groups/{id}/decline',       'verb' => 'POST'],
         ['name' => 'serviceTeam#index',        'url' => '/api/v1/service-teams',                       'verb' => 'GET'],
         ['name' => 'serviceTeam#catalogue',    'url' => '/api/v1/service-teams/catalogue',             'verb' => 'GET'],
         ['name' => 'serviceTeam#claimStatus',  'url' => '/api/v1/service-teams/claim-status',          'verb' => 'GET'],
@@ -258,6 +264,8 @@ return [
         ['name' => 'serviceAdmin#saveCategories', 'url' => '/api/v1/admin/services/settings/categories', 'verb' => 'PUT'],
         ['name' => 'serviceAdmin#saveLinks',      'url' => '/api/v1/admin/services/settings/links',      'verb' => 'PUT'],
         ['name' => 'serviceTeam#queue',        'url' => '/api/v1/service-teams/{teamId}/queue',        'verb' => 'GET'],
+        // v4.11.7 — the whole history behind the widget's glance, filtered.
+        ['name' => 'serviceTeam#requests',     'url' => '/api/v1/service-teams/{teamId}/requests',     'verb' => 'GET'],
         ['name' => 'serviceTeam#statistics',   'url' => '/api/v1/service-teams/{teamId}/statistics',   'verb' => 'GET'],        // v4.10.27
         ['name' => 'serviceTeam#claim',        'url' => '/api/v1/workflows/{id}/claim',                'verb' => 'POST', 'requirements' => ['id' => '\d+']],
         ['name' => 'serviceTeam#assign',       'url' => '/api/v1/workflows/{id}/assign',               'verb' => 'POST', 'requirements' => ['id' => '\d+']],
@@ -265,6 +273,14 @@ return [
         ['name' => 'serviceTeam#internalNote', 'url' => '/api/v1/workflows/{id}/internal-note',        'verb' => 'POST', 'requirements' => ['id' => '\d+']],
         // v4.10.31 — an admin of the service team closes a request, at any step.
         ['name' => 'serviceTeam#close',        'url' => '/api/v1/workflows/{id}/close-request',        'verb' => 'POST', 'requirements' => ['id' => '\d+']],
+        // v4.11.12 — the decisions behind a request. The list is readable on a
+        // closed request too (the grid is the desk's whole history); linking
+        // and unlinking need it open, like every other desk write.
+        ['name' => 'serviceTeam#decisions',       'url' => '/api/v1/workflows/{id}/decisions',                'verb' => 'GET',    'requirements' => ['id' => '\d+']],
+        ['name' => 'serviceTeam#linkDecision',    'url' => '/api/v1/workflows/{id}/decisions',                'verb' => 'POST',   'requirements' => ['id' => '\d+']],
+        ['name' => 'serviceTeam#unlinkDecision',  'url' => '/api/v1/workflows/{id}/decisions/{decisionId}',   'verb' => 'DELETE', 'requirements' => ['id' => '\d+', 'decisionId' => '\d+']],
+        // The picker behind *Link a decision*: the desk's own public decisions.
+        ['name' => 'serviceTeam#publicDecisions', 'url' => '/api/v1/service-teams/{teamId}/public-decisions', 'verb' => 'GET'],
 
         // ----------------------------------------------------------------
         // Manage team → Services (v4.10.23) — where a team claims the
@@ -521,6 +537,8 @@ return [
         // Audit log — admin governance (NC admin required)
         // ----------------------------------------------------------------
         ['name' => 'audit#listTeams',     'url' => '/api/v1/admin/audit/teams',                          'verb' => 'GET'],
+        // v4.11.39 — every team plus the instance scope, the team as a filter.
+        ['name' => 'audit#listAllEvents', 'url' => '/api/v1/admin/audit/events',                         'verb' => 'GET'],
         ['name' => 'audit#listEvents',    'url' => '/api/v1/admin/audit/teams/{teamId}/events',         'verb' => 'GET'],
         ['name' => 'audit#exportTeam',    'url' => '/api/v1/admin/audit/teams/{teamId}/export',         'verb' => 'GET'],
         ['name' => 'audit#getRetention',  'url' => '/api/v1/admin/audit/retention',                      'verb' => 'GET'],
@@ -708,10 +726,27 @@ return [
         ['name' => 'decision#finalizeProposal', 'url' => '/api/v1/teams/{teamId}/decisions/{decisionId}/finalize-proposal', 'verb' => 'POST'],
         ['name' => 'decision#share',            'url' => '/api/v1/teams/{teamId}/decisions/{decisionId}/share',             'verb' => 'POST'],
         ['name' => 'decision#withdraw',   'url' => '/api/v1/teams/{teamId}/decisions/{decisionId}/withdraw',    'verb' => 'POST'],
+        // v4.11.12 — publish a decision to every logged-in account on the
+        // instance, or take it back into the team.
+        ['name' => 'decision#setPublic',  'url' => '/api/v1/teams/{teamId}/decisions/{decisionId}/public',      'verb' => 'PUT'],
         ['name' => 'decision#approve',    'url' => '/api/v1/teams/{teamId}/decisions/{decisionId}/approve',     'verb' => 'POST'],
         ['name' => 'decision#deny',       'url' => '/api/v1/teams/{teamId}/decisions/{decisionId}/deny',        'verb' => 'POST'],
         // Session J — audit timeline (read-only).
         ['name' => 'decision#audit',      'url' => '/api/v1/teams/{teamId}/decisions/{decisionId}/audit',       'verb' => 'GET'],
+
+        // v4.11.18 — the review and retirement cycle of an approved
+        // decision. Reviews are a collection on the decision, so they are a
+        // GET and a POST on one URL; completing one is a POST on the review
+        // that is open, which the server resolves rather than the client
+        // naming an id it would have to fetch first.
+        ['name' => 'decision#listReviews',    'url' => '/api/v1/teams/{teamId}/decisions/{decisionId}/reviews',          'verb' => 'GET'],
+        ['name' => 'decision#requestReview',  'url' => '/api/v1/teams/{teamId}/decisions/{decisionId}/reviews',          'verb' => 'POST'],
+        ['name' => 'decision#completeReview', 'url' => '/api/v1/teams/{teamId}/decisions/{decisionId}/reviews/complete', 'verb' => 'POST'],
+        ['name' => 'decision#archive',        'url' => '/api/v1/teams/{teamId}/decisions/{decisionId}/archive',          'verb' => 'POST'],
+        // v4.11.30 — move a miscategorised decision into the right category.
+        ['name' => 'decision#moveCategory',   'url' => '/api/v1/teams/{teamId}/decisions/{decisionId}/category',         'verb' => 'POST'],
+        ['name' => 'decision#supersede',      'url' => '/api/v1/teams/{teamId}/decisions/{decisionId}/supersede',        'verb' => 'POST'],
+        ['name' => 'decision#supersedeOptions', 'url' => '/api/v1/teams/{teamId}/decisions/{decisionId}/supersede-options', 'verb' => 'GET'],
 
         // Session B — decision ↔ task links
         ['name' => 'decision#listTasks',   'url' => '/api/v1/teams/{teamId}/decisions/{decisionId}/tasks',            'verb' => 'GET'],
@@ -792,14 +827,23 @@ return [
         ['name' => 'policy#clearProfile',      'url' => '/api/v1/admin/policy/teams/{teamId}',        'verb' => 'DELETE'],
 
         // ----------------------------------------------------------------
+        // Files ⋯ menu (v4.11.42)
+        // ----------------------------------------------------------------
+        // Called from the Nextcloud Files app, by the two file actions TeamHub
+        // registers there, rather than from a TeamHub page. `scopes` answers
+        // for both actions in one request — the entry runs on every Files page
+        // load, so a second round trip would be a second cost on a page
+        // TeamHub only visits. It replaced `fileReview#getScopes` in v4.11.42;
+        // see FileActionController's docblock for why the gate had to move off
+        // the endpoint and onto each action.
+        ['name' => 'fileAction#scopes',         'url' => '/api/v1/file-actions/scopes',                        'verb' => 'GET'],
+        ['name' => 'fileAction#proposeContext', 'url' => '/api/v1/teams/{teamId}/file-actions/propose-context', 'verb' => 'GET'],
+
         // File reviews (v4.8.17) — FILE-REVIEW-PLAN.md §3.2
         // ----------------------------------------------------------------
-        // The first two are called from the Nextcloud Files app, by the file
-        // action TeamHub registers there, rather than from a TeamHub page.
-        // They are gated exactly like the rest: `scopes` answers only about the
-        // caller's own teams, and `review-context` refuses a file the caller
-        // cannot read before it returns anybody's name.
-        ['name' => 'fileReview#getScopes',     'url' => '/api/v1/file-reviews/scopes',          'verb' => 'GET'],
+        // `review-context` is the other one called from the Files app, by the
+        // review dialog on click. Gated exactly like the rest: it refuses a
+        // file the caller cannot read before it returns anybody's name.
         ['name' => 'fileReview#reviewContext', 'url' => '/api/v1/files/{fileId}/review-context', 'verb' => 'GET'],
         // Team-scoped. The team id is part of the path on the single-review
         // verbs too, and is checked against the review's own team — see the

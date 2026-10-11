@@ -21,6 +21,34 @@
                     :helper-text="errors.title || ''" />
             </div>
 
+            <!--
+                v4.11.15 — who the task is for. Without it the task names
+                nobody, and My Work has to guess between a to-do somebody wrote
+                for themselves and one the whole team owes — it guessed wrong in
+                both directions. Defaults to you, which is also what makes this
+                dialog's own name honest.
+
+                `input-id` + `label-outside` with the label above: the same
+                pattern as AddOpenProjectWorkPackageModal, where the reasoning
+                for it is written out.
+            -->
+            <div class="addtask-modal__field">
+                <label class="addtask-modal__label" for="th-task-assignee">
+                    {{ t('teamhub', 'Who the task is for') }}
+                </label>
+                <NcSelect
+                    input-id="th-task-assignee"
+                    label-outside
+                    v-model="form.assignee"
+                    :options="assigneeOptions"
+                    :clearable="false"
+                    :disabled="saving"
+                    label="label" />
+                <p class="addtask-modal__hint addtask-modal__hint--field">
+                    {{ assigneeHint }}
+                </p>
+            </div>
+
             <div class="addtask-modal__field">
                 <NcTextArea
                     v-model="form.description"
@@ -68,17 +96,22 @@
 
 <script>
 import { translate as t } from '@nextcloud/l10n'
+import { getCurrentUser } from '@nextcloud/auth'
 import { generateUrl } from '@nextcloud/router'
 import { showSuccess, showError } from '@nextcloud/dialogs'
 import axios from '@nextcloud/axios'
-import { NcModal, NcButton, NcLoadingIcon, NcTextField, NcTextArea } from '@nextcloud/vue'
+import { NcModal, NcButton, NcLoadingIcon, NcTextField, NcTextArea, NcSelect } from '@nextcloud/vue'
 import ClipboardPlusOutline from 'vue-material-design-icons/ClipboardPlusOutline.vue'
 import { ICON_BODY } from '../constants/uiTokens.js'
+
+/** Mirrors `TaskService::ASSIGN_SELF` / `::ASSIGN_TEAM`. Keep in sync. */
+const ASSIGN_SELF = 'self'
+const ASSIGN_TEAM = 'team'
 
 export default {
     name: 'AddPersonalTaskModal',
 
-    components: { NcModal, NcButton, NcLoadingIcon, NcTextField, NcTextArea, ClipboardPlusOutline },
+    components: { NcModal, NcButton, NcLoadingIcon, NcTextField, NcTextArea, NcSelect, ClipboardPlusOutline },
 
     props: {
         teamId: { type: String, required: true },
@@ -91,11 +124,15 @@ export default {
             ICON_BODY,
             saving: false,
             errors: {},
+            /** Team members, for the "For" picker. Self is filtered out — `Me` is already an option. */
+            members: [],
             form: {
                 title:       '',
                 description: '',
                 dueDate:     '',
                 dueTime:     '09:00',
+                // Yourself, until you say otherwise.
+                assignee:    null,
             },
         }
     },
@@ -106,10 +143,77 @@ export default {
             const pad = v => String(v).padStart(2, '0')
             return `${n.getFullYear()}-${pad(n.getMonth() + 1)}-${pad(n.getDate())}`
         },
+
+        /**
+         * Yourself, then the team, then everybody else in it.
+         *
+         * `self` and `team` are sent as keywords rather than as your uid and an
+         * empty string, so the backend resolves them and the payload says what
+         * was meant rather than what it happened to evaluate to.
+         */
+        assigneeOptions() {
+            const options = [
+                { id: ASSIGN_SELF, label: t('teamhub', 'Me') },
+                { id: ASSIGN_TEAM, label: t('teamhub', 'The whole team') },
+            ]
+
+            const me = getCurrentUser()?.uid
+            for (const member of this.members || []) {
+                const uid = member.userId || member.uid
+                if (!uid || uid === me) {
+                    continue
+                }
+                options.push({ id: uid, label: member.displayName || member.displayname || uid })
+            }
+
+            return options
+        },
+
+        /** What picking this option actually does, in one line. */
+        assigneeHint() {
+            const id = this.form.assignee?.id
+            if (id === ASSIGN_TEAM) {
+                return t('teamhub', 'Everybody in the team sees it on their My Work page.')
+            }
+            if (!id || id === ASSIGN_SELF) {
+                return t('teamhub', 'It appears on your My Work page and nobody else’s.')
+            }
+            return t('teamhub', 'It appears on their My Work page and they are notified. You can follow it under Waiting for others.')
+        },
+    },
+
+    created() {
+        // The default has to be an object from the options list, or NcSelect
+        // shows its placeholder instead of the selection.
+        this.form.assignee = this.assigneeOptions[0]
+    },
+
+    mounted() {
+        this.loadMembers()
     },
 
     methods: {
         t,
+
+        /**
+         * The team's members, for the picker.
+         *
+         * Best-effort: a failure leaves *Me* and *The whole team*, which is
+         * every case the dialog had before this field existed. A task you
+         * cannot assign is better than a dialog that will not open.
+         */
+        async loadMembers() {
+            try {
+                const { data } = await axios.get(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.teamId}/members/all`),
+                )
+                const list = Array.isArray(data) ? data : (Array.isArray(data?.members) ? data.members : [])
+                const me = (getCurrentUser()?.uid || '').toLowerCase()
+                this.members = list.filter(m => (m.userId || '').toLowerCase() !== me)
+            } catch (e) {
+                this.members = []
+            }
+        },
 
         validate() {
             this.errors = {}
@@ -124,7 +228,11 @@ export default {
             this.saving = true
             this.errors = {}
 
-            const payload = { title: this.form.title.trim() }
+            const payload = {
+                title:    this.form.title.trim(),
+                // `self` / `team` / a uid — see TaskService::resolveAssignee().
+                assignee: this.form.assignee?.id || ASSIGN_SELF,
+            }
 
             if (this.form.description.trim()) {
                 payload.description = this.form.description.trim()
@@ -144,9 +252,19 @@ export default {
                 this.$emit('created')
                 this.$emit('close')
             } catch (e) {
-                const msg = e?.response?.data?.error || ''
-                this.errors.general = msg ? t('teamhub', 'Failed to add task: {error}', { error: msg }) : t('teamhub', 'Failed to add task')
-                showError(t('teamhub', 'Failed to add task'))
+                // Issue #106 — the server's own sentence, and the correlation
+                // id when it sends one, in both the inline error and the toast.
+                // On hosting that only ships logs to syslog the id is the one
+                // thing a user can quote back.
+                const data = e?.response?.data
+                const msg = data?.ref
+                    ? `${data.error || t('teamhub', 'Server error')} (ref ${data.ref})`
+                    : data?.error
+                const sentence = msg
+                    ? t('teamhub', 'Failed to add task: {error}', { error: msg })
+                    : t('teamhub', 'Failed to add task')
+                this.errors.general = sentence
+                showError(sentence)
             } finally {
                 this.saving = false
             }
@@ -184,6 +302,11 @@ export default {
     font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
     margin: 0 0 20px;
+}
+
+/* The line under the "For" picker explains that one field, not the dialog. */
+.addtask-modal__hint--field {
+    margin: 4px 0 0;
 }
 
 .addtask-modal__field { margin-bottom: 16px; }

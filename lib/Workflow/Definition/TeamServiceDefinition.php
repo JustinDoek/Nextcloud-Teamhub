@@ -9,6 +9,7 @@ use OCA\TeamHub\Service\Workflow\WorkflowActorResolver;
 use OCA\TeamHub\Service\Workflow\WorkflowShareService;
 use OCA\TeamHub\Workflow\IWorkflowClosableByDesk;
 use OCA\TeamHub\Workflow\IWorkflowDefinition;
+use OCA\TeamHub\Workflow\IWorkflowDefinitionSource;
 use OCA\TeamHub\Workflow\WorkflowActor;
 use OCA\TeamHub\Workflow\WorkflowDefinitionRegistry;
 use OCA\TeamHub\Workflow\WorkflowStepDefinition;
@@ -70,7 +71,8 @@ use OCP\IL10N;
  * again; it stays registered for the same reason every unpublished service
  * does.
  */
-class TeamServiceDefinition implements IWorkflowDefinition, IWorkflowClosableByDesk {
+class TeamServiceDefinition implements IWorkflowDefinition,
+    IWorkflowDefinitionSource, IWorkflowClosableByDesk {
 
     public const KEY_PREFIX = 'team_service_';
 
@@ -214,6 +216,15 @@ class TeamServiceDefinition implements IWorkflowDefinition, IWorkflowClosableByD
         return $this->serviceTeams->isActiveServiceTeam($this->serviceTeamId)
             ? WorkflowActor::serviceAgent($this->serviceTeamId)
             : null;
+    }
+
+    /**
+     * v4.11.41 — the My Work source chip these requests appear under.
+     * No group, for the same reason as the catalogue services: a service a
+     * team built is whatever they made it. The Services chip is its home.
+     */
+    public function sourceGroup(): string {
+        return '';
     }
 
     public function getConcurrency(): string {

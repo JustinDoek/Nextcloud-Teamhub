@@ -21,6 +21,8 @@
  * optimisation: a link inside an embedded page must never be able to make
  * TeamHub navigate to an origin of its choosing.
  */
+import { generateUrl } from '@nextcloud/router'
+
 import logger from '../logger.js'
 
 /**
@@ -96,6 +98,54 @@ export function fileIdFromUrl(url, base = window.location.href) {
     // /apps/files/{view}/{id}
     const deep = parsed.pathname.match(/\/apps\/files\/[^/]+\/(\d+)\/?$/)
     return deep ? toId(deep[1]) : null
+}
+
+/**
+ * The team and decision a TeamHub decision link points at, or null
+ * (v4.11.12).
+ *
+ * The link somebody copies from a decision is the deep link this app already
+ * consumes — `/apps/teamhub?team={teamId}&decision={id}` (`App.vue`
+ * § consumeDeepLink) — so this recognises exactly that and nothing else.
+ *
+ * **Cross-origin never matches**, for the same reason as every other reader
+ * in this module: a pasted link must not be able to make TeamHub ask a
+ * server of somebody else's choosing about a decision. Nor does this decide
+ * anything about access — it reads two ids out of a string, and the server
+ * still answers whether that decision may be linked and by whom.
+ *
+ * @param {string} url absolute or relative
+ * @param {string} [base] resolved against, and the origin that must match
+ * @return {{teamId: string, decisionId: number}|null}
+ */
+export function decisionFromUrl(url, base = window.location.href) {
+    const parsed = sameOriginUrl(url, base)
+    if (!parsed || !parsed.pathname.includes('/apps/teamhub')) {
+        return null
+    }
+    const decisionId = toId(parsed.searchParams.get('decision'))
+    const teamId = (parsed.searchParams.get('team') || '').trim()
+    if (decisionId === null || teamId === '') {
+        return null
+    }
+    return { teamId, decisionId }
+}
+
+/**
+ * The link to copy for one decision — the other direction of
+ * `decisionFromUrl()`, so the two can never drift apart (v4.11.12).
+ *
+ * Built with `generateUrl()`, so it is right on an instance served from a
+ * subdirectory — where a hand-written `/apps/teamhub` would 404.
+ *
+ * @param {string} teamId
+ * @param {number|string} decisionId
+ * @return {string}
+ */
+export function decisionUrl(teamId, decisionId) {
+    return generateUrl('/apps/teamhub')
+        + '?team=' + encodeURIComponent(teamId)
+        + '&decision=' + encodeURIComponent(decisionId)
 }
 
 /**

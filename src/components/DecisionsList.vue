@@ -208,6 +208,11 @@ export default {
                 denied:     t('teamhub', 'Denied'),
                 // TRANSLATORS: status pill — proposer cancelled before finalize
                 withdrawn:  t('teamhub', 'Withdrawn'),
+                // v4.11.18 — the two retirement states.
+                // TRANSLATORS: status pill — a newer decision overrules this one
+                superseded: t('teamhub', 'Superseded'),
+                // TRANSLATORS: status pill — a reviewer retired the decision into the team archive
+                archived:   t('teamhub', 'Archived'),
                 // Legacy values (kept for any stale rows still in DB)
                 proposed:   t('teamhub', 'Open'),
                 decided:    t('teamhub', 'Approved'),
@@ -229,6 +234,9 @@ export default {
                 decided:    'success',
                 denied:     'error',
                 withdrawn:  'tertiary',
+                // v4.11.18 — a retired decision is a record, not a problem.
+                superseded: 'tertiary',
+                archived:   'tertiary',
             }
             return map[status] || 'tertiary'
         },

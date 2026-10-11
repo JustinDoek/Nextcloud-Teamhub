@@ -808,6 +808,21 @@ class TeamExpiryService {
      * admin UI cannot drift apart on what "the default" is.
      */
     public function defaultPickerDate(?int $now = null): string {
+        return self::defaultPickerDateFor($now);
+    }
+
+    /**
+     * The same date, without needing this service injected (v4.11.33).
+     *
+     * Added because two other places computed it themselves —
+     * `TeamService::getAdminSettings()` had the whole `DateTimeImmutable`
+     * expression inline, under a comment explaining that it is computed
+     * server-side precisely so the wizard, the importer's documentation and
+     * the admin panel cannot drift apart. They had already drifted into three
+     * copies of the arithmetic. This is the one copy; the instance method
+     * above delegates to it so no caller has to change.
+     */
+    public static function defaultPickerDateFor(?int $now = null): string {
         $base = (new \DateTimeImmutable('@' . ($now ?? time())))->setTimezone(new \DateTimeZone('UTC'));
         return $base->modify('+' . self::DEFAULT_PICKER_MONTHS . ' months')->format('Y-m-d');
     }

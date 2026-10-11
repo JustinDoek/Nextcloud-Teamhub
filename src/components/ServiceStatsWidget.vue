@@ -1,15 +1,15 @@
 <template>
 	<div class="svc-stats-w">
+		<!-- v4.11.9 — the pill of What's new and the service catalog. No
+		     number: the period is what the figures below are counted over,
+		     so a count on the pill itself would be the same number twice. -->
 		<div class="svc-stats-w__periods" role="group" :aria-label="t('teamhub', 'Period')">
-			<NcButton
+			<TogglePill
 				v-for="days in periods"
 				:key="days"
-				size="small"
-				variant="tertiary"
+				:label="periodLabel(days)"
 				:pressed="period === days"
-				@click="setPeriod(days)">
-				{{ periodLabel(days) }}
-			</NcButton>
+				@click="setPeriod(days)" />
 		</div>
 
 		<NcNoteCard v-if="error" type="error">
@@ -74,6 +74,7 @@
 import { mapState } from 'vuex'
 import { translate as t } from '@nextcloud/l10n'
 import { NcButton, NcCounterBubble, NcLoadingIcon, NcNoteCard } from '@nextcloud/vue'
+import TogglePill from './TogglePill.vue'
 import { STATISTICS_PERIODS, formatDuration, periodLabel } from '../constants/serviceTeams.js'
 import { ICON_LARGE } from '../constants/uiTokens.js'
 
@@ -91,7 +92,7 @@ import { ICON_LARGE } from '../constants/uiTokens.js'
 export default {
 	name: 'ServiceStatsWidget',
 
-	components: { NcButton, NcCounterBubble, NcLoadingIcon, NcNoteCard },
+	components: { NcButton, NcCounterBubble, NcLoadingIcon, NcNoteCard, TogglePill },
 
 	data() {
 		return {
@@ -219,7 +220,8 @@ export default {
 .svc-stats-w__periods {
 	display: flex;
 	flex-wrap: wrap;
-	gap: var(--th-space-xs, 4px);
+	/* 8px, as every other row of pills — a row of them is one control. */
+	gap: var(--th-space-sm, 8px);
 }
 
 .svc-stats-w__loading {

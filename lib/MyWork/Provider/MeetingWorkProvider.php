@@ -13,12 +13,13 @@ use OCA\TeamHub\MyWork\Priority;
 use OCA\TeamHub\MyWork\WorkItem;
 use OCA\TeamHub\MyWork\WorkItemPage;
 use OCA\TeamHub\MyWork\WorkQuery;
+use OCA\TeamHub\Service\CalendarIdentityService;
+use OCA\TeamHub\Service\TeamCalendarLocator;
+use OCA\TeamHub\Util\CalendarBlob;
 use OCP\App\IAppManager;
 use OCP\DB\QueryBuilder\IQueryBuilder;
 use OCP\IDBConnection;
 use OCP\IL10N;
-use OCP\IURLGenerator;
-use OCP\IUserManager;
 use OCP\IUserSession;
 use Psr\Log\LoggerInterface;
 
@@ -101,9 +102,12 @@ class MeetingWorkProvider implements IWorkProvider {
     public function __construct(
         private IDBConnection $db,
         private IAppManager $appManager,
-        private IUserManager $userManager,
         private IUserSession $userSession,
-        private IURLGenerator $urlGenerator,
+        // v4.11.15 — identity matching and the team-calendar lookup moved out
+        // of this class when TaskWorkProvider needed the same two answers. The
+        // behaviour is unchanged; there is simply one copy of it now.
+        private CalendarIdentityService $identity,
+        private TeamCalendarLocator $calendars,
         private IL10N $l,
         private LoggerInterface $logger,
     ) {
@@ -378,70 +382,14 @@ class MeetingWorkProvider implements IWorkProvider {
     /**
      * Calendars shared with any of these teams' circles.
      *
+     * v4.11.15 — the two reads behind this moved to `TeamCalendarLocator` when
+     * the task provider needed the identical answer. Same output shape.
+     *
      * @param string[] $teamIds
      * @return array<int,array{id:int,teamId:string,name:string,owner:string,slug:string}>
      */
     private function teamCalendars(array $teamIds): array {
-        $principals = [];
-        foreach ($teamIds as $teamId) {
-            $principals['principals/circles/' . $teamId] = $teamId;
-        }
-        if ($principals === []) {
-            return [];
-        }
-
-        $shared = [];
-        try {
-            $qb  = $this->db->getQueryBuilder();
-            $res = $qb->select('resourceid', 'principaluri')
-                ->from('dav_shares')
-                ->where($qb->expr()->eq('type', $qb->createNamedParameter('calendar')))
-                ->andWhere($qb->expr()->in('principaluri', $qb->createNamedParameter(
-                    array_keys($principals), IQueryBuilder::PARAM_STR_ARRAY)))
-                ->executeQuery();
-            while ($row = $res->fetch()) {
-                $shared[(int)$row['resourceid']] = $principals[(string)$row['principaluri']] ?? '';
-            }
-            $res->closeCursor();
-        } catch (\Throwable $e) {
-            $this->logger->warning('[TeamHub][MyWork][Meetings] Share lookup failed', [
-                'error' => $e->getMessage(), 'app' => Application::APP_ID,
-            ]);
-            return [];
-        }
-
-        if ($shared === []) {
-            return [];
-        }
-
-        $calendars = [];
-        try {
-            $qb  = $this->db->getQueryBuilder();
-            $res = $qb->select('id', 'principaluri', 'uri', 'displayname')
-                ->from('calendars')
-                ->where($qb->expr()->in('id', $qb->createNamedParameter(
-                    array_keys($shared), IQueryBuilder::PARAM_INT_ARRAY)))
-                ->executeQuery();
-            while ($row = $res->fetch()) {
-                $id    = (int)$row['id'];
-                $parts = explode('/', (string)$row['principaluri']);
-                $calendars[] = [
-                    'id'     => $id,
-                    'teamId' => $shared[$id] ?? '',
-                    'name'   => (string)($row['displayname'] ?: $row['uri']),
-                    'owner'  => (string)end($parts),
-                    'slug'   => (string)$row['uri'],
-                ];
-            }
-            $res->closeCursor();
-        } catch (\Throwable $e) {
-            $this->logger->warning('[TeamHub][MyWork][Meetings] Calendar lookup failed', [
-                'error' => $e->getMessage(), 'app' => Application::APP_ID,
-            ]);
-            return [];
-        }
-
-        return $calendars;
+        return $this->calendars->forTeams($teamIds);
     }
 
     /**
@@ -504,7 +452,8 @@ class MeetingWorkProvider implements IWorkProvider {
      */
     private function occurrences(array $row, int $from, int $to): array {
         try {
-            $vcalendar = \Sabre\VObject\Reader::read((string)$row['calendardata']);
+            // CalendarBlob: Postgres hands this back as a stream (v4.11.16).
+            $vcalendar = \Sabre\VObject\Reader::read(CalendarBlob::read($row['calendardata']));
         } catch (\Throwable $e) {
             $this->logger->debug('[TeamHub][MyWork][Meetings] Unreadable calendar object', [
                 'objectId' => $row['id'], 'error' => $e->getMessage(), 'app' => Application::APP_ID,
@@ -620,43 +569,21 @@ class MeetingWorkProvider implements IWorkProvider {
      * Every address that means "this user" in a VEVENT.
      *
      * Three shapes, because NC writes all three depending on the path an event
-     * arrived by: the user's own email, the synthetic `uid@host` address
+     * arrived by: the user's own email, the synthetic `uid@host`
      * `ActivityService` falls back to when a profile has no email, and the
      * `principal:principals/users/uid` form the DAV layer uses internally.
+     *
+     * v4.11.15 — the list itself lives in `CalendarIdentityService`, which
+     * tasks read too. Same three shapes, same order, same caching.
      *
      * @return string[] lower-cased, `mailto:` stripped
      */
     private function selfAddresses(string $userId): array {
-        if (isset($this->selfAddressCache[$userId])) {
-            return $this->selfAddressCache[$userId];
-        }
-
-        $addresses = [];
-        $user      = $this->userManager->get($userId);
-
-        if ($user !== null) {
-            $email = (string)($user->getEMailAddress() ?? '');
-            if ($email !== '') {
-                $addresses[] = strtolower($email);
-            }
-        }
-
-        // Same synthetic host ActivityService uses, so an event this app wrote
-        // for a user with no email still matches back to them.
-        try {
-            $host = parse_url($this->urlGenerator->getAbsoluteURL('/'), PHP_URL_HOST) ?: 'localhost';
-        } catch (\Throwable) {
-            $host = 'localhost';
-        }
-        $addresses[] = strtolower($userId . '@' . $host);
-        $addresses[] = strtolower('principal:principals/users/' . $userId);
-
-        $this->selfAddressCache[$userId] = array_values(array_unique($addresses));
-        return $this->selfAddressCache[$userId];
+        return $this->identity->addressesFor($userId);
     }
 
     private static function normaliseAddress(string $raw): string {
-        return strtolower(preg_replace('/^mailto:/i', '', trim($raw)) ?? '');
+        return CalendarIdentityService::normalise($raw);
     }
 
     private function currentUserId(): string {

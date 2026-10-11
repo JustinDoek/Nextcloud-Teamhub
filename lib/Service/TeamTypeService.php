@@ -22,11 +22,17 @@ use Psr\Log\LoggerInterface;
  * the catalogue live there, and `ServiceTeamService` is the only thing that
  * decides eligibility. This value exists so a desk reads as one in the team
  * list and the wizard, and setting it by hand on a team with no service-team
- * row changes nothing about what that team can do. Deliberately **not** in
- * `TeamTemplates::TEMPLATES`: a service team is declared from Admin →
- * TeamHub → Service desk on a team that already exists (the product rule
- * that one is never created silently), so the creation wizard has no card
- * for it and nothing provisions one.
+ * row changes nothing about what that team can do.
+ *
+ * **It is a template** since v4.10.23 (`TeamTemplates::TEMPLATES`) — the text
+ * here said the opposite until v4.11.6, describing the v4.10.20 rule that a
+ * desk is only ever declared on a team that already exists.
+ *
+ * Two things follow from this value being written, and both live in
+ * `TeamController::saveTeamType()` rather than here, so this class stays a
+ * label writer: the expiry set at creation, and (v4.11.6) the default issue
+ * process seeded as a draft on a new service team
+ * (`TeamServiceBuilder::seedDefault()`).
  */
 class TeamTypeService {
 

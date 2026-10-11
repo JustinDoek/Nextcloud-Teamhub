@@ -9,6 +9,7 @@ use OCA\TeamHub\Service\ServiceTeam\ServiceTeamService;
 use OCA\TeamHub\Service\Workflow\WorkflowActorResolver;
 use OCA\TeamHub\Workflow\IWorkflowClosableByDesk;
 use OCA\TeamHub\Workflow\IWorkflowDefinition;
+use OCA\TeamHub\Workflow\IWorkflowDefinitionSource;
 use OCA\TeamHub\Workflow\WorkflowActor;
 use OCA\TeamHub\Workflow\WorkflowDefinitionRegistry;
 use OCA\TeamHub\Workflow\WorkflowStepDefinition;
@@ -56,7 +57,8 @@ use OCP\IL10N;
  * The quota request and the team request are not closable: their desk
  * step *does* something, and closing one would skip that.
  */
-class ServiceRequestDefinition implements IWorkflowDefinition, IWorkflowClosableByDesk {
+class ServiceRequestDefinition implements IWorkflowDefinition,
+    IWorkflowDefinitionSource, IWorkflowClosableByDesk {
 
     public const VERSION = 1;
 
@@ -141,6 +143,16 @@ class ServiceRequestDefinition implements IWorkflowDefinition, IWorkflowClosable
         }
         $serviceTeamId = $this->serviceTeams->serviceTeamForDefinition($this->getKey());
         return $serviceTeamId === null ? null : WorkflowActor::serviceAgent($serviceTeamId);
+    }
+
+    /**
+     * v4.11.41 — the My Work source chip these requests appear under.
+     * No group: a catalogue service can be about anything, so naming one
+     * would be a guess. Its home is the **Services** chip (v4.11.5), which
+     * cuts across the sources and catches every request a desk handles.
+     */
+    public function sourceGroup(): string {
+        return '';
     }
 
     public function getConcurrency(): string {

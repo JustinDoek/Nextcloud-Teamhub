@@ -340,6 +340,9 @@ import Folder from 'vue-material-design-icons/Folder.vue'
 import FolderAccountOutline from 'vue-material-design-icons/FolderAccountOutline.vue'
 import Gavel from 'vue-material-design-icons/Gavel.vue'
 import Calendar from 'vue-material-design-icons/Calendar.vue'
+// v4.11.15 — team tasks. A ticked checkbox: a plain Calendar would read
+// as a meeting, and tasks sit next to meetings in the queue.
+import CheckboxMarkedOutline from 'vue-material-design-icons/CheckboxMarkedOutline.vue'
 import Puzzle from 'vue-material-design-icons/Puzzle.vue'
 
 import {
@@ -379,7 +382,7 @@ export default {
 		Check, CheckCircleOutline,
 		Close, CommentEditOutline, CommentOutline, AccountArrowRight,
 		InformationOutline, OpenInNew, VideoOutline, FileDocumentOutline, EmailOutline,
-		CardText, Folder, FolderAccountOutline, Gavel, Calendar, Puzzle, ShieldAccountOutline, CalendarClock,
+		CardText, Folder, FolderAccountOutline, Gavel, Calendar, CheckboxMarkedOutline, Puzzle, ShieldAccountOutline, CalendarClock,
 		AccountPlusOutline, FileEyeOutline, ArchiveCheckOutline, BriefcaseOutline, FlagOutline,
 		ChevronDown, ChevronUp, SourceBranch,
 	},

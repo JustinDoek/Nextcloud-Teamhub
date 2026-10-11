@@ -41,18 +41,17 @@
                  tabpanels that do not exist. `aria-pressed` is the honest
                  pattern and the one SKILLS.md § "NcButton is the default"
                  names as a raw-<button> carve-out. -->
+            <!-- v4.11.8 — the pill this view defined is now `TogglePill`, so
+                 the pages that copied it (the service catalog, My requests)
+                 cannot drift from it. Same markup, same CSS, one definition. -->
             <div class="whats-happening__tabs" role="group" :aria-label="t('teamhub', 'Filter by source')">
-                <button
+                <TogglePill
                     v-for="tab in visibleTabs"
                     :key="tab"
-                    type="button"
-                    class="whats-happening__tab"
-                    :class="{ 'whats-happening__tab--active': activeTab === tab }"
-                    :aria-pressed="activeTab === tab ? 'true' : 'false'"
-                    @click="setTab(tab)">
-                    {{ feedTabLabel(tab) }}
-                    <span class="whats-happening__tab-count">{{ sourceCounts[tab] || 0 }}</span>
-                </button>
+                    :label="feedTabLabel(tab)"
+                    :count="sourceCounts[tab] || 0"
+                    :pressed="activeTab === tab"
+                    @click="setTab(tab)" />
             </div>
 
             <!-- v4.9.7 — the OpenProject news source did not answer cleanly:
@@ -163,6 +162,7 @@ import Rss from 'vue-material-design-icons/Rss.vue'
 import BriefcaseOutline from 'vue-material-design-icons/BriefcaseOutline.vue'
 import FeedItemCard from './feed/FeedItemCard.vue'
 import FeedControlRail from './feed/FeedControlRail.vue'
+import TogglePill from './TogglePill.vue'
 import { ICON_BODY, ICON_HERO, ICON_LARGE } from '../constants/uiTokens.js'
 import { mentionsUser } from '../lib/mentions.js'
 import { personalSettingsUrl } from '../lib/openProject.js'
@@ -233,6 +233,7 @@ export default {
         NcEmptyContent,
         FeedItemCard,
         FeedControlRail,
+        TogglePill,
         FilterVariant,
         Rss,
         BriefcaseOutline,
@@ -840,53 +841,10 @@ export default {
     flex-wrap: wrap;
 }
 
-// Raw <button> with role="tab": a segmented tab bar, which SKILLS.md
-// § "NcButton is the default" lists as a carve-out.
-.whats-happening__tab {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    padding: 4px 12px;
-    border: 1px solid var(--color-border);
-    border-radius: var(--th-radius-pill, 999px);
-    background: var(--color-main-background);
-    color: var(--color-main-text);
-    font-size: var(--th-font-meta, 12px);
-    font-weight: var(--th-font-weight-medium, 500);
-    cursor: pointer;
-
-    &:hover {
-        background: var(--color-background-hover);
-    }
-
-    // Split from :hover — grouping them silences the keyboard focus ring,
-    // which is the trap SKILLS.md § Focus visibility documents.
-    &:focus-visible {
-        background: var(--color-background-hover);
-        outline: 2px solid var(--color-primary-element);
-        outline-offset: 2px;
-    }
-}
-
-// Selection is carried by the fill AND the border AND the bolder count chip,
-// so it does not rest on colour alone (WCAG 1.4.1).
-.whats-happening__tab--active {
-    background: var(--color-primary-element);
-    border-color: var(--color-primary-element);
-    color: var(--color-primary-element-text);
-    font-weight: var(--th-font-weight-semibold, 600);
-
-    &:hover,
-    &:focus-visible {
-        background: var(--color-primary-element-hover, var(--color-primary-element));
-    }
-}
-
-.whats-happening__tab-count {
-    font-variant-numeric: tabular-nums;
-    opacity: 0.85;
-    font-weight: var(--th-font-weight-semibold, 600);
-}
+// v4.11.8 — `.whats-happening__tab`, `--active` and `__tab-count` moved into
+// `TogglePill.vue` unchanged. The carve-out comment (a raw <button> with
+// `aria-pressed`, not `role="tab"`) and the split :hover / :focus-visible
+// rules went with them.
 
 // ── Groups ───────────────────────────────────────────────────────────────
 .whats-happening__group {

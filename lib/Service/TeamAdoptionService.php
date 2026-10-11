@@ -6,6 +6,7 @@ namespace OCA\TeamHub\Service;
 use OCA\TeamHub\AppInfo\Application;
 use OCA\TeamHub\BackgroundJob\TeamAdoptionProvisionJob;
 use OCA\TeamHub\Constants\CirclesConfig;
+use OCA\TeamHub\Constants\CirclesMemberType;
 use OCA\TeamHub\Db\TeamAdoptionMapper;
 use OCA\TeamHub\Db\TeamRegistryMapper;
 use OCA\TeamHub\Db\WorkflowStep;
@@ -54,16 +55,58 @@ use Psr\Log\LoggerInterface;
  * so "unregistered" is exactly "made since 4.10.6" (Justin, 2026-09-26: all
  * of those are offered). The first sweep after an upgrade offers the backlog.
  *
- * ## Who is asked ({@see route()}) — Justin's rules, 2026-09-26
+ * ## The second candidate class — SCIM teams (v4.11.32)
  *
- *   1. No team creator group: anybody could have made the team in TeamHub,
- *      so it is **accepted by itself** with the default template and policy.
- *   2. A team holds the Nextcloud services: a request in its queue.
- *   3. Otherwise, licensed: a task in the Nextcloud administrators' My Work.
- *   4. Unlicensed (no My Work, no service teams): the grid in Admin →
+ * Nextcloud 35's Circles provisions a circle per SCIM group, and such a
+ * circle is invisible to the rule above: `ScimService::createCircle()` writes
+ * `source = Member::APP_CIRCLES` (**10001**), not 16. So the sweep looks at
+ * both sources, with a second set of conditions for the new one:
+ *
+ *   - **`CFG_SCIM` is required, not optional.** The test instance already
+ *     carries two `source = 10001` circles — Circles' own app identities,
+ *     `app:circles:{singleId}` — and one of them has `config = 0`, which
+ *     NOT_A_TEAM_BITS does not exclude. Keying on the source alone would have
+ *     offered the Circles app's own identity circle as a team to adopt.
+ *   - **The circle must be local.** A federated master's SCIM circles are
+ *     cached on every slave; a slave adopting one would provision a second
+ *     set of resources for a team it does not own.
+ *
+ * A SCIM circle also has **no human owner** (Circles makes `app:circles` its
+ * owner at LEVEL_OWNER), which is why {@see route()} sends it straight to the
+ * grid instead of through rules 1 to 3 — all three need a person.
+ *
+ * ## What happens to one — the customer's rule, not ours (v4.11.34)
+ *
+ * `teamAdoptionMode`, on Admin → TeamHub → Import/Export beside the grid,
+ * with three values and `review` the default:
+ *
+ *   - **`accept`** — every team made elsewhere is accepted by itself, with
+ *     the default template and that template's policy. Nobody is asked.
+ *   - **`review`** — somebody is asked ({@see route()}, below).
+ *   - **`decline`** — every team made elsewhere is declined by itself and
+ *     stays a plain Nextcloud team. Nobody is asked.
+ *
+ * This **supersedes the first of Justin's four rules of 2026-09-26**
+ * (DESIGN §2.149, revised by §2.168), which read "no team creator group:
+ * anybody could have made the team in TeamHub, so it is accepted by
+ * itself". That was a decision taken
+ * for the customer about the customer's estate, and 2026-10-06 moved it to
+ * the customer: an instance with no creator group that wants silent adoption
+ * now says so by choosing *Accept it automatically*. The creator group no
+ * longer enters the routing at all.
+ *
+ * Either automatic mode still writes an adoption row and still tells the
+ * owner, so the grid's thirty-day list remains the record of what happened,
+ * and a decline is as final as a decline made by hand.
+ *
+ * ## Who is asked in `review` mode ({@see route()}) — Justin, 2026-09-26
+ *
+ *   1. A team holds the Nextcloud services: a request in its queue.
+ *   2. Otherwise, licensed: a task in the Nextcloud administrators' My Work.
+ *   3. Unlicensed (no My Work, no service teams): the grid in Admin →
  *      TeamHub only, and a notification to the administrators.
  *
- * Routes 2 and 3 are one workflow (`TeamAdoptionDefinition`) with two
+ * Routes 1 and 2 are one workflow (`TeamAdoptionDefinition`) with two
  * actors. The **grid** is where the decision is made in every route —
  * template and policy per team — and the requests point to it.
  *
@@ -75,17 +118,67 @@ class TeamAdoptionService {
     /** Circles' source for a circle a user made (Contacts, Teams page, occ, API). */
     public const SOURCE_USER = 16;
 
+    /**
+     * Circles' source for a circle its own app identity made
+     * (`Member::APP_CIRCLES`). **Not a team by itself** — see
+     * {@see findCandidates()} — but it is what a circle provisioned from a
+     * SCIM group carries, so it is the second door into the sweep. v4.11.32.
+     */
+    public const SOURCE_APP_CIRCLES = 10001;
+
+    /** The two sources the sweep looks at. Everything else is not a team. */
+    private const CANDIDATE_SOURCES = [self::SOURCE_USER, self::SOURCE_APP_CIRCLES];
+
+    /** A circle somebody made: Contacts, the Teams page, occ, a provisioner. */
+    public const KIND_USER = 'user';
+
+    /** A circle Circles' SCIM integration made from a directory group. */
+    public const KIND_SCIM = 'scim';
+
     /** How old a circle must be before the sweep looks at it. */
     public const MIN_AGE_SECONDS = 120;
 
-    /** How long the grid lists decided teams. */
+    /**
+     * How long the grid listed decided teams, until v4.11.39 moved that
+     * history to the Compliance tab's audit log (DESIGN §2.172). Kept because
+     * `TeamAdoptionMapper::findDecidedSince()` is still the right read for
+     * "what was decided recently" and the window is the project's answer to
+     * how long that means.
+     */
     public const DECIDED_WINDOW_SECONDS = 30 * 24 * 60 * 60;
 
     /** A provisioning job still queued after this long is queued again. */
     public const REQUEUE_AFTER_SECONDS = 60 * 60;
 
-    /** Notification object for the administrators' notice (route 4). */
+    /** Notification object for the administrators' notice (route 3). */
     public const NOTIFY_OBJECT = 'team_adoption';
+
+    // ------------------------------------------------------------------
+    // What happens to a team made outside TeamHub (v4.11.34)
+    // ------------------------------------------------------------------
+
+    /** Accept it by itself, with the default template and policy. */
+    public const MODE_ACCEPT = 'accept';
+
+    /** Ask somebody — the desk, My Work, or the grid. The default. */
+    public const MODE_REVIEW = 'review';
+
+    /** Decline it by itself. It stays a plain Nextcloud team. */
+    public const MODE_DECLINE = 'decline';
+
+    public const MODES = [self::MODE_ACCEPT, self::MODE_REVIEW, self::MODE_DECLINE];
+
+    public const SETTING_MODE = 'teamAdoptionMode';
+
+    /**
+     * The template and policy profile an **automatically** accepted team is
+     * given (Justin, 2026-10-06: *we need to apply the template and policy we
+     * chose as default when we use automatic acceptance of teams*). Offered
+     * on Import/Export only while the mode is `accept`: in `review` the grid
+     * asks per team, and in `decline` nothing is ever accepted.
+     */
+    public const SETTING_TEMPLATE = 'teamAdoptionTemplate';
+    public const SETTING_PROFILE  = 'teamAdoptionProfile';
 
     /** Config bits that make a circle something other than a team. */
     private const NOT_A_TEAM_BITS = CirclesConfig::CFG_SINGLE
@@ -111,6 +204,63 @@ class TeamAdoptionService {
         private IL10N                       $l,
         private LoggerInterface             $logger,
     ) {
+    }
+
+    // ------------------------------------------------------------------
+    // The rule
+    // ------------------------------------------------------------------
+
+    /**
+     * What this instance does with a team made outside TeamHub.
+     *
+     * `review` on an unset or unrecognised value: of the three, it is the
+     * only one that takes no action on somebody's team without being told
+     * to, and an unreadable setting must never read as "accept everything"
+     * or as "refuse everything".
+     */
+    public function mode(): string {
+        return self::normaliseMode($this->config->getAppValue(Application::APP_ID, self::SETTING_MODE, self::MODE_REVIEW));
+    }
+
+    /**
+     * The same clamp, without this service's object graph.
+     *
+     * `TeamService::getAdminSettings()` needs the stored rule and nothing
+     * else; constructing this class for it would pull in the workflow engine
+     * and the service-team service, and a failure anywhere in that graph
+     * would cost the admin panel every other value it returns. So the
+     * vocabulary stays here and the raw read happens there.
+     */
+    /**
+     * The template an automatically accepted team is built from: the
+     * administrator's choice when it is still a template the grid offers,
+     * otherwise `collaboration`.
+     */
+    public function defaultTemplate(): string {
+        return $this->decisions->resolveTemplate(
+            trim($this->config->getAppValue(Application::APP_ID, self::SETTING_TEMPLATE, '')),
+        );
+    }
+
+    /**
+     * The policy profile an automatically accepted team is classified with:
+     * the administrator's choice when that profile still exists, otherwise
+     * `internal`, otherwise — if somebody deleted even that — whatever the
+     * template sets, which may be nothing.
+     */
+    public function defaultProfile(): string {
+        $chosen = trim($this->config->getAppValue(Application::APP_ID, self::SETTING_PROFILE, ''));
+        foreach ([$chosen, TeamAdoptionDecisionService::DEFAULT_PROFILE] as $candidate) {
+            if ($candidate !== '' && $this->policy->profileExists($candidate)) {
+                return $candidate;
+            }
+        }
+        return '';
+    }
+
+    public static function normaliseMode(string $raw): string {
+        $mode = trim($raw);
+        return in_array($mode, self::MODES, true) ? $mode : self::MODE_REVIEW;
     }
 
     // ------------------------------------------------------------------
@@ -172,30 +322,47 @@ class TeamAdoptionService {
     }
 
     /**
-     * Record one candidate and send it where the rules say. Returns false
-     * when another sweep recorded it first.
+     * Record one candidate and send it where the instance's rule says.
+     * Returns false when another sweep recorded it first.
      *
-     * @param array{teamId: string, name: string, owner: string} $candidate
+     * @param array{teamId: string, name: string, owner: string, kind?: string} $candidate
      */
     public function route(array $candidate, int $now): bool {
         $teamId = $candidate['teamId'];
         $owner  = $candidate['owner'];
+        $isScim = ($candidate['kind'] ?? self::KIND_USER) === self::KIND_SCIM;
+        $mode   = $this->mode();
 
-        // Rule 1: no creator group — accepted by itself.
-        if ($this->creatorGroup() === '') {
-            $id = $this->adoptions->insert($teamId, $candidate['name'], $owner, TeamAdoptionMapper::ROUTE_AUTO, $now);
+        // ── The two automatic modes (v4.11.34) ─────────────────
+        //
+        // Both decide at once and before anything else, the SCIM branch
+        // below included: the administrator has said what happens to a team
+        // made elsewhere, and that answer does not depend on which door the
+        // team came through. Both still write the row, so the grid's
+        // thirty-day list stays the record of what was done.
+        if ($mode === self::MODE_ACCEPT) {
+            return $this->decideByItself($candidate, $now, true);
+        }
+        if ($mode === self::MODE_DECLINE) {
+            return $this->decideByItself($candidate, $now, false);
+        }
+
+        // ── `review`: somebody is asked ────────────────────────
+
+        // v4.11.32 — a SCIM team skips rules 1 and 2 and is always decided
+        // in the grid. Both open a request *for the owner*, and a SCIM
+        // circle's owner is the `app:circles` identity at LEVEL_OWNER, so
+        // there is nobody to stand in for and nobody to notify.
+        if ($isScim) {
+            $id = $this->adoptions->insert($teamId, $candidate['name'], '', TeamAdoptionMapper::ROUTE_GRID, $now);
             if ($id === null) {
                 return false;
             }
-            $row = $this->adoptions->find($id);
-            if ($row !== null) {
-                $this->decisions->accept($row, '');
-                $this->notifyOwner($owner, $teamId, 'team_adoption_accepted', $candidate['name']);
-            }
+            $this->notifyAdmins($teamId, $candidate['name']);
             return true;
         }
 
-        // Rules 2 and 3 need the licence (My Work and service teams are
+        // Rules 1 and 2 need the licence (My Work and service teams are
         // licensed) and an owner to open the request for.
         if ($this->tier->isFull() && $owner !== '') {
             $route = $this->decisions->holdingTeam() !== null
@@ -224,12 +391,69 @@ class TeamAdoptionService {
             }
         }
 
-        // Rule 4: the grid only.
+        // Rule 3: the grid only.
         $id = $this->adoptions->insert($teamId, $candidate['name'], $owner, TeamAdoptionMapper::ROUTE_GRID, $now);
         if ($id === null) {
             return false;
         }
         $this->notifyAdmins($teamId, $candidate['name']);
+        return true;
+    }
+
+    /**
+     * `accept` and `decline` mode: record the team and decide it in the same
+     * breath, with no decider and nobody asked (v4.11.34).
+     *
+     * `ROUTE_AUTO` on both, which is what the grid already reads to say the
+     * decision was automatic rather than naming a person. A failure to
+     * decide leaves the row pending, and a pending row with no request is
+     * exactly what the grid is for — so the team is never lost, it waits for
+     * a hand, and the administrators are told it is waiting.
+     *
+     * @param array{teamId: string, name: string, owner: string, kind?: string} $candidate
+     */
+    private function decideByItself(array $candidate, int $now, bool $accept): bool {
+        $teamId = $candidate['teamId'];
+        $owner  = $candidate['owner'];
+
+        $id = $this->adoptions->insert($teamId, $candidate['name'], $owner, TeamAdoptionMapper::ROUTE_AUTO, $now);
+        if ($id === null) {
+            return false;
+        }
+        $row = $this->adoptions->find($id);
+        if ($row === null) {
+            return true;
+        }
+
+        // v4.11.35 — the configured pair is written onto the row before
+        // the decision, exactly as the grid writes the pair a person chose.
+        // `accept()` then has nothing special to know about an automatic
+        // acceptance, and the row shows what was applied.
+        if ($accept) {
+            $this->adoptions->update($id, [
+                'template_key' => $this->defaultTemplate(),
+                'profile_key'  => $this->defaultProfile(),
+            ]);
+            $row = $this->adoptions->find($id) ?? $row;
+        }
+
+        try {
+            if ($accept) {
+                $this->decisions->accept($row, '');
+                $this->notifyOwner($owner, $teamId, 'team_adoption_accepted', $candidate['name']);
+                return true;
+            }
+            // Stored on the row and shown to the owner, so it has to say why
+            // without naming anybody: nobody decided this.
+            $reason = $this->l->t('This instance does not add teams made outside TeamHub.');
+            $this->decisions->decline($row, '', $reason);
+            $this->notifyOwner($owner, $teamId, 'team_adoption_declined', $candidate['name'], $reason);
+        } catch (\Throwable $e) {
+            $this->logger->error('[TeamHub][TeamAdoption] a team could not be decided automatically; it waits in the grid', [
+                'teamId' => $teamId, 'accept' => $accept, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            $this->notifyAdmins($teamId, $candidate['name']);
+        }
         return true;
     }
 
@@ -239,14 +463,20 @@ class TeamAdoptionService {
 
     /**
      * Everything the grid renders: the pending teams, the teams decided in
-     * the last thirty days, and the templates and policies to choose from.
+     * the last thirty days, the templates and policies to choose from, and
+     * the instance's rule.
+     *
+     * The rule rides along (v4.11.34) so the empty state can tell the truth
+     * in both of the grid's homes. "No teams are waiting, they appear here
+     * within a few minutes" is right in `review` mode and wrong in the other
+     * two, where nothing ever waits; the widget on the holding team has no
+     * other way to know, because the setting is an administrator's.
      *
      * @return array<string,mixed>
      * @throws AccessDeniedException
      */
     public function grid(string $uid): array {
         $this->requireDecider($uid);
-        $now = $this->timeFactory->getTime();
 
         $templates = $this->decisions->offeredTemplates();
         $profiles  = array_map(
@@ -254,9 +484,12 @@ class TeamAdoptionService {
             $this->policy->creationContext()['profiles'] ?? [],
         );
 
+        // v4.11.39 — no `decided`. The thirty-day history is in the audit
+        // log under Compliance now (DESIGN §2.172), and the grid was its only
+        // reader, so computing it here was a query nobody looked at.
         return [
+            'mode'            => $this->mode(),
             'pending'         => array_map(fn (array $r): array => $this->describe($r, $uid), $this->adoptions->findPending()),
-            'decided'         => array_map(fn (array $r): array => $this->describe($r, $uid), $this->adoptions->findDecidedSince($now - self::DECIDED_WINDOW_SECONDS)),
             'templates'       => $templates,
             'profiles'        => $profiles,
             'defaultTemplate' => $this->decisions->resolveTemplate(''),
@@ -523,31 +756,105 @@ class TeamAdoptionService {
     /**
      * @return list<array{teamId: string, name: string, owner: string}>
      */
+    /**
+     * Is one `circles_circle` row a candidate, and of which kind?
+     *
+     * Static and separate from the query on purpose (v4.11.32): this is where
+     * every rule about "what counts as an adoptable team" lives, it is the
+     * part that has been wrong before, and a unit test can reach it without a
+     * database. The query above only decides which rows are worth asking
+     * about.
+     *
+     * @param array<string,mixed> $row
+     * @return array{teamId: string, name: string, owner: string, kind: string}|null
+     */
+    public static function candidateFromRow(array $row, int $now): ?array {
+        $config = (int)($row['config'] ?? 0);
+        $source = (int)($row['source'] ?? 0);
+
+        if ($source === self::SOURCE_APP_CIRCLES) {
+            // ── The SCIM class ───────────────────────────────────────────
+            //
+            // `CFG_SCIM` is not optional here, and the test instance is why:
+            // it already carries two `source = 10001` circles — Circles' own
+            // app identities, named `app:circles:{singleId}` — and one of them
+            // has **`config = 0`**, which NOT_A_TEAM_BITS does not exclude.
+            // Keying on the source alone would have offered the Circles app's
+            // own identity circle to administrators as a team to adopt.
+            if (($config & CirclesConfig::CFG_SCIM) === 0) {
+                return null;
+            }
+            // Only the instance that owns the circle may adopt it. On a
+            // federated estate the master's SCIM circles are cached on every
+            // slave, and without this a slave would adopt the master's team
+            // and provision a *second* folder, Talk room, calendar and board
+            // for it.
+            //
+            // No alias list, like every other `isLocalInstance()` caller in
+            // the app: Circles stores a circle this instance owns with
+            // `instance = ''` and a remote one with the remote's name, so the
+            // empty-string test is the whole question here. (Verified on the
+            // test instance: every circle on it carries `''`.)
+            if (!CirclesMemberType::isLocalInstance((string)($row['instance'] ?? ''))) {
+                return null;
+            }
+        } elseif ($source === self::SOURCE_USER) {
+            if (($config & self::NOT_A_TEAM_BITS) !== 0) {
+                return null;
+            }
+        } else {
+            // Any other source is not a team at all. Reached only if the
+            // query is ever widened; stated rather than assumed.
+            return null;
+        }
+
+        // Circles writes `creation` in UTC (Nextcloud runs PHP in UTC). The
+        // age guard is what keeps TeamHub's own createTeam() out: its circle
+        // exists for a moment before the registry row does.
+        $created = isset($row['creation']) && $row['creation'] !== null
+            ? strtotime((string)$row['creation'] . ' UTC')
+            : false;
+        if ($created !== false && $now - $created < self::MIN_AGE_SECONDS) {
+            return null;
+        }
+
+        $teamId = (string)($row['unique_id'] ?? '');
+        if ($teamId === '') {
+            return null;
+        }
+        $name = trim((string)($row['display_name'] ?? '')) !== ''
+            ? (string)$row['display_name']
+            : (string)($row['name'] ?? '');
+
+        return [
+            'teamId' => $teamId,
+            'name'   => $name,
+            'owner'  => '',
+            // Which door it came through. A `scim` candidate has no human
+            // owner at all — Circles makes `app:circles` its owner at
+            // LEVEL_OWNER — so route() treats it differently.
+            'kind'   => $source === self::SOURCE_APP_CIRCLES ? self::KIND_SCIM : self::KIND_USER,
+        ];
+    }
+
     private function findCandidates(int $now): array {
         $qb = $this->db->getQueryBuilder();
-        $qb->select('c.unique_id', 'c.name', 'c.display_name', 'c.config', 'c.creation')
+        $qb->select('c.unique_id', 'c.name', 'c.display_name', 'c.config', 'c.creation', 'c.source', 'c.instance')
             ->from('circles_circle', 'c')
             ->leftJoin('c', TeamRegistryMapper::TABLE, 'r', $qb->expr()->eq('r.team_id', 'c.unique_id'))
-            ->where($qb->expr()->eq('c.source', $qb->createNamedParameter(self::SOURCE_USER, IQueryBuilder::PARAM_INT)))
+            ->where($qb->expr()->in('c.source', $qb->createNamedParameter(
+                self::CANDIDATE_SOURCES,
+                IQueryBuilder::PARAM_INT_ARRAY,
+            )))
             ->andWhere($qb->expr()->isNull('r.team_id'));
         $res = $qb->executeQuery();
 
         $out = [];
         while ($row = $res->fetch()) {
-            $config = (int)($row['config'] ?? 0);
-            if (($config & self::NOT_A_TEAM_BITS) !== 0) {
-                continue;
+            $candidate = self::candidateFromRow($row, $now);
+            if ($candidate !== null) {
+                $out[] = $candidate;
             }
-            // Circles writes `creation` in UTC (Nextcloud runs PHP in UTC).
-            $created = isset($row['creation']) && $row['creation'] !== null
-                ? strtotime((string)$row['creation'] . ' UTC')
-                : false;
-            if ($created !== false && $now - $created < self::MIN_AGE_SECONDS) {
-                continue;
-            }
-            $teamId = (string)$row['unique_id'];
-            $name   = trim((string)($row['display_name'] ?? '')) !== '' ? (string)$row['display_name'] : (string)$row['name'];
-            $out[] = ['teamId' => $teamId, 'name' => $name, 'owner' => ''];
         }
         $res->closeCursor();
 
@@ -598,10 +905,6 @@ class TeamAdoptionService {
         return $row !== false;
     }
 
-    private function creatorGroup(): string {
-        return trim($this->config->getAppValue(Application::APP_ID, 'createTeamGroup', ''));
-    }
-
     private function displayName(string $uid): string {
         if ($uid === '') {
             return '';
@@ -613,7 +916,7 @@ class TeamAdoptionService {
     // Notifications — the fallback, never the workflow
     // ------------------------------------------------------------------
 
-    /** Route 4: every administrator hears that a team waits in the grid. */
+    /** Route 3: every administrator hears that a team waits in the grid. */
     private function notifyAdmins(string $teamId, string $teamName): void {
         $group = $this->groupManager->get('admin');
         if ($group === null) {

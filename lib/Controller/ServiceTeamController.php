@@ -3,20 +3,19 @@ declare(strict_types=1);
 
 namespace OCA\TeamHub\Controller;
 
-use OCA\TeamHub\Constants\ServiceCatalogue;
 use OCA\TeamHub\Exception\LicenseGateException;
 use OCA\TeamHub\Exception\WorkflowRateLimitException;
 use OCA\TeamHub\Exception\WorkflowTransitionException;
+use OCA\TeamHub\Service\DecisionService;
 use OCA\TeamHub\Service\ServiceTeam\QuotaTeamsService;
 use OCA\TeamHub\Service\ServiceTeam\ExpiryTeamsService;
+use OCA\TeamHub\Service\ServiceTeam\ServiceCatalogueReader;
 use OCA\TeamHub\Service\ServiceTeam\ServiceCategoryService;
-use OCA\TeamHub\Workflow\Definition\TeamExpiryRequestDefinition;
 use OCA\TeamHub\Service\ServiceTeam\ServiceDeskStatisticsService;
 use OCA\TeamHub\Service\ServiceTeam\ServiceTeamService;
 use OCA\TeamHub\Service\Workflow\WorkflowActorResolver;
 use OCA\TeamHub\Service\Workflow\WorkflowEngine;
 use OCA\TeamHub\Service\Workflow\WorkflowLicenceTier;
-use OCA\TeamHub\Workflow\Definition\QuotaRequestDefinition;
 use OCP\AppFramework\Controller;
 use OCP\AppFramework\Http;
 use OCP\AppFramework\Http\Attribute\NoAdminRequired;
@@ -74,6 +73,12 @@ class ServiceTeamController extends Controller {
         // date, and the administrator's categories and links.
         private ExpiryTeamsService  $expiryTeams,
         private ServiceCategoryService $categories,
+        // v4.11.11 — the catalogue this viewer may start, shared with the
+        // unified search so the two can never offer different services.
+        private ServiceCatalogueReader $catalogueReader,
+        // v4.11.12 — the picker behind *Link a decision*: the desk's own
+        // public decisions, searched by keyword.
+        private DecisionService     $decisionService,
         private IUserSession        $userSession,
         private LoggerInterface     $logger,
     ) {
@@ -144,6 +149,50 @@ class ServiceTeamController extends Controller {
     }
 
     /**
+     * GET /api/v1/service-teams/{teamId}/requests
+     *
+     * The desk's whole history, filtered (v4.11.7) — what *View all
+     * requests* opens. The queue widget is bounded by
+     * `WorkflowEngine::CLOSED_WINDOW_DAYS`; this is not, so a member can
+     * find a request they never worked and that closed months ago.
+     *
+     * Query: `state` (`open` | `closed` | `all`, default `all`), `assignee`
+     * (a uid, or `unassigned` for nobody), `requester` (a uid), `q`,
+     * `offset`, `limit`. Eligible agents of that service team only — the
+     * engine checks, as it does for the queue.
+     */
+    #[NoAdminRequired]
+    public function requests(string $teamId): JSONResponse {
+        $uid = $this->requireUser();
+        if ($uid instanceof JSONResponse) {
+            return $uid;
+        }
+        try {
+            $assignee = $this->request->getParam('assignee', null);
+            if ($assignee !== null) {
+                // 'unassigned' is a value, not the absence of one: without it
+                // "nobody has this" could not be asked for.
+                $assignee = $assignee === 'unassigned' ? '' : (string)$assignee;
+            }
+            $state = (string)$this->request->getParam('state', 'all');
+            if (!in_array($state, ['open', 'closed', 'all'], true)) {
+                return new JSONResponse(['error' => 'state must be open, closed or all'], Http::STATUS_BAD_REQUEST);
+            }
+
+            return new JSONResponse($this->engine->listDeskRequests($teamId, $uid, [
+                'state'     => $state,
+                'assignee'  => $assignee,
+                'requester' => (string)$this->request->getParam('requester', ''),
+                'q'         => mb_substr((string)$this->request->getParam('q', ''), 0, 200),
+                'offset'    => (int)$this->request->getParam('offset', 0),
+                'limit'     => (int)$this->request->getParam('limit', 0),
+            ]));
+        } catch (\Throwable $e) {
+            return $this->serviceError($e, 'Failed to list the requests', ['teamId' => $teamId]);
+        }
+    }
+
+    /**
      * GET /api/v1/service-teams/{teamId}/statistics?days=30
      *
      * The statistics widget on a service team's home (v4.10.27): counts for
@@ -199,37 +248,9 @@ class ServiceTeamController extends Controller {
         }
         try {
             $this->serviceTeams->requireLicence();
-            $out = [];
-            $mayAskQuota = null;
-            $mayAskTime  = null;
-            foreach ($this->serviceTeams->listAll(true) as $team) {
-                $teamName = $this->serviceTeams->teamName($team->getTeamId());
-                foreach ($this->serviceTeams->describeCatalogue($team->getTeamId()) as $entry) {
-                    // v4.10.50 — a service TeamHub starts itself has no card.
-                    $serviceKey = ServiceCatalogue::serviceForDefinition((string)$entry['definitionKey']);
-                    if ($serviceKey !== null && !ServiceCatalogue::hasCard($serviceKey)) {
-                        continue;
-                    }
-                    if ($entry['definitionKey'] === QuotaRequestDefinition::KEY) {
-                        $mayAskQuota ??= $this->quotaTeams->forUser($uid) !== [];
-                        if (!$mayAskQuota) {
-                            continue;
-                        }
-                    }
-                    // v4.10.45 — only for somebody who administers a team
-                    // with an expiration date.
-                    if ($entry['definitionKey'] === TeamExpiryRequestDefinition::KEY) {
-                        $mayAskTime ??= $this->expiryTeams->forUser($uid) !== [];
-                        if (!$mayAskTime) {
-                            continue;
-                        }
-                    }
-                    $out[] = $entry + [
-                        'serviceTeamId'   => $team->getTeamId(),
-                        'serviceTeamName' => $teamName,
-                    ];
-                }
-            }
+            // v4.11.11 — the loop moved to `ServiceCatalogueReader` when the
+            // unified search needed the same per-viewer answer.
+            $out = $this->catalogueReader->forUser($uid);
             // v4.10.45 — the categories in the administrator's order (the
             // tiles follow it), and the links under the catalog.
             $categories = array_map(
@@ -403,6 +424,112 @@ class ServiceTeamController extends Controller {
             fn (string $caller): array => $this->engine->closeRequest($id, $caller, $note !== '' ? $note : null, $fileIds),
             'close the request',
         );
+    }
+
+    /**
+     * GET /api/v1/workflows/{id}/decisions
+     *
+     * The decisions this request points at (v4.11.12). Every eligible agent
+     * of the desk may read the list, closed requests included; each row says
+     * whether *this* reader may open the decision, and carries its question
+     * only when they may.
+     */
+    #[NoAdminRequired]
+    public function decisions(int $id): JSONResponse {
+        $uid = $this->requireUser();
+        if ($uid instanceof JSONResponse) {
+            return $uid;
+        }
+        try {
+            return new JSONResponse(['decisions' => $this->engine->listRequestDecisions($id, $uid)]);
+        } catch (\Throwable $e) {
+            return $this->serviceError($e, 'Failed to list the decisions', ['id' => $id]);
+        }
+    }
+
+    /**
+     * POST /api/v1/workflows/{id}/decisions
+     * Body: { "decisionId": 42 } — required.
+     *
+     * Point the request at a decision of the service team handling it
+     * (v4.11.12). Any eligible agent of the desk, while the request is open.
+     * A decision of another team is a 400: the desk records its decisions on
+     * its own side.
+     *
+     * The client may send the decision's own URL instead of an id — that is
+     * resolved in the client, which is where the URL was pasted; this route
+     * takes an id only, so there is no URL parsing on the server and nothing
+     * that could be pointed at another origin.
+     */
+    #[NoAdminRequired]
+    public function linkDecision(int $id, int $decisionId = 0): JSONResponse {
+        $uid = $this->requireUser();
+        if ($uid instanceof JSONResponse) {
+            return $uid;
+        }
+        try {
+            return new JSONResponse(['decisions' => $this->engine->linkDecision($id, $uid, $decisionId)]);
+        } catch (\Throwable $e) {
+            return $this->serviceError($e, 'Failed to link the decision', ['id' => $id]);
+        }
+    }
+
+    /**
+     * DELETE /api/v1/workflows/{id}/decisions/{decisionId}
+     *
+     * Take a decision off a request (v4.11.12). Same gate as linking one.
+     * The decision itself is untouched.
+     */
+    #[NoAdminRequired]
+    public function unlinkDecision(int $id, int $decisionId): JSONResponse {
+        $uid = $this->requireUser();
+        if ($uid instanceof JSONResponse) {
+            return $uid;
+        }
+        try {
+            return new JSONResponse(['decisions' => $this->engine->unlinkDecision($id, $uid, $decisionId)]);
+        } catch (\Throwable $e) {
+            return $this->serviceError($e, 'Failed to remove the decision', ['id' => $id, 'decisionId' => $decisionId]);
+        }
+    }
+
+    /**
+     * GET /api/v1/service-teams/{teamId}/public-decisions?q=…
+     *
+     * The desk's picker (v4.11.12): the service team's **approved, public**
+     * decisions whose question or answer contains the words given, newest
+     * first, **at most four**.
+     *
+     * Both narrowings are the product rule: only an approved decision answers
+     * a request, and only a public one opens for the requester who reads the
+     * conversation it is linked into.
+     *
+     * Only an eligible agent of that service team may ask. The rows are
+     * public records, so this is not what protects them; it is what stops the
+     * route being used to enumerate an arbitrary team's records from an
+     * arbitrary account.
+     */
+    #[NoAdminRequired]
+    public function publicDecisions(string $teamId): JSONResponse {
+        $uid = $this->requireUser();
+        if ($uid instanceof JSONResponse) {
+            return $uid;
+        }
+        try {
+            $this->serviceTeams->requireLicence();
+            if (!$this->serviceTeams->isEligibleAgent($uid, $teamId)) {
+                return new JSONResponse(['error' => 'You are not an agent of this service team'], Http::STATUS_FORBIDDEN);
+            }
+            return new JSONResponse([
+                'decisions' => $this->decisionService->searchPublicInTeam(
+                    $teamId,
+                    (string)$this->request->getParam('q', ''),
+                    4,
+                ),
+            ]);
+        } catch (\Throwable $e) {
+            return $this->serviceError($e, 'Failed to search the decisions', ['teamId' => $teamId]);
+        }
     }
 
     // ──────────────────────────────────────────────────────────────────────

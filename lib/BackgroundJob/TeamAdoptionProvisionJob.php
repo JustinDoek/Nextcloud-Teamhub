@@ -69,11 +69,18 @@ class TeamAdoptionProvisionJob extends QueuedJob {
             return;
         }
 
-        $teamId = (string)$row['teamId'];
-        $owner  = $this->userManager->get((string)$row['ownerUid']);
+        $teamId   = (string)$row['teamId'];
+        $ownerUid = (string)$row['ownerUid'];
+        $owner    = $ownerUid !== '' ? $this->userManager->get($ownerUid) : null;
         if ($owner === null) {
-            $this->finish($id, TeamAdoptionMapper::PROVISION_FAILED,
-                'The team owner\'s account no longer exists, so the template\'s apps were not added. A team admin can add them from Manage team.');
+            // v4.11.34 — the two reasons are not the same thing and the note
+            // is what the grid shows an administrator. A SCIM team has no
+            // human owner at all (Circles makes `app:circles` its owner), and
+            // telling somebody their owner's account was deleted sends them
+            // looking for a user that never existed.
+            $this->finish($id, TeamAdoptionMapper::PROVISION_FAILED, $ownerUid === ''
+                ? 'This team has no owner account for resources to be created as, so the template\'s apps were not added. A team admin can add them from Manage team.'
+                : 'The team owner\'s account no longer exists, so the template\'s apps were not added. A team admin can add them from Manage team.');
             return;
         }
 

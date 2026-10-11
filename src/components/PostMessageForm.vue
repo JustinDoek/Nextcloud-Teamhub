@@ -237,25 +237,13 @@
 
         <!-- Decision options -->
         <div v-if="messageType === 'decision'" class="post-form__decision-options">
-            <!-- Supersede banner — shown when this proposal will replace another -->
-            <div v-if="decisionSupersedesId" class="decision-supersede-banner" role="note">
-                <SwapHorizontal :size="ICON_BODY" aria-hidden="true" />
-                <span class="decision-supersede-banner__text">
-                    <!-- TRANSLATORS: shown above the message composer when the user is creating a proposal that supersedes an earlier one -->
-                    {{ t('teamhub', 'This proposal will supersede decision #{id}. The original will be withdrawn if it is still open.', { id: decisionSupersedesId }) }}
-                </span>
-                <NcButton
-                    class="decision-supersede-banner__clear"
-                    :aria-label="t('teamhub', 'Cancel superseding')"
-                    :title="t('teamhub', 'Cancel superseding')"
-                    @click="decisionSupersedesId = null"
-                    variant="tertiary"
-                    size="small">
-                    <template #icon>
-                        <Close :size="ICON_INLINE" />
-                    </template>
-                </NcButton>
-            </div>
+            <!-- v4.11.18 — the supersede banner is gone with the handshake
+                 that set it. Superseding is now something an approver does
+                 to an *approved* decision, in the Decisions tab, by naming
+                 the decision that replaces it — so there is nothing to
+                 pre-set on a proposal that has not been written yet. The
+                 `supersedes_id` column and the API still accept it; no UI
+                 reaches them, which is why this banner could never render. -->
 
             <!-- v4.5.46 — Impact / Level / Category as one two-row grid.
                  They were three stacked blocks, each with its own label line
@@ -547,6 +535,20 @@ export default {
             type: Boolean,
             default: false,
         },
+        /**
+         * v4.11.42 — initial contents of the body field (*Context*, in
+         * decision mode). Read once, in `created()`, so everything the user
+         * types afterwards is theirs: this is a starting point, not a bound
+         * value.
+         *
+         * Its one caller today is ComposeDecisionModal's `contextPrefill`,
+         * carrying the markdown link to the file the *Propose a decision*
+         * entry in the Files ⋯ menu was invoked on.
+         */
+        initialBody: {
+            type: String,
+            default: '',
+        },
     },
 
     data() {
@@ -578,10 +580,6 @@ export default {
             decisionCategoryOptions: [],
             decisionCategoriesLoaded: false,
             loadingCategories: false,
-            // Supersede handshake (Session E flow finally wired in Session K).
-            // When non-null, this proposal supersedes the referenced decision —
-            // the backend auto-withdraws that decision on successful submit.
-            decisionSupersedesId: null,
             // v3.97.5 — optional milestone linkage for Advanced project teams.
             // Loaded lazily when the compose form is opened on such a team.
             // Bound NcSelect option object { id, label, date } or null.
@@ -833,6 +831,13 @@ export default {
     },
 
     created() {
+        // v4.11.42 — a caller-supplied starting point for the body. Before the
+        // first render, so the field is never briefly empty, and unconditional
+        // on `forceDecision` because the prop says what it means on its own.
+        if (this.initialBody) {
+            this.body = this.initialBody
+        }
+
         // When the form is embedded in ComposeDecisionModal, lock into decision
         // mode from the very first render so the decision-specific UI shows
         // without flicker, and prime the category dropdown.
@@ -858,16 +863,21 @@ export default {
         ...mapActions(['postMessage']),
 
         /**
-         * Read window.__teamhubDecisionCompose set by TeamView.openDecisionCompose().
-         * If present, pre-set the form to Decision mode and stash the
-         * supersedesId. Clears the global so we don't double-consume.
+         * Read window.__teamhubDecisionCompose, set by whoever wants this
+         * form to open in Decision mode.
+         *
+         * v4.11.18 — it no longer carries a `supersedesId`. It used to be
+         * the handshake behind *Supersede* on an open proposal, and that
+         * button is gone: superseding is now an approver naming the decision
+         * that replaces an approved one. The handshake itself stays, because
+         * "open the composer in decision mode" is still a thing callers ask
+         * for, and it clears the global so we do not double-consume.
          */
         consumeDecisionComposeHandshake() {
             const handshake = window.__teamhubDecisionCompose
             if (!handshake) return
             window.__teamhubDecisionCompose = null
             this.messageType = 'decision'
-            this.decisionSupersedesId = handshake.supersedesId || null
             // Trigger category load if not already done (watcher handles
             // the case where messageType was already 'decision').
             if (!this.decisionCategoriesLoaded) {
@@ -1434,7 +1444,15 @@ export default {
                 const { data } = await axios.get(
                     generateUrl(`/apps/teamhub/api/v1/teams/${teamId}/decisions/manage/categories`)
                 )
-                this.decisionCategoryOptions = Array.isArray(data?.items) ? data.items : []
+                // v4.11.30 — **the archive is not a place to propose into**
+                // (Justin, 2026-10-05). It holds decisions that have stopped
+                // governing, it has no approvers and no review period, so a
+                // proposal made there could never be approved by anybody.
+                // `DecisionService::propose()` refuses it as well — hiding an
+                // option has never been a boundary — and this is what stops
+                // the refusal ever being something a user has to read.
+                const items = Array.isArray(data?.items) ? data.items : []
+                this.decisionCategoryOptions = items.filter(c => !c.is_archive)
                 this.decisionCategoriesLoaded = true
                 // v4.5.46 — preselect the first category. Category is required
                 // and the picker is now a plain select, where an unset value
@@ -1519,12 +1537,10 @@ export default {
                         category: this.decisionCategory?.name || null,
                         // source_type defaults to 'message' server-side for
                         // decisions created from the compose form.
-                        // supersedesId not exposed in v1 compose form — only via
-                        // the "Supersede this decision" entry point from Session E.
-                        // Set when the proposer used the "Supersede" action
-                        // from the Decisions tab. Backend auto-withdraws the
-                        // referenced decision if it was still open.\
-                        supersedesId: this.decisionSupersedesId,
+                        // v4.11.18 — `supersedesId` is no longer sent from
+                        // here. A proposal cannot know what it will replace;
+                        // superseding is an approver's act on the approved
+                        // decision being retired (DecisionReviewService).
                         // Session A: the compose modal's proposer has written
                         // the full proposal upfront, so it can land directly on
                         // 'finalized'.
@@ -2048,34 +2064,8 @@ export default {
 }
 .post-form__image-dialog-divider::before { left: 0; }
 .post-form__image-dialog-divider::after  { right: 0; }
-/* v3.100.14: full-saturation warning banner per SKILLS.md (was a 12%
-   color-mix soft tint). Fallback #hex values dropped now that NC
-   guarantees --color-warning / --color-warning-text on all themes. */
-.decision-supersede-banner {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 8px;
-    margin-bottom: 8px;
-    background: var(--color-warning);
-    border: 1px solid var(--color-warning);
-    border-radius: var(--border-radius-small);
-    color: var(--color-warning-text);
-    font-size: 0.9em;
-}
-
-.decision-supersede-banner__text {
-    flex: 1;
-    line-height: 1.4;
-}
-
-.decision-supersede-banner__clear {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 24px;
-    flex-shrink: 0;
-}
+/* v4.11.18 — the .decision-supersede-banner rules went with the banner
+   itself; see the comment where it used to be in the template. */
 
 /* v3.100.14: hover feedback on a clear button that lives inside the
    warning banner. --color-warning-hover is the intended token for this

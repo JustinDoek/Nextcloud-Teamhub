@@ -699,7 +699,18 @@ export function sourceGroupOf(providerId) {
  * @param {string} active  the current providerId filter ('' = All)
  * @return {Array<{key: string, label: string, icon: string, count: number|null, active: boolean, members: string[]}>}
  */
-export function buildSourceTabs(providers, counts = {}, active = '') {
+/**
+ * @param {Array<object>} providers  the viewer's providers
+ * @param {object} counts            per-provider counts from the server
+ * @param {string} active            the current providerId filter
+ * @param {object} extras            v4.11.41 — per-*group* counts that come
+ *   from somewhere other than a provider: the workflow requests a definition
+ *   filed under that group (`IWorkflowDefinitionSource`). Added to the
+ *   group's own total, and enough on its own to make the chip exist — an
+ *   instance whose admin providers are all unavailable can still have an
+ *   administrator's request waiting.
+ */
+export function buildSourceTabs(providers, counts = {}, active = '', extras = {}) {
 	const tabs = [{
 		key: '',
 		label: t('teamhub', 'All'),
@@ -740,12 +751,76 @@ export function buildSourceTabs(providers, counts = {}, active = '') {
 			key: group,
 			label: sourceGroupLabel(group),
 			icon: SOURCE_GROUP_ICONS[group] || FALLBACK_ICON,
-			count: members.reduce((sum, id) => sum + (counts[id] || 0), 0),
+			count: members.reduce((sum, id) => sum + (counts[id] || 0), 0) + (extras[group] || 0),
 			active: active === group || members.includes(active),
 			members,
 		})
 	}
+	// v4.11.41 — a group whose providers are all absent or unavailable, but
+	// which holds workflow requests. Without this the Administration chip
+	// would be missing on an instance with no admin provider available, and
+	// the request filed under it would be findable only under All.
+	for (const group of Object.keys(extras)) {
+		if (seen.has(group) || !extras[group] || !SOURCE_GROUP_MEMBERS[group]) {
+			continue
+		}
+		seen.add(group)
+		tabs.push({
+			key: group,
+			label: sourceGroupLabel(group),
+			icon: SOURCE_GROUP_ICONS[group] || FALLBACK_ICON,
+			count: extras[group],
+			active: active === group,
+			members: [],
+		})
+	}
 	return tabs
+}
+
+// ── The Services view (v4.11.5) ─────────────────────────────────────────
+
+/**
+ * The key of the Services chip: only the service requests the viewer takes
+ * part in — as requester, as the desk, or as somebody a step waits on.
+ *
+ * Not a source. A service request is a workflow, never a provider item, so
+ * every source chip hides it (v4.10.18) and *All* was the only way to find
+ * one. This key is the page's own narrowing: it is stored in the viewer's
+ * preferences like any other chip, but never sent as `providerIds` — the
+ * aggregated queue is read unnarrowed and its rows are left out.
+ */
+export const SERVICES_VIEW = 'services'
+
+/**
+ * Add the Services chip to the source tabs, straight after *All*: it cuts
+ * across the sources rather than being one of them.
+ *
+ * Shown when the viewer can ask for a service (`available`: the catalogue
+ * has something in it), has a service request, or has the chip on — a chip
+ * that is on and invisible is a filter nobody can see how to leave.
+ *
+ * @param {Array<object>} tabs    what `buildSourceTabs` returned
+ * @param {object} opts
+ * @param {number|null} opts.count  service rows, or null when not yet known
+ * @param {boolean} opts.available
+ * @param {string} opts.active    the current providerId filter
+ * @return {Array<object>}
+ */
+export function withServicesTab(tabs, { count = 0, available = false, active = '' } = {}) {
+	const on = active === SERVICES_VIEW
+	if (!on && !available && !count) {
+		return tabs
+	}
+	const chip = {
+		key: SERVICES_VIEW,
+		// TRANSLATORS: My Work filter chip — only the service requests you take part in
+		label: t('teamhub', 'Services'),
+		icon: 'Lifebuoy',
+		count,
+		active: on,
+		members: [],
+	}
+	return [...tabs.slice(0, 1), chip, ...tabs.slice(1)]
 }
 
 /**
@@ -801,6 +876,10 @@ export const RESOURCE_TYPE_ICONS = {
 	file: 'Folder',
 	decision: 'Gavel',
 	meeting: 'Calendar',
+	// v4.11.15 — a VTODO on a team calendar. A ticked checkbox, which is the
+	// one thing a task is for; a plain Calendar would read as a meeting, and
+	// the two sit next to each other in the queue.
+	task: 'CheckboxMarkedOutline',
 	// v4.5.45 — a resource awaiting an admin's review. Same glyph as the
 	// Team admin category, because this provider is the only thing in it.
 	team_resource: 'ShieldAccountOutline',
@@ -837,6 +916,9 @@ export const PROVIDER_ICONS = {
 	approval: 'Folder',
 	decisions: 'Gavel',
 	meetings: 'Calendar',
+	// v4.11.15 — team tasks. Same glyph as the resource type, per the note
+	// above: they are the same affordance seen twice.
+	tasks: 'CheckboxMarkedOutline',
 	teamadmin: 'ShieldAccountOutline',
 	teamexpiry_team: 'CalendarClock',
 	teamexpiry_admin: 'CalendarClock',
@@ -862,6 +944,9 @@ export function resourceTypeLabel(type) {
 	case 'meeting':
 		// TRANSLATORS: the kind of thing a My Work row is — a calendar meeting
 		return t('teamhub', 'Meeting')
+	case 'task':
+		// TRANSLATORS: the kind of thing a My Work row is — a task on a team calendar
+		return t('teamhub', 'Task')
 	case 'team_resource':
 		// TRANSLATORS: the kind of thing a My Work row is — an app resource connected to a team
 		return t('teamhub', 'Team resource')
@@ -932,6 +1017,23 @@ export function statusLabel(status) {
 		return t('teamhub', 'Upcoming milestone')
 	case 'completed':
 		return t('teamhub', 'Completed')
+	// v4.11.15 — team tasks. A task names who it is for, so the statuses are
+	// the three answers to "whose is it" plus overdue and done.
+	case 'task_assigned':
+		// TRANSLATORS: My Work status filter option — a task on a team calendar that names the viewer
+		return t('teamhub', 'My tasks')
+	case 'task_overdue':
+		// TRANSLATORS: My Work status filter option — a task of the viewer's past its due date
+		return t('teamhub', 'Overdue tasks')
+	case 'task_team':
+		// TRANSLATORS: My Work status filter option — a task on a team calendar that names nobody
+		return t('teamhub', 'Team tasks')
+	case 'task_delegated':
+		// TRANSLATORS: My Work status filter option — a task the viewer gave to a colleague
+		return t('teamhub', 'Given to someone else')
+	case 'task_done':
+		// TRANSLATORS: My Work status filter option — a finished task
+		return t('teamhub', 'Completed tasks')
 	// v4.10.1 — the team-space administrator source.
 	case 'shared_folder':
 		// TRANSLATORS: My Work status filter option — a team's files still sit in an old shared folder

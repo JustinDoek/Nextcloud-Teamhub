@@ -45,6 +45,23 @@ use Psr\Log\LoggerInterface;
 class PolicyService {
 
     /**
+     * Recorded in `assigned_by` when TeamHub classified a team and no person
+     * was involved — an automatic adoption of a team that has no owner
+     * either (v4.11.35, DESIGN §2.169).
+     *
+     * `assigned_by` is `notnull`, and {@see assignAtCreation()} assigns
+     * nothing at all when it has neither an actor nor a session: that guard
+     * is what left an automatically accepted SCIM team unclassified. The
+     * answer is not to weaken the guard — a policy row has to say who
+     * applied it — but to name the one actor that is not a person.
+     *
+     * Shaped like Circles' own `app:circles:{singleId}` on the same kind of
+     * data, so it reads as a system actor rather than a missing one and
+     * cannot collide with a Nextcloud account.
+     */
+    public const ACTOR_SYSTEM = 'app:teamhub';
+
+    /**
      * Reserved, and not a row in `teamhub_policy_profile`.
      *
      * A team with no assignment resolves to an empty policy: it governs
@@ -451,7 +468,20 @@ class PolicyService {
      * @return array{templates: list<array<string,mixed>>}
      */
     public function templatesForCreation(): array {
-        return ['templates' => $this->templateMapper->findAll()];
+        // v4.11.33 — the wizard's own two render values travel with the
+        // templates, because the wizard fetched them from
+        // `GET /api/v1/admin/settings`, which is **NC-admin gated**. So the
+        // description an administrator writes for the Create new team dialog
+        // reached administrators only: every other person got a 403, the
+        // catch set it to '', and the dialog silently showed the template's
+        // built-in subtitle instead. Neither value is admin information —
+        // one is a sentence shown to whoever is creating a team, the other
+        // the date the expiry picker opens on.
+        return [
+            'templates'         => $this->templateMapper->findAll(),
+            'wizardDescription' => $this->config->getAppValue(Application::APP_ID, 'wizardDescription', ''),
+            'expiryDefaultDate' => TeamExpiryService::defaultPickerDateFor(),
+        ];
     }
 
     /**
@@ -669,8 +699,8 @@ class PolicyService {
      * @return array<string,mixed> the governed values, empty when unclassified
      */
     public function assignAtCreation(string $teamId, ?string $requestedKey, ?string $templateKey = null, ?string $actorUid = null): array {
-        // v4.10.50 — an adopted team may be accepted from a background job
-        // (no creator group: accepted by itself), which has no session; the
+        // v4.10.50 — an adopted team may be accepted from the sweep itself
+        // (`teamAdoptionMode = accept`, v4.11.34), which has no session; the
         // caller names the actor instead. Without either, nothing is assigned.
         if ($actorUid !== null && $actorUid !== '') {
             $actor = $actorUid;

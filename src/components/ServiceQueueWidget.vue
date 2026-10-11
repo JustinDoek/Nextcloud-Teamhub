@@ -61,20 +61,21 @@
 						:step="currentStep(request)"
 						:extra="rowExtra(request)" />
 
-					<template v-else>
-						<div class="svc-queue-w__meta">
-							<span>{{ t('teamhub', 'Asked by {name}', { name: nameOf(request, request.startedBy) }) }}</span>
-							<span v-if="request.desk" :title="formatAbsolute(request.desk.closedAt)">
-								{{ formatRecent(request.desk.closedAt) }}
-							</span>
-						</div>
-						<div v-if="request.desk" class="svc-queue-w__chips">
-							<NcChip
-								no-close
-								:variant="deskOutcomeVariant(request.desk.status)"
-								:text="deskOutcomeLabel(request.desk.status)" />
-						</div>
-					</template>
+					<!-- v4.11.7 — how it ended sits on the second line with who
+					     asked and when, not on a third line of its own
+					     (Justin, 2026-09-30). A closed row is two lines, like
+					     every other row in the widget. -->
+					<div v-else class="svc-queue-w__meta">
+						<span>{{ t('teamhub', 'Asked by {name}', { name: nameOf(request, request.startedBy) }) }}</span>
+						<span v-if="request.desk" :title="formatAbsolute(request.desk.closedAt)">
+							{{ formatRecent(request.desk.closedAt) }}
+						</span>
+						<NcChip
+							v-if="request.desk"
+							no-close
+							:variant="deskOutcomeVariant(request.desk.status)"
+							:text="deskOutcomeLabel(request.desk.status)" />
+					</div>
 				</div>
 
 				<div class="svc-queue-w__actions">
@@ -106,6 +107,17 @@
 				</div>
 			</li>
 		</ul>
+
+		<!-- v4.11.7 — the widget is the glance; everything the desk has ever
+		     been asked is in the grid on the team's Services tab (Justin,
+		     2026-09-30). Always offered, including on an empty tab: a desk
+		     with nothing on it now still has a history. -->
+		<div class="svc-queue-w__foot">
+			<NcButton variant="tertiary" size="small" @click="openGrid">
+				<template #icon><ClipboardTextOutline :size="ICON_INLINE" /></template>
+				{{ t('teamhub', 'View all requests') }}
+			</NcButton>
+		</div>
 
 		<!-- Reassign, set back to unclaimed, or add an internal note. One small
 		     dialog for the three, because each asks one thing. -->
@@ -160,28 +172,13 @@
 			</div>
 		</NcModal>
 
-		<!-- Processing a request is the workflow's own detail and actions —
-		     complete, reject, ask the requester — exactly as in My Work, so
-		     the two places a member works a request can never disagree. -->
-		<WorkflowDetailModal
-			v-if="detailOpen"
-			:workflow="workflows.detail"
-			:loading="workflows.detailLoading"
-			:error="workflows.detailError"
-			:busy="workflows.busyId !== null && !!workflows.detail && workflows.busyId === workflows.detail.id"
-			:display-names="workflows.detail ? (workflows.detail.people || {}) : {}"
-			@close="closeRequest"
-			@retry="reopenRequest"
-			@action="onWorkflowAction"
-			@changed="reload" />
-		<WorkflowActionDialog
-			v-if="workflowAction"
-			:action="workflowAction.action"
-			:subject="workflowAction.workflow.title"
-			:workflow="workflowAction.workflow"
-			:busy="workflows.busyId === workflowAction.workflow.id"
-			@close="workflowAction = null"
-			@submit="submitWorkflowAction" />
+		<!-- v4.11.12 — the request's own detail used to open here as a dialog.
+		     It opens in the Services tab's request grid now (`openRequest()`),
+		     which is where a member works a request from wherever they found
+		     it, so the detail view and the verbs that belong to it are no
+		     longer wired into this widget. What stays is the queue's own work:
+		     claiming a row, and the dialog behind *Reassign*, *Set as
+		     unclaimed* and *Add internal note*. -->
 	</div>
 </template>
 
@@ -195,11 +192,10 @@ import {
 	NcModal, NcNoteCard, NcSelect, NcTextArea,
 } from '@nextcloud/vue'
 import AccountArrowRight from 'vue-material-design-icons/AccountArrowRight.vue'
+import ClipboardTextOutline from 'vue-material-design-icons/ClipboardTextOutline.vue'
 import LockOpenVariantOutline from 'vue-material-design-icons/LockOpenVariantOutline.vue'
 import NoteEditOutline from 'vue-material-design-icons/NoteEditOutline.vue'
 
-import WorkflowActionDialog from './mywork/WorkflowActionDialog.vue'
-import WorkflowDetailModal from './mywork/WorkflowDetailModal.vue'
 import WorkflowTaskMeta from './mywork/WorkflowTaskMeta.vue'
 import FileAttachField from './mywork/FileAttachField.vue'
 import {
@@ -207,7 +203,7 @@ import {
 	agentActionLabel, assignableAgents, assigneeLabel, deskOutcomeLabel, deskOutcomeVariant,
 	queueTabEmptyState, queueTabLabel, queueTabRows,
 } from '../constants/serviceTeams.js'
-import { actionText, activeStep, fileSharingOf, formatAbsolute, formatRecent, isOpen, rowKey, shareNote } from '../constants/workflows.js'
+import { activeStep, fileSharingOf, formatAbsolute, formatRecent, rowKey, shareNote } from '../constants/workflows.js'
 import { ICON_BODY, ICON_INLINE, ICON_LARGE } from '../constants/uiTokens.js'
 
 /**
@@ -232,8 +228,8 @@ export default {
 	components: {
 		NcActionButton, NcActions, NcButton, NcChip, NcCounterBubble, NcLoadingIcon,
 		NcModal, NcNoteCard, NcSelect, NcTextArea,
-		WorkflowActionDialog, WorkflowDetailModal, WorkflowTaskMeta, FileAttachField,
-		AccountArrowRight, LockOpenVariantOutline, NoteEditOutline,
+		WorkflowTaskMeta, FileAttachField,
+		AccountArrowRight, ClipboardTextOutline, LockOpenVariantOutline, NoteEditOutline,
 	},
 
 	data() {
@@ -247,9 +243,7 @@ export default {
 			activeTab: QUEUE_TAB.NEW,
 			/** `{ request, action, value }` while an agent dialog is open. */
 			dialog: null,
-			detailOpen: false,
 			/** `{ workflow, action }` while a workflow verb collects its text. */
-			workflowAction: null,
 		}
 	},
 
@@ -404,11 +398,6 @@ export default {
 			}
 		},
 
-		async claimFromDetail(workflow) {
-			await this.claim(workflow)
-			this.$store.dispatch('workflows/open', { id: workflow.id, step: workflow.viewer?.stepKey || '' })
-		},
-
 		startDialog(request, action) {
 			this.dialog = { request, action, value: '', files: [] }
 		},
@@ -432,76 +421,35 @@ export default {
 			}
 		},
 
-		/** v4.10.37 — opened on the row's own task. */
+		/**
+		 * v4.11.12 — a service worker works a request in the Services tab's
+		 * request grid, not in a dialog over this widget (Justin, 2026-09-30):
+		 * the same place, with the same *Back to requests*, wherever they
+		 * opened it from. The widget is a glance at the queue; a widget on the
+		 * team's home is no place to read a long request.
+		 *
+		 * The request and the pane are committed before the view, so the tab
+		 * opens on the grid with the request already open rather than showing
+		 * the services and then jumping (the `openGrid()` rule).
+		 *
+		 * v4.10.37 — the row's own task is what the grid then opens it on.
+		 */
 		openRequest(request) {
-			this.detailOpen = true
-			this.$store.dispatch('workflows/open', { id: request.id, step: request.viewer?.stepKey || '' })
+			this.$store.commit('SET_SERVICES_TAB_REQUEST', request.id)
+			this.$store.commit('SET_SERVICES_TAB_PANE', 'requests')
+			this.$store.commit('SET_VIEW', 'services')
 		},
 
-		reopenRequest() {
-			const detail = this.workflows.detail
-			if (detail?.id) {
-				this.$store.dispatch('workflows/open', { id: detail.id, step: detail.viewer?.stepKey || '' })
-			}
+		/**
+		 * v4.11.7 — the whole history, on the team's Services tab. The pane
+		 * is committed before the view so the tab opens on the grid rather
+		 * than on the services and then jumping.
+		 */
+		openGrid() {
+			this.$store.commit('SET_SERVICES_TAB_PANE', 'requests')
+			this.$store.commit('SET_VIEW', 'services')
 		},
 
-		closeRequest() {
-			this.detailOpen = false
-			this.$store.dispatch('workflows/close')
-		},
-
-		/** A verb from the detail view. Those that take a text ask for it first. */
-		onWorkflowAction({ workflow, action, direct = false }) {
-			if (this.workflows.busyId !== null) {
-				return
-			}
-			// v4.10.39 — claiming from the detail view: the task it is open on.
-			if (action === AGENT_ACTION.CLAIM) {
-				this.claimFromDetail(workflow)
-				return
-			}
-			if (direct || actionText(action) === 'none') {
-				this.runWorkflowAction(workflow, action, '')
-				return
-			}
-			this.workflowAction = { workflow, action }
-		},
-
-		/** v4.10.38 — `files` from the dialog's paperclip. */
-		submitWorkflowAction(text, files = []) {
-			if (this.workflowAction) {
-				this.runWorkflowAction(this.workflowAction.workflow, this.workflowAction.action, text, files)
-			}
-		},
-
-		async runWorkflowAction(workflow, action, text, files = []) {
-			try {
-				const updated = await this.$store.dispatch('workflows/act', {
-					id: workflow.id, action, text, step: workflow.viewer?.stepKey || '',
-					fileIds: (files || []).map(f => f.fileId),
-				})
-				this.workflowAction = null
-				showSuccess(t('teamhub', 'Done: {title}', { title: updated?.title || workflow.title }))
-				if (updated && isOpen(updated) && this.workflows.detail?.id === updated.id) {
-					this.$store.dispatch('workflows/open', { id: updated.id, step: updated.viewer?.stepKey || '' })
-				} else {
-					this.closeRequest()
-				}
-			} catch (e) {
-				if (e?.status === 0) {
-					return // busy — the first click is still running
-				}
-				showError(e?.message || t('teamhub', 'That action could not be completed.'))
-				if (e?.status === 409) {
-					this.workflowAction = null
-				}
-			} finally {
-				// Answering or rejecting moves the request to Closed; asking the
-				// requester keeps it where it is. Either way the queue is re-read
-				// rather than guessed at.
-				this.reload()
-			}
-		},
 	},
 }
 </script>
@@ -586,12 +534,16 @@ export default {
 	}
 }
 
+/* v4.11.4 — no gap: the title button already carries its own vertical
+   padding, so a gap on top of it read as the task line drifting away from
+   the subject it belongs to (Justin, 2026-09-30). The Closed tab's chips
+   ask for their own air instead. */
 .svc-queue-w__main {
 	flex: 1 1 auto;
 	min-width: 0;
 	display: flex;
 	flex-direction: column;
-	gap: var(--th-space-xs, 4px);
+	gap: 0;
 }
 
 /* v4.11.2 — `size="small"` rather than a min-height override: a full-height
@@ -631,24 +583,23 @@ export default {
 	}
 }
 
+.svc-queue-w__foot {
+	display: flex;
+	justify-content: flex-end;
+	padding-block-start: var(--th-space-xs, 4px);
+}
+
 .svc-queue-w__meta {
 	display: flex;
 	flex-wrap: wrap;
-	gap: 0 var(--th-space-sm, 8px);
+	/* v4.11.7 — the outcome chip lives on this line now, so it needs a row
+	   gap as well: a narrow column wraps the chip under the words rather
+	   than letting it touch them. */
+	align-items: center;
+	gap: var(--th-space-xs, 4px) var(--th-space-sm, 8px);
 	padding-inline-start: var(--svc-row-indent);
 	color: var(--th-widget-meta-color, var(--color-text-maxcontrast));
 	font-size: var(--th-font-meta, 13px);
-}
-
-.svc-queue-w__chips {
-	display: flex;
-	flex-wrap: wrap;
-	gap: var(--th-space-xs, 4px);
-	padding-inline-start: var(--svc-row-indent);
-
-	&:empty {
-		display: none;
-	}
 }
 
 .svc-queue-w__actions {

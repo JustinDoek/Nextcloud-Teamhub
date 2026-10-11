@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace OCA\TeamHub\Workflow\Definition;
 
+use OCA\TeamHub\MyWork\SourceGroup;
 use OCA\TeamHub\Constants\ServiceCatalogue;
 use OCA\TeamHub\Db\TeamAdoptionMapper;
 use OCA\TeamHub\Db\WorkflowInstance;
@@ -11,6 +12,7 @@ use OCA\TeamHub\Service\TeamAdoptionDecisionService;
 use OCA\TeamHub\Service\Workflow\WorkflowActorResolver;
 use OCA\TeamHub\Service\Workflow\WorkflowEngine;
 use OCA\TeamHub\Workflow\IWorkflowDefinition;
+use OCA\TeamHub\Workflow\IWorkflowDefinitionSource;
 use OCA\TeamHub\Workflow\IWorkflowDefinitionEndHook;
 use OCA\TeamHub\Workflow\IWorkflowDefinitionHooks;
 use OCA\TeamHub\Workflow\IWorkflowDefinitionReference;
@@ -59,6 +61,7 @@ class TeamAdoptionDefinition implements
     IWorkflowDefinitionHooks,
     IWorkflowDefinitionEndHook,
     IWorkflowDefinitionReference,
+    IWorkflowDefinitionSource,
     IWorkflowSystemStarted {
 
     public const KEY     = 'team_adoption';
@@ -128,6 +131,15 @@ class TeamAdoptionDefinition implements
         return $holder !== null
             ? WorkflowActor::serviceAgent($holder)
             : WorkflowActor::group(self::ADMIN_GROUP);
+    }
+
+    /**
+     * v4.11.41 — the My Work source chip these requests appear under.
+     * Same chip as its directory-group sibling: nobody asked for it and it is
+     * answered from Admin → TeamHub (or a desk's widget), not by the team.
+     */
+    public function sourceGroup(): string {
+        return SourceGroup::ADMINISTRATION;
     }
 
     public function getConcurrency(): string {

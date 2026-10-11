@@ -18,16 +18,21 @@ use Psr\Log\LoggerInterface;
 /**
  * File review requests (v4.8.18). Design: FILE-REVIEW-PLAN.md §3.2.
  *
- * ## Two of these are called from outside TeamHub
+ * ## One of these is called from outside TeamHub
  *
- * `getScopes` and `reviewContext` are what the Files-app file action talks to,
- * from a page TeamHub does not render. That changes nothing about how they are
- * written — every method here re-establishes the caller and their membership
- * through the service, and none of them trusts a team id or a file id because
- * it arrived in a URL. It is worth stating because the temptation with a
- * "internal, our own script calls it" endpoint is to gate it less, and this is
- * exactly the endpoint pair where that would be wrong: `reviewContext` returns
- * a team's member list.
+ * `reviewContext` is what the Files-app review dialog talks to, from a page
+ * TeamHub does not render. That changes nothing about how it is written —
+ * every method here re-establishes the caller and their membership through the
+ * service, and none of them trusts a team id or a file id because it arrived in
+ * a URL. It is worth stating because the temptation with an "internal, our own
+ * script calls it" endpoint is to gate it less, and this is exactly the
+ * endpoint where that would be wrong: `reviewContext` returns a team's member
+ * list.
+ *
+ * The folder-prefix call that used to sit beside it, `getScopes`, moved to
+ * `FileActionController` in v4.11.42, when the Files entry gained a second
+ * action whose gating is not this one's. `FileReviewService::listScopes()` is
+ * gone with it.
  *
  * ## Why the team id is in the path for the single-review verbs
  *
@@ -68,10 +73,9 @@ class FileReviewController extends Controller {
      * menu entry without this would be exactly the "the frontend won't call
      * this" reasoning SKILLS.md § Security standards rules out.
      *
-     * Every method is gated, `getScopes()` included. It is the cheapest one to
-     * leave open and the argument for an exception was that the listener never
-     * calls it unlicensed anyway — which is the same reasoning, one step
-     * removed.
+     * Every method here is gated, `reviewContext()` included — the argument for
+     * exempting the one the Files entry calls was that the entry never calls it
+     * unlicensed anyway, which is the same reasoning, one step removed.
      */
     private function licenseGate(): ?JSONResponse {
         if ($this->reviewService->isEnabledGlobally()) {
@@ -82,33 +86,6 @@ class FileReviewController extends Controller {
             'error'       => 'File reviews require an active TeamHub license.',
             'licenseGate' => true,
         ], Http::STATUS_FORBIDDEN);
-    }
-
-    /**
-     * Team-folder path prefixes for the current user.
-     *
-     * One call per Files page load, and the only thing that makes a
-     * synchronous `enabled()` callback possible in the file action.
-     */
-    #[NoAdminRequired]
-    public function getScopes(): JSONResponse {
-        $gate = $this->licenseGate();
-        if ($gate !== null) {
-            return $gate;
-        }
-
-        $uid = $this->currentUid();
-        if ($uid === null) {
-            return $this->unauthenticated();
-        }
-
-        try {
-            return new JSONResponse([
-                'scopes' => $this->reviewService->listScopes($uid, $this->userTeamIds()),
-            ]);
-        } catch (\Throwable $e) {
-            return $this->exceptionResponse($e, 'Failed to load review scopes', []);
-        }
     }
 
     /**

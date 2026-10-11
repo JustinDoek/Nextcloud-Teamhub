@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace OCA\TeamHub\Db;
 
+use OCP\DB\QueryBuilder\IQueryBuilder;
 use OCP\IDBConnection;
 
 /**
@@ -125,36 +126,56 @@ class AuditLogMapper {
         ?int $fromTs = null,
         ?int $toTs = null,
     ): array {
+        return $this->findPage($teamId, $offset, $limit, $eventTypes, $fromTs, $toTs);
+    }
+
+    /**
+     * v4.11.39 — the same page across **every** team, plus the instance-scoped
+     * rows (`AuditService::INSTANCE_SCOPE`), newest first.
+     *
+     * The Compliance tab opened on a team picker until 4.11.39, which made two
+     * kinds of event unreachable: anything filed under the instance scope
+     * (policy profiles, blueprints, provisioning runs, and since this version
+     * the directory-group history), and the plain question *what happened on
+     * this installation recently*. The team dropdown is now a narrowing
+     * filter over this read rather than the way in.
+     *
+     * @param string[] $eventTypes
+     * @return array<int, array<string, mixed>>
+     */
+    public function findAll(
+        int $offset,
+        int $limit,
+        array $eventTypes = [],
+        ?int $fromTs = null,
+        ?int $toTs = null,
+    ): array {
+        return $this->findPage(null, $offset, $limit, $eventTypes, $fromTs, $toTs);
+    }
+
+    /**
+     * One page, optionally narrowed to a team. `null` means every team.
+     *
+     * @param string[] $eventTypes
+     * @return array<int, array<string, mixed>>
+     */
+    private function findPage(
+        ?string $teamId,
+        int $offset,
+        int $limit,
+        array $eventTypes,
+        ?int $fromTs,
+        ?int $toTs,
+    ): array {
         $qb = $this->db->getQueryBuilder();
         $qb->select('*')
             ->from('teamhub_audit_log')
-            ->where($qb->expr()->eq('team_id', $qb->createNamedParameter($teamId)))
             ->orderBy('created_at', 'DESC')
             ->addOrderBy('id', 'DESC')
             ->setFirstResult($offset)
             ->setMaxResults($limit);
 
-        if (!empty($eventTypes)) {
-            $qb->andWhere($qb->expr()->in(
-                'event_type',
-                $qb->createNamedParameter(
-                    $eventTypes,
-                    \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_STR_ARRAY
-                )
-            ));
-        }
-        if ($fromTs !== null) {
-            $qb->andWhere($qb->expr()->gte(
-                'created_at',
-                $qb->createNamedParameter($fromTs, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)
-            ));
-        }
-        if ($toTs !== null) {
-            $qb->andWhere($qb->expr()->lte(
-                'created_at',
-                $qb->createNamedParameter($toTs, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)
-            ));
-        }
+        $this->applyFilters($qb, $teamId, $eventTypes, $fromTs, $toTs);
 
         $result = $qb->executeQuery();
         $rows = [];
@@ -163,6 +184,45 @@ class AuditLogMapper {
         }
         $result->closeCursor();
         return $rows;
+    }
+
+    /**
+     * The team, event-type and date predicates shared by every read and
+     * count above. `$teamId === null` leaves the team unconstrained.
+     *
+     * @param string[] $eventTypes
+     */
+    private function applyFilters(
+        IQueryBuilder $qb,
+        ?string $teamId,
+        array $eventTypes,
+        ?int $fromTs,
+        ?int $toTs,
+    ): void {
+        if ($teamId !== null) {
+            $qb->andWhere($qb->expr()->eq('team_id', $qb->createNamedParameter($teamId)));
+        }
+        if (!empty($eventTypes)) {
+            $qb->andWhere($qb->expr()->in(
+                'event_type',
+                $qb->createNamedParameter(
+                    array_values($eventTypes),
+                    IQueryBuilder::PARAM_STR_ARRAY
+                )
+            ));
+        }
+        if ($fromTs !== null) {
+            $qb->andWhere($qb->expr()->gte(
+                'created_at',
+                $qb->createNamedParameter($fromTs, IQueryBuilder::PARAM_INT)
+            ));
+        }
+        if ($toTs !== null) {
+            $qb->andWhere($qb->expr()->lte(
+                'created_at',
+                $qb->createNamedParameter($toTs, IQueryBuilder::PARAM_INT)
+            ));
+        }
     }
 
     /**
@@ -211,32 +271,36 @@ class AuditLogMapper {
         ?int $fromTs = null,
         ?int $toTs = null,
     ): int {
+        return $this->countPage($teamId, $eventTypes, $fromTs, $toTs);
+    }
+
+    /**
+     * v4.11.39 — the matching count for {@see findAll()}.
+     *
+     * @param string[] $eventTypes
+     */
+    public function countAll(
+        array $eventTypes = [],
+        ?int $fromTs = null,
+        ?int $toTs = null,
+    ): int {
+        return $this->countPage(null, $eventTypes, $fromTs, $toTs);
+    }
+
+    /**
+     * @param string[] $eventTypes
+     */
+    private function countPage(
+        ?string $teamId,
+        array $eventTypes,
+        ?int $fromTs,
+        ?int $toTs,
+    ): int {
         $qb = $this->db->getQueryBuilder();
         $qb->select($qb->createFunction('COUNT(*) AS cnt'))
-            ->from('teamhub_audit_log')
-            ->where($qb->expr()->eq('team_id', $qb->createNamedParameter($teamId)));
+            ->from('teamhub_audit_log');
 
-        if (!empty($eventTypes)) {
-            $qb->andWhere($qb->expr()->in(
-                'event_type',
-                $qb->createNamedParameter(
-                    $eventTypes,
-                    \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_STR_ARRAY
-                )
-            ));
-        }
-        if ($fromTs !== null) {
-            $qb->andWhere($qb->expr()->gte(
-                'created_at',
-                $qb->createNamedParameter($fromTs, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)
-            ));
-        }
-        if ($toTs !== null) {
-            $qb->andWhere($qb->expr()->lte(
-                'created_at',
-                $qb->createNamedParameter($toTs, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)
-            ));
-        }
+        $this->applyFilters($qb, $teamId, $eventTypes, $fromTs, $toTs);
 
         $result = $qb->executeQuery();
         $row = $result->fetch();

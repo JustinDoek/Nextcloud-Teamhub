@@ -1725,8 +1725,9 @@
                             :key="cat.id"
                             class="teamhub-dec-cats__row">
 
-                            <!-- Read mode -->
-                            <template v-if="decCatEditing !== cat.id">
+                            <!-- v4.11.23 — no inline edit mode any more, so
+                                 no condition: the row is always the row. -->
+                            <template>
                                 <div class="teamhub-dec-cats__row-main">
                                     <span v-if="cat.icon && categoryIconMap[cat.icon]" class="teamhub-dec-cats__row-icon" aria-hidden="true">
                                         <component :is="categoryIconMap[cat.icon]" :size="ICON_BODY" />
@@ -1734,19 +1735,37 @@
                                     <div class="teamhub-dec-cats__row-text">
                                         <span class="teamhub-dec-cats__row-name">{{ cat.name }}</span>
                                         <span v-if="cat.description" class="teamhub-dec-cats__row-desc">{{ cat.description }}</span>
+                                        <!-- v4.11.18 — what this category
+                                             asks of its approvers, on the row
+                                             rather than only in the form: a
+                                             review period is the kind of
+                                             setting somebody comes to this
+                                             page to check. -->
+                                        <span v-if="cat.is_archive" class="teamhub-dec-cats__row-desc">
+                                            {{ t('teamhub', 'Superseded and archived decisions are kept here. Read-only, no approvers, no review.') }}
+                                        </span>
+                                        <span v-else-if="cat.review_period_months > 0" class="teamhub-dec-cats__row-desc">
+                                            {{ n('teamhub', 'Reviewed every month', 'Reviewed every {n} months', cat.review_period_months, { n: cat.review_period_months }) }}
+                                        </span>
                                     </div>
                                     <span class="teamhub-dec-cats__row-approvers">
-                                        {{ formatApprovers(cat.approvers) }}
+                                        {{ cat.is_archive ? '—' : formatApprovers(cat.approvers) }}
                                     </span>
                                 </div>
                                 <div class="teamhub-dec-cats__row-actions">
                                     <NcButton
                                         variant="tertiary"
                                         :aria-label="t('teamhub', 'Edit category {name}', { name: cat.name })"
-                                        @click="startEditDecCategory(cat)">
+                                        @click="openDecCategoryDialog(cat)">
                                         <template #icon><PencilIcon :size="ICON_BODY" /></template>
                                     </NcButton>
+                                    <!-- The archive cannot be deleted: every
+                                         retired decision points at it, and the
+                                         next supersede would have nowhere to
+                                         put its decision. Hidden rather than
+                                         disabled — CLAUDE.md § Permissions. -->
                                     <NcButton
+                                        v-if="!cat.is_archive"
                                         variant="tertiary"
                                         :aria-label="t('teamhub', 'Delete category {name}', { name: cat.name })"
                                         @click="confirmDeleteDecCategory(cat)">
@@ -1755,247 +1774,28 @@
                                 </div>
                             </template>
 
-                            <!-- Edit mode -->
-                            <template v-else>
-                                <div class="teamhub-dec-cats__edit">
-                                    <div class="teamhub-dec-cats__edit-row">
-                                        <div class="teamhub-dec-cats__edit-icon-wrap">
-                                            <label class="teamhub-dec-cats__edit-label">{{ t('teamhub', 'Icon') }}</label>
-                                            <div class="teamhub-dec-cats__icon-picker-wrap">
-                                                <button
-                                                    type="button"
-                                                    class="teamhub-dec-cats__icon-btn"
-                                                    :aria-label="t('teamhub', 'Choose category icon')"
-                                                    :aria-expanded="decCatIconPickerOpen"
-                                                    @click.stop="decCatIconPickerOpen = !decCatIconPickerOpen">
-                                                    <component v-if="decCatForm.icon && categoryIconMap[decCatForm.icon]" :is="categoryIconMap[decCatForm.icon]" :size="ICON_BODY" aria-hidden="true" />
-                                                    <span v-else class="teamhub-dec-cats__icon-btn-placeholder" aria-hidden="true">—</span>
-                                                </button>
-                                                <div v-if="decCatIconPickerOpen" class="teamhub-dec-cats__icon-popover" @click.stop>
-                                                    <!-- Search inside picker -->
-                                                    <div class="teamhub-dec-cats__icon-search-wrap">
-                                                        <NcTextField
-                                                            v-model="catIconSearch"
-                                                            type="search"
-                                                            class="teamhub-dec-cats__icon-search"
-                                                            :placeholder="t('teamhub', 'Search icons…')"
-                                                            :aria-label="t('teamhub', 'Search icons')"
-                                                            autofocus
-                                                            label-outside />
-                                                        <NcButton
-                                                            class="teamhub-dec-cats__icon-clear-btn"
-                                                            :aria-label="t('teamhub', 'Remove icon')"
-                                                            @click.stop="clearCatIcon"
-                                                            variant="tertiary">
-                                                            {{ t('teamhub', 'None') }}
-                                                        </NcButton>
-                                                    </div>
-                                                    <!-- Scrollable grouped grid -->
-                                                    <div class="teamhub-dec-cats__icon-scroll" role="listbox" :aria-label="t('teamhub', 'Select an icon')">
-                                                        <div
-                                                            v-for="group in filteredIconGroups"
-                                                            :key="group.name"
-                                                            class="teamhub-dec-cats__icon-group">
-                                                            <div class="teamhub-dec-cats__icon-group-hdr">{{ group.name }}</div>
-                                                            <div class="teamhub-dec-cats__icon-group-grid">
-                                                                <button
-                                                                    v-for="ic in group.icons"
-                                                                    :key="ic.name"
-                                                                    type="button"
-                                                                    class="teamhub-dec-cats__icon-grid-btn"
-                                                                    :class="{ 'teamhub-dec-cats__icon-grid-btn--selected': decCatForm.icon === ic.name }"
-                                                                    :aria-label="ic.label"
-                                                                    :title="ic.label"
-                                                                    role="option"
-                                                                    :aria-selected="decCatForm.icon === ic.name"
-                                                                    @click.stop="selectCatIcon(ic.name)">
-                                                                    <component :is="categoryIconMap[ic.name]" :size="ICON_BODY" aria-hidden="true" />
-                                                                </button>
-                                                            </div>
-                                                        </div>
-                                                        <p v-if="!filteredIconGroups.length" class="teamhub-dec-cats__icon-no-results">
-                                                            {{ t('teamhub', 'No icons match "{q}"', { q: catIconSearch }) }}
-                                                        </p>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
-                                        <div class="teamhub-dec-cats__edit-name-wrap">
-                                            <label class="teamhub-dec-cats__edit-label" :for="`dec-cat-edit-name-${cat.id}`">{{ t('teamhub', 'Name') }}</label>
-                                            <NcTextField
-                                                :id="`dec-cat-edit-name-${cat.id}`"
-                                                v-model="decCatForm.name"
-                                                maxlength="128"
-                                                class="teamhub-dec-cats__edit-input"
-                                                label-outside />
-                                        </div>
-                                    </div>
-
-                                    <label class="teamhub-dec-cats__edit-label" :for="`dec-cat-edit-desc-${cat.id}`">{{ t('teamhub', 'Description') }}</label>
-                                    <NcTextField
-                                        :id="`dec-cat-edit-desc-${cat.id}`"
-                                        v-model="decCatForm.description"
-                                        maxlength="500"
-                                        class="teamhub-dec-cats__edit-input"
-                                        :placeholder="t('teamhub', 'Optional short description shown in the category grid')"
-                                        label-outside />
-
-                                    <label class="teamhub-dec-cats__edit-label">{{ t('teamhub', 'Approvers') }}</label>
-                                    <p class="teamhub-dec-cats__edit-hint">{{ t('teamhub', 'Leave empty to default to the team owner.') }}</p>
-                                    <NcSelect
-                                        v-model="decCatForm.approvers"
-                                        :options="memberUserOptions"
-                                        :multiple="true"
-                                        :close-on-select="false"
-                                        :clearable="true"
-                                        label="displayName"
-                                        track-by="userId"
-                                        :placeholder="t('teamhub', 'Pick one or more members')"
-                                        :aria-label="t('teamhub', 'Approver users')" />
-
-                                    <div class="teamhub-dec-cats__edit-actions">
-                                        <NcButton variant="secondary" @click="cancelEditDecCategory">{{ t('teamhub', 'Cancel') }}</NcButton>
-                                        <NcButton
-                                            variant="primary"
-                                            :disabled="savingDecCategory || !decCatForm.name.trim()"
-                                            @click="saveDecCategory">
-                                            {{ savingDecCategory ? t('teamhub', 'Saving…') : t('teamhub', 'Save') }}
-                                        </NcButton>
-                                    </div>
-
-                                    <p v-if="decCatFormError" class="teamhub-dec-cats__edit-error" role="alert">
-                                        {{ decCatFormError }}
-                                    </p>
-                                </div>
-                            </template>
+                            <!-- v4.11.23 — editing happens in
+                                 `DecisionCategoryDialog` now; the inline
+                                 editor and its icon picker are gone. -->
                         </li>
                     </ul>
 
-                    <p v-else-if="!decCatEditing" class="teamhub-dec-cats__empty-text">
+                    <p v-else class="teamhub-dec-cats__empty-text">
                         {{ t('teamhub', 'No categories yet. Add the first one below.') }}
                     </p>
 
-                    <!-- Add-new form -->
+                    <!-- v4.11.23 — one button; the form is
+                         `DecisionCategoryDialog`, shared with the
+                         Decisions landing page. What stood here was a
+                         copy of the edit form above it, itself a copy of
+                         the 319-icon picker — and Justin asking for the
+                         same options on the landing page would have made
+                         it three. -->
                     <div class="teamhub-dec-cats__add-area">
-                        <NcButton
-                            v-if="decCatEditing !== 'new'"
-                            variant="secondary"
-                            @click="startCreateDecCategory">
+                        <NcButton variant="secondary" @click="openDecCategoryDialog(null)">
                             <template #icon><PlusIcon :size="ICON_BODY" /></template>
                             {{ t('teamhub', 'Add category') }}
                         </NcButton>
-
-                        <div v-else class="teamhub-dec-cats__edit">
-                                    <div class="teamhub-dec-cats__edit-row">
-                                        <div class="teamhub-dec-cats__edit-icon-wrap">
-                                            <label class="teamhub-dec-cats__edit-label">{{ t('teamhub', 'Icon') }}</label>
-                                            <div class="teamhub-dec-cats__icon-picker-wrap">
-                                                <button
-                                                    type="button"
-                                                    class="teamhub-dec-cats__icon-btn"
-                                                    :aria-label="t('teamhub', 'Choose category icon')"
-                                                    :aria-expanded="decCatIconPickerOpen"
-                                                    @click.stop="decCatIconPickerOpen = !decCatIconPickerOpen">
-                                                    <component v-if="decCatForm.icon && categoryIconMap[decCatForm.icon]" :is="categoryIconMap[decCatForm.icon]" :size="ICON_BODY" aria-hidden="true" />
-                                                    <span v-else class="teamhub-dec-cats__icon-btn-placeholder" aria-hidden="true">—</span>
-                                                </button>
-                                                <div v-if="decCatIconPickerOpen" class="teamhub-dec-cats__icon-popover" @click.stop>
-                                                    <!-- Search inside picker -->
-                                                    <div class="teamhub-dec-cats__icon-search-wrap">
-                                                        <NcTextField
-                                                            v-model="catIconSearch"
-                                                            type="search"
-                                                            class="teamhub-dec-cats__icon-search"
-                                                            :placeholder="t('teamhub', 'Search icons…')"
-                                                            :aria-label="t('teamhub', 'Search icons')"
-                                                            autofocus
-                                                            label-outside />
-                                                        <NcButton
-                                                            class="teamhub-dec-cats__icon-clear-btn"
-                                                            :aria-label="t('teamhub', 'Remove icon')"
-                                                            @click.stop="clearCatIcon"
-                                                            variant="tertiary">
-                                                            {{ t('teamhub', 'None') }}
-                                                        </NcButton>
-                                                    </div>
-                                                    <!-- Scrollable grouped grid -->
-                                                    <div class="teamhub-dec-cats__icon-scroll" role="listbox" :aria-label="t('teamhub', 'Select an icon')">
-                                                        <div
-                                                            v-for="group in filteredIconGroups"
-                                                            :key="group.name"
-                                                            class="teamhub-dec-cats__icon-group">
-                                                            <div class="teamhub-dec-cats__icon-group-hdr">{{ group.name }}</div>
-                                                            <div class="teamhub-dec-cats__icon-group-grid">
-                                                                <button
-                                                                    v-for="ic in group.icons"
-                                                                    :key="ic.name"
-                                                                    type="button"
-                                                                    class="teamhub-dec-cats__icon-grid-btn"
-                                                                    :class="{ 'teamhub-dec-cats__icon-grid-btn--selected': decCatForm.icon === ic.name }"
-                                                                    :aria-label="ic.label"
-                                                                    :title="ic.label"
-                                                                    role="option"
-                                                                    :aria-selected="decCatForm.icon === ic.name"
-                                                                    @click.stop="selectCatIcon(ic.name)">
-                                                                    <component :is="categoryIconMap[ic.name]" :size="ICON_BODY" aria-hidden="true" />
-                                                                </button>
-                                                            </div>
-                                                        </div>
-                                                        <p v-if="!filteredIconGroups.length" class="teamhub-dec-cats__icon-no-results">
-                                                            {{ t('teamhub', 'No icons match "{q}"', { q: catIconSearch }) }}
-                                                        </p>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
-                                        <div class="teamhub-dec-cats__edit-name-wrap">
-                                            <label class="teamhub-dec-cats__edit-label" for="dec-cat-name-new-standalone">{{ t('teamhub', 'Name') }}</label>
-                                            <NcTextField
-                                                id="dec-cat-name-new-standalone"
-                                                v-model="decCatForm.name"
-                                                maxlength="128"
-                                                class="teamhub-dec-cats__edit-input"
-                                                :placeholder="t('teamhub', 'e.g. Architecture, Hiring, Policy')"
-                                                label-outside />
-                                        </div>
-                                    </div>
-
-                                    <label class="teamhub-dec-cats__edit-label" for="dec-cat-desc-new-standalone">{{ t('teamhub', 'Description') }}</label>
-                                    <NcTextField
-                                        id="dec-cat-desc-new-standalone"
-                                        v-model="decCatForm.description"
-                                        maxlength="500"
-                                        class="teamhub-dec-cats__edit-input"
-                                        :placeholder="t('teamhub', 'Optional short description shown in the category grid')"
-                                        label-outside />
-
-                                    <label class="teamhub-dec-cats__edit-label">{{ t('teamhub', 'Approvers') }}</label>
-                            <p class="teamhub-dec-cats__edit-hint">{{ t('teamhub', 'Leave empty to default to the team owner.') }}</p>
-                            <NcSelect
-                                v-model="decCatForm.approvers"
-                                :options="memberUserOptions"
-                                :multiple="true"
-                                :close-on-select="false"
-                                :clearable="true"
-                                label="displayName"
-                                track-by="userId"
-                                :placeholder="t('teamhub', 'Pick one or more members')"
-                                :aria-label="t('teamhub', 'Approver users')" />
-
-                            <div class="teamhub-dec-cats__edit-actions">
-                                <NcButton variant="secondary" @click="cancelEditDecCategory">{{ t('teamhub', 'Cancel') }}</NcButton>
-                                <NcButton
-                                    variant="primary"
-                                    :disabled="savingDecCategory || !decCatForm.name.trim()"
-                                    @click="saveDecCategory">
-                                    {{ savingDecCategory ? t('teamhub', 'Saving…') : t('teamhub', 'Create') }}
-                                </NcButton>
-                            </div>
-
-                            <p v-if="decCatFormError" class="teamhub-dec-cats__edit-error" role="alert">
-                                {{ decCatFormError }}
-                            </p>
-                        </div>
                     </div>
                 </template>
             </div>
@@ -3095,6 +2895,15 @@
                 </NcButton>
             </template>
         </NcDialog>
+        <!-- v4.11.23 — the category form, shared with the Decisions
+             landing page so the two surfaces cannot drift. -->
+        <DecisionCategoryDialog
+            v-if="decCatDialogOpen"
+            :team-id="team.id"
+            :category="decCatDialogTarget"
+            :members="$store.state.allEffectiveMembers || []"
+            @saved="onDecCategorySaved"
+            @close="closeDecCategoryDialog" />
     </div>
 </template>
 
@@ -3120,6 +2929,8 @@ import DragVertical from 'vue-material-design-icons/DragVertical.vue'
 import MessageIcon from 'vue-material-design-icons/Message.vue'
 import FolderIcon from 'vue-material-design-icons/Folder.vue'
 import DatabaseArrowUpOutline from 'vue-material-design-icons/DatabaseArrowUpOutline.vue'
+// v4.11.23 — the category form, shared with TeamDecisionsView.
+import DecisionCategoryDialog from './DecisionCategoryDialog.vue'
 import QuotaRequestDialog from './services/QuotaRequestDialog.vue'
 import { formatBytes, isQuotaService, QUOTA_DEFINITION } from '../constants/serviceTeams.js'
 import CalendarIcon from 'vue-material-design-icons/Calendar.vue'
@@ -3199,6 +3010,7 @@ export default {
         TextIcon, TuneIcon, AccountMultipleIcon, PuzzleIcon, AlertIcon, CalendarClock,
         ClockOutline, CloseCircle,
         ArchiveTeamModal,
+        DecisionCategoryDialog,
         ResourcePicker,
         InviteMemberModal,
         OpenProjectSettingsPanel,
@@ -3385,12 +3197,12 @@ export default {
             // Decision categories — Session G
             decCategories:          [],
             loadingDecCategories:   false,
-            decCatEditing:          null,
-            decCatForm:             { name: '', icon: '', description: '', approvers: [] },
-            decCatIconPickerOpen:   false,   // controls the MDI icon picker popover
-            catIconSearch:          '',      // search filter inside the icon picker
-            savingDecCategory:      false,
-            decCatFormError:        '',
+            // v4.11.23 — the inline form's state (`decCatForm`,
+            // `decCatEditing`, the icon-picker flags, the error and the
+            // saving flag) lives in `DecisionCategoryDialog` now. What is
+            // left here is which dialog is open, if any.
+            decCatDialogOpen:       false,
+            decCatDialogTarget:     null,
 
             // Timeline Milestones (v3.78.2) — admin-managed marker lines
             // shown on the Timeline tab. Mirrors the decCategories pattern.
@@ -3547,18 +3359,8 @@ export default {
 
         // Group + filter icons for the picker UI.
         // Returns [{ name, icons: [...] }, ...] for groups that have matches.
-        filteredIconGroups() {
-            const q = this.catIconSearch.trim().toLowerCase()
-            const groups = new Map()
-            for (const ic of CATEGORY_ICONS) {
-                if (q && !ic.label.toLowerCase().includes(q) && !ic.name.toLowerCase().includes(q)) {
-                    continue
-                }
-                if (!groups.has(ic.group)) groups.set(ic.group, [])
-                groups.get(ic.group).push(ic)
-            }
-            return [...groups.entries()].map(([name, icons]) => ({ name, icons }))
-        },
+        // v4.11.23 — `filteredIconGroups` moved into
+        // `DecisionCategoryDialog` with the picker it fed.
 
         /** Numeric fileId of the team folder root, or null if none connected.
          *  Used by the image cache clear button. */
@@ -4214,9 +4016,6 @@ export default {
     mounted() {
         this.loadAll()
         this._iconPickerOutside = (e) => {
-            if (this.decCatIconPickerOpen && !e.target.closest('.teamhub-dec-cats__icon-picker-wrap')) {
-                this.decCatIconPickerOpen = false
-            }
         }
         document.addEventListener('click', this._iconPickerOutside)
 
@@ -6226,81 +6025,26 @@ export default {
             return CATEGORY_ICON_MAP[name] || null
         },
 
-        selectCatIcon(name) {
-            this.decCatForm.icon      = name
-            this.decCatIconPickerOpen = false
-            this.catIconSearch        = ''
+        // ── Decision categories ──
+        // v4.11.23 — `startCreateDecCategory`, `startEditDecCategory`,
+        // `cancelEditDecCategory`, `saveDecCategory`, `selectCatIcon` and
+        // `clearCatIcon` are gone with the inline forms they served.
+        // `DecisionCategoryDialog` owns the whole exchange now, including
+        // the POST and the PUT.
+
+        /** @param cat the category to edit, or null to create one. */
+        openDecCategoryDialog(cat) {
+            this.decCatDialogTarget = cat
+            this.decCatDialogOpen   = true
         },
 
-        clearCatIcon() {
-            this.decCatForm.icon      = ''
-            this.decCatIconPickerOpen = false
-            this.catIconSearch        = ''
+        closeDecCategoryDialog() {
+            this.decCatDialogOpen   = false
+            this.decCatDialogTarget = null
         },
 
-        startCreateDecCategory() {
-            const owner = this.memberUserOptions.find(m => {
-                const direct = this.manageMembers?.direct || []
-                const row = direct.find(d => d.userId === m.userId)
-                return row && row.level >= 9
-            }) || null
-            this.decCatEditing   = 'new'
-            this.decCatForm      = { name: '', icon: '', description: '', approvers: owner ? [owner] : [] }
-            this.decCatFormError = ''
-        },
-
-        startEditDecCategory(cat) {
-            const opts = this.memberUserOptions
-            const approverObjs = (cat.approvers || []).map(uid => {
-                const found = opts.find(o => o.userId === uid)
-                return found || { userId: uid, displayName: uid }
-            })
-            this.decCatEditing   = cat.id
-            this.decCatForm      = { name: cat.name, icon: cat.icon || '', description: cat.description || '', approvers: approverObjs }
-            this.decCatFormError = ''
-        },
-
-        cancelEditDecCategory() {
-            this.decCatEditing        = null
-            this.decCatIconPickerOpen = false
-            this.decCatForm           = { name: '', icon: '', description: '', approvers: [] }
-            this.decCatFormError      = ''
-        },
-
-        async saveDecCategory() {
-            const name = this.decCatForm.name.trim()
-            if (!name) {
-                this.decCatFormError = t('teamhub', 'Name cannot be empty')
-                return
-            }
-            const approverIds = (this.decCatForm.approvers || []).map(a => a.userId).filter(Boolean)
-            const icon        = this.decCatForm.icon?.trim() || null
-            const description = this.decCatForm.description?.trim() || null
-            const isNew       = this.decCatEditing === 'new'
-
-            this.savingDecCategory = true
-            this.decCatFormError   = ''
-            try {
-                if (isNew) {
-                    await axios.post(
-                        generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/decisions/manage/categories`),
-                        { name, icon, description, approvers: approverIds }
-                    )
-                } else {
-                    await axios.put(
-                        generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/decisions/manage/categories/${this.decCatEditing}`),
-                        { name, icon, description, approvers: approverIds }
-                    )
-                }
-                this.cancelEditDecCategory()
-                await this.loadDecCategories()
-            } catch (err) {
-                console.error('[TeamHub][ManageTeamView] saveDecCategory error:', err)
-                const apiErr = err?.response?.data?.error || err.message
-                this.decCatFormError = apiErr
-            } finally {
-                this.savingDecCategory = false
-            }
+        async onDecCategorySaved() {
+            await this.loadDecCategories()
         },
 
         async confirmDeleteDecCategory(cat) {
@@ -9152,6 +8896,13 @@ export default {
 
 .teamhub-dec-cats__edit-input {
     width: 100%;
+}
+
+/* v4.11.18 — a month count is at most three digits, so a full-width field
+   would read as "type a sentence here". Capped rather than sized in ch so it
+   holds in a locale whose digits are wider. */
+.teamhub-dec-cats__edit-input--months {
+    max-width: 120px;
 }
 
 .teamhub-dec-cats__edit-actions {

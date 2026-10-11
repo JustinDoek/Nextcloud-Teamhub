@@ -9,6 +9,7 @@ use OCA\TeamHub\Db\MilestoneMapper;
 use OCA\TeamHub\Db\DecisionTaskMapper;
 use OCA\TeamHub\Service\DecisionTaskService;
 use OCA\TeamHub\Service\DbIntrospectionService;
+use OCA\TeamHub\Util\CalendarBlob;
 use OCP\App\IAppManager;
 use OCP\DB\QueryBuilder\IQueryBuilder;
 use OCP\IDBConnection;
@@ -311,7 +312,7 @@ class TimelineService {
 
             while ($row = $evRes->fetch()) {
                 try {
-                    $vcalendar = \Sabre\VObject\Reader::read($row['calendardata']);
+                    $vcalendar = \Sabre\VObject\Reader::read(CalendarBlob::read($row['calendardata']));
                     if (!isset($vcalendar->VEVENT)) {
                         continue;
                     }

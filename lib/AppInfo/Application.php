@@ -23,6 +23,7 @@ use OCA\TeamHub\MyWork\Provider\DecisionWorkProvider;
 use OCA\TeamHub\MyWork\Provider\FileReviewWorkProvider;
 use OCA\TeamHub\MyWork\Provider\MeetingWorkProvider;
 use OCA\TeamHub\MyWork\Provider\OpenProjectWorkProvider;
+use OCA\TeamHub\MyWork\Provider\TaskWorkProvider;
 use OCA\TeamHub\MyWork\Provider\TeamAdminWorkProvider;
 use OCA\TeamHub\MyWork\Provider\TeamExpiryAdminWorkProvider;
 use OCA\TeamHub\MyWork\Provider\TeamExpiryTeamWorkProvider;
@@ -32,6 +33,7 @@ use OCA\TeamHub\Workflow\Definition\QuotaRequestDefinition;
 use OCA\TeamHub\Constants\ServiceCatalogue;
 use OCA\TeamHub\Service\ServiceTeam\ServiceTeamService;
 use OCA\TeamHub\Workflow\Definition\ServiceRequestDefinition;
+use OCA\TeamHub\Workflow\Definition\IdpGroupAdoptionDefinition;
 use OCA\TeamHub\Workflow\Definition\TeamAdoptionDefinition;
 use OCA\TeamHub\Workflow\Definition\TeamExpiryRequestDefinition;
 use OCA\TeamHub\Workflow\Definition\TeamRequestDefinition;
@@ -40,6 +42,8 @@ use OCA\TeamHub\Db\TeamServiceMapper;
 use OCA\TeamHub\Workflow\WorkflowDefinitionRegistry;
 use OCA\TeamHub\Search\DecisionSearchProvider;
 use OCA\TeamHub\Search\MessageSearchProvider;
+use OCA\TeamHub\Search\ServiceRequestSearchProvider;
+use OCA\TeamHub\Search\ServiceSearchProvider;
 use OCA\TeamHub\Search\TeamSearchProvider;
 use OCA\TeamHub\Teams\TeamHubResourceProvider;
 use OCA\TeamHub\Service\MyWorkConfigService;
@@ -143,6 +147,12 @@ class Application extends App implements IBootstrap {
         $context->registerSearchProvider(TeamSearchProvider::class);
         $context->registerSearchProvider(MessageSearchProvider::class);
         $context->registerSearchProvider(DecisionSearchProvider::class);
+        // v4.11.11 — the service catalog, and the searcher's own requests.
+        // Both answer empty when the licence or the administrator's module
+        // switch is missing, so an instance without service teams gets no
+        // extra sections in the search drawer.
+        $context->registerSearchProvider(ServiceSearchProvider::class);
+        $context->registerSearchProvider(ServiceRequestSearchProvider::class);
         // v4.10.4 — the results' icon class lives in css/search.css, which has
         // to be on every page the search can open on (Talk's pattern).
         $context->registerEventListener(
@@ -227,6 +237,13 @@ class Application extends App implements IBootstrap {
                 // calendar event that carries one rather than a source of
                 // its own.
                 MeetingWorkProvider::class,
+                // v4.11.15 — team tasks: the VTODOs on a team's calendar that
+                // *Create personal task* writes and the Tasks app shows. They
+                // were in the Upcoming tasks widget and nowhere in My Work.
+                // Since the same version a task names who it is for, so the
+                // provider reads ownership off the object instead of guessing:
+                // yours, yours-to-wait-for, or the team's own list.
+                TaskWorkProvider::class,
                 // v4.5.45 — team-administration housekeeping, currently
                 // resources awaiting an admin's accept/ignore. The first
                 // provider whose items are not the viewer's own work but
@@ -307,6 +324,14 @@ class Application extends App implements IBootstrap {
                 // the eighth service of the bundle, started by TeamHub's own
                 // sweep rather than by a person (IWorkflowSystemStarted).
                 TeamAdoptionDefinition::class,
+                // v4.11.39 — its sibling for the other half of "waiting to
+                // join TeamHub": a Nextcloud group that came from the
+                // directory and has no team yet. Also system-started, and
+                // always the administrators' — never a desk. Separate from
+                // the adoption definition because the engine's
+                // one-open-per-team rule is keyed on the team id and a group
+                // has none; see the class docblock.
+                IdpGroupAdoptionDefinition::class,
             ];
 
             foreach ($builtIn as $definitionClass) {

@@ -101,6 +101,35 @@ final class CirclesConfig {
      */
     public const CFG_APP = 131072;
 
+    /**
+     * Circle is managed by a SCIM server, not manually. **New in Circles 35.**
+     *
+     * Circles' own comment: *"Circle is managed by a SCIM server, not manually"*.
+     * Its arrival raised `Circle::$DEF_CFG_MAX` from 262143 to **524287**, so a
+     * config write carrying this bit is only valid against Circles ≥ 35.
+     *
+     * v4.11.32 — read off the Circles 35 source, together with what
+     * `ScimService::createCircle()` actually writes:
+     *
+     *   - `source` = `Member::APP_CIRCLES` (**10001**), *not* the 16 every other
+     *     team carries. This is why `TeamAdoptionService::findCandidates()` has a
+     *     second candidate class: its `source = 16` filter can never see one.
+     *   - `config` = `CFG_ROOT | CFG_FEDERATED | CFG_SCIM` = **303104**. None of
+     *     those bits are in NOT_A_TEAM_BITS, so the config was never the blocker.
+     *   - owner = a `Member` for the `app:circles` identity at `LEVEL_OWNER`.
+     *     **There is no human owner**, which is why a `scim` team is adopted with
+     *     a service account as its actor rather than an owner.
+     *
+     * **This may move.** The upstream PR (nextcloud/circles#2674) carries its own
+     * TODO list, two items of which are "consider setting the source of
+     * SCIM-created circles to SCIM instead of the current value" and "consider
+     * creating SCIM circles with `CFG_APP + CFG_SYSTEM` instead of the current
+     * config". If either lands, the detection in `TeamAdoptionService` has to
+     * follow — and note that upstream adding CFG_APP would collide with
+     * TeamHub's own lock, which is set by `TeamRegistryService` and nothing else.
+     */
+    public const CFG_SCIM = 262144;
+
     // -------------------------------------------------------------------------
     // Derived sets — referenced throughout TeamHub
     // -------------------------------------------------------------------------

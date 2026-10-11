@@ -7,9 +7,11 @@ use OCA\TeamHub\AppInfo\Application;
 use OCA\TeamHub\Db\CommentMapper;
 use OCA\TeamHub\Db\Decision;
 use OCA\TeamHub\Db\DecisionMapper;
+use OCA\TeamHub\Db\DecisionReviewMapper;
 use OCA\TeamHub\Db\DecisionTeamConfigMapper;
 use OCA\TeamHub\Db\MessageMapper;
 use OCA\TeamHub\Exception\AccessDeniedException;
+use OCA\TeamHub\Util\ReviewSchedule;
 use OCP\Files\IRootFolder;
 use OCP\IConfig;
 use OCP\IUserManager;
@@ -61,11 +63,13 @@ class DecisionService {
     //   withdrawn  — proposer cancelled before finalizing, OR admin withdrew (terminal)
     // Legacy values 'proposed' / 'decided' / 'withdrawn' are no longer written.
     // 'withdrawn' is reused with the same meaning. Existing test data should be wiped.
-    private const STATUSES = ['open', 'finalized', 'approved', 'denied', 'withdrawn'];
+    //   superseded — v4.11.18, a newer decision overrules this one (terminal)
+    //   archived   — v4.11.18, a reviewer retired it (terminal)
+    private const STATUSES = ['open', 'finalized', 'approved', 'denied', 'withdrawn', 'superseded', 'archived'];
     // Statuses where the row is immutable (no further state transitions allowed)
-    private const TERMINAL_STATUSES = ['approved', 'denied', 'withdrawn'];
+    private const TERMINAL_STATUSES = ['approved', 'denied', 'withdrawn', 'superseded', 'archived'];
     // Statuses where comments on the parent message are locked (read-only)
-    private const COMMENTS_LOCKED_STATUSES = ['finalized', 'approved', 'denied', 'withdrawn'];
+    private const COMMENTS_LOCKED_STATUSES = ['finalized', 'approved', 'denied', 'withdrawn', 'superseded', 'archived'];
     // Hidden subfolder in the team folder where finalized proposal documents are written
     private const PROPOSALS_FOLDER = '.proposals';
     private const ALLOWED_SOURCE_TYPES = ['message', 'document', 'external', 'direct'];
@@ -116,6 +120,24 @@ class DecisionService {
         // is no per-recipient language to resolve; it is written in the
         // **proposer's** language, because they are its author.
         private \OCP\L10N\IFactory $l10nFactory,
+        // v4.11.12 — `mayRead()` and `requireActionLevel()` ask what level a
+        // **named** user holds on a team, which `MemberService` answers
+        // against a connection rather than against the session (the reader of
+        // a service-request grid row is not always the session user of the
+        // call that resolves it).
+        private \OCP\IDBConnection $db,
+        // v4.11.30 — `moveToCategory()` changes which approvers a decision
+        // belongs to, so both sets' My Work queues go stale the moment it is
+        // written. `/mywork-workflows` rule 6, as §2.157 restated it: bump
+        // the other side, and the other side includes this side.
+        private \OCP\ICacheFactory $cacheFactory,
+        // v4.11.30 — `moveToCategory()` refuses while a review is open, for
+        // the reason `archive()` does: that review is with the category's
+        // approvers, and moving the decision out from under them leaves them
+        // holding a question about a decision that is no longer theirs. Only
+        // the mapper, not `DecisionReviewService` — that one depends on this
+        // service, and the cycle is the whole reason the read is done here.
+        private DecisionReviewMapper $reviewMapper,
     ) {}
 
     // =========================================================================
@@ -239,6 +261,19 @@ class DecisionService {
             } elseif (mb_strlen($category) > self::MAX_CATEGORY_LEN) {
                 throw new \InvalidArgumentException('category exceeds maximum length');
             }
+        }
+
+        // v4.11.30 — the archive is for archival only (Justin, 2026-10-05).
+        // A proposal created there would be born in a category with no
+        // approvers and no review period, so nothing could ever approve it;
+        // and the archive's whole job is to say "these decisions have
+        // stopped governing", which a brand-new proposal contradicts. The
+        // composer no longer offers it, and this is the boundary — the
+        // frontend hiding an option has never been one.
+        if ($category !== null && $this->categoryService->isArchiveName($teamId, $category)) {
+            throw new \InvalidArgumentException(
+                'The archive category holds retired decisions — a proposal cannot be made in it'
+            );
         }
 
         // Validate source fields.
@@ -650,8 +685,16 @@ class DecisionService {
                 'Only open proposals can be edited (current status: ' . $decision->getStatus() . ')'
             );
         }
+        // v4.11.24 — proposer **or team admin**, mirroring `withdraw()`.
+        // Until now this was proposer-only, which was fine while `open` only
+        // ever meant "newly proposed". Accepting a review sends an approved
+        // decision back to `open` to be redrafted, and a decision whose
+        // original proposer has since left the team would have been stuck
+        // there with nobody able to move it — reopened by a reviewer and
+        // editable by nobody. An admin can already withdraw it; being able
+        // to fix its wording is the smaller power of the two.
         if ($decision->getProposedBy() !== $actingUserId) {
-            throw new \RuntimeException('Only the proposer can edit this proposal');
+            $this->memberService->requireAdminLevel($teamId);
         }
 
         $message = $this->messageMapper->find($decision->getMessageId());
@@ -724,6 +767,495 @@ class DecisionService {
     }
 
     /**
+     * Rewrite the wording of an **approved** decision, in place (v4.11.26).
+     *
+     * ## Why this exists
+     *
+     * Justin, 2026-10-05: *deny means the original decision stands*, and a
+     * review must never leave a decision `denied`. v4.11.24 answered "and
+     * then how does it change?" by sending the decision back to `open` to be
+     * redrafted — which put an approved decision back into the proposal
+     * lifecycle, where `deny()` and `withdraw()` are reachable and terminal.
+     * One click on Deny and the standing decision was gone, its approval
+     * overwritten. Marketing decision #11 on the test instance is the
+     * evidence: approved → review accepted → reopened → finalized → **denied**.
+     *
+     * So accepting a review no longer moves the decision anywhere. The
+     * approver rewrites the wording and the decision **stays approved
+     * throughout** — same status, same `resolvedBy`, same `resolvedAt`. The
+     * team is never without a decision in force, and `denied` is unreachable
+     * from a review because the proposal lifecycle is never re-entered.
+     *
+     * ## What "the wording" is
+     *
+     * Two fields, and both have to move together:
+     *
+     *  - `question` — mirrored from `message.subject`, which `propose()`
+     *    treats as canonical.
+     *  - `selectedAnswer` — the final wording, taken from `message.message`
+     *    at finalize time. This is what the panel renders for an approved
+     *    decision, so a revision that missed it would change the title and
+     *    leave the text underneath saying the old thing.
+     *
+     * The message row is written too, for the reason `updateProposal()`
+     * gives: the decision row caches the message, and writing only the cache
+     * leaves the stream showing wording nobody decided.
+     *
+     * ## What it deliberately does not do
+     *
+     * No audit line — the caller owns the story. `DecisionReviewService`
+     * writes `review_accepted` (why) and `revised` (what), the same
+     * two-lines-for-one-act shape as `superseded` + `archived`.
+     *
+     * No status change, no clock. The clock is the review's business and the
+     * status is the point of the whole method.
+     *
+     * @param ?string $question null leaves it unchanged
+     * @param ?string $answer   null leaves it unchanged
+     *
+     * @return array{decision: Decision, changed: string[], previous: array{question: string, answer: string}}
+     *         `changed` is empty when the text submitted matched what was
+     *         already there — the caller decides whether that is an error,
+     *         because "accept but change nothing" is one and a repair run
+     *         would not be.
+     *
+     * @throws \RuntimeException         the decision is not approved
+     * @throws \InvalidArgumentException empty question, or either field too long
+     */
+    public function reviseApproved(
+        string   $teamId,
+        Decision $decision,
+        ?string  $question,
+        ?string  $answer,
+        string   $actingUserId,
+    ): array {
+        if ($decision->getStatus() !== 'approved') {
+            throw new \RuntimeException(
+                'Only an approved decision can be revised (current status: ' . $decision->getStatus() . ')'
+            );
+        }
+
+        // Gated here as well as in the caller. The method is public so the
+        // review service can reach it, and a public write that trusts its
+        // caller is one refactor away from being a hole — the same reasoning
+        // that made `assertApproverFor()` public rather than copied.
+        $this->assertApproverFor($teamId, $decision, $actingUserId);
+
+        $message = $this->messageMapper->find($decision->getMessageId());
+
+        $prevQuestion = (string)$decision->getQuestion();
+        $prevAnswer   = (string)$decision->getSelectedAnswer();
+
+        $newSubject = (string)($message['subject'] ?? $prevQuestion);
+        $newBody    = (string)($message['message'] ?? $prevAnswer);
+        $changed    = [];
+
+        if ($question !== null) {
+            $question = trim($question);
+            if ($question === '') {
+                throw new \InvalidArgumentException('Question cannot be empty');
+            }
+            if (mb_strlen($question) > self::MAX_QUESTION_LEN) {
+                throw new \InvalidArgumentException('Question exceeds maximum length');
+            }
+            // **Trimmed against trimmed** (v4.11.27). The client sends what
+            // the approver typed, trimmed; the row holds whatever was stored,
+            // which for a decision proposed from an attachment is commonly a
+            // body ending in a newline. Comparing the one against the other
+            // made "nothing was altered" read as a change, so an accept that
+            // altered nothing would be recorded as one — the exact thing the
+            // refusal below exists to prevent.
+            if ($question !== trim($prevQuestion)) {
+                $newSubject = $question;
+                $changed[]  = 'question';
+            }
+        }
+
+        if ($answer !== null) {
+            $answer = trim($answer);
+            if ($answer === '') {
+                throw new \InvalidArgumentException('The decision cannot be left without wording');
+            }
+            if (mb_strlen($answer) > self::MAX_ANSWER_LEN) {
+                throw new \InvalidArgumentException('Decision wording exceeds maximum length');
+            }
+            if ($answer !== trim($prevAnswer)) {
+                $newBody   = $answer;
+                $changed[] = 'answer';
+            }
+        }
+
+        if ($changed === []) {
+            return [
+                'decision' => $decision,
+                'changed'  => [],
+                'previous' => ['question' => $prevQuestion, 'answer' => $prevAnswer],
+            ];
+        }
+
+        // One write for both halves, as `updateProposal()` does — there is no
+        // window where the stream shows a new title over an old body.
+        $this->messageMapper->update($decision->getMessageId(), $newSubject, $newBody);
+        $decision->setQuestion($newSubject);
+        $decision->setSelectedAnswer($newBody);
+
+        /** @var Decision $saved */
+        $saved = $this->decisionMapper->update($decision);
+
+        // Best-effort, like every other caller of this: the decision is
+        // revised whether or not the markdown copy of it could be rewritten,
+        // and failing the review over a file write would be the tail wagging
+        // the dog.
+        $this->regenerateProposalDocument($saved);
+
+        $this->logger->info('[TeamHub][DecisionService] reviseApproved', [
+            'team_id' => $teamId, 'decision_id' => $saved->getId(),
+            'fields'  => $changed, 'by' => $actingUserId,
+        ]);
+
+        return [
+            'decision' => $saved,
+            'changed'  => $changed,
+            'previous' => ['question' => $prevQuestion, 'answer' => $prevAnswer],
+        ];
+    }
+
+    /**
+     * Move a decision into the category it should have been proposed in
+     * (v4.11.30, Justin 2026-10-05).
+     *
+     * *An approver for a category can move a proposal that is in the wrong
+     * category to the proper category from the actions menu on the decision
+     * page.* Until this existed, `category` was written once by `propose()`
+     * and never again except by `retire()` — so a proposal filed under the
+     * wrong category had exactly two outs: withdraw it and write it again,
+     * or let the wrong approvers decide it. Neither is a correction.
+     *
+     * **The gate is the current category's approver**, not the target's.
+     * Justin chose that way round and it is the one that matches the
+     * problem: the people who find a decision in their queue that does not
+     * belong to them are the current approvers, and they are the ones who
+     * need to be able to push it out. The target's approvers cannot pull it
+     * in — they would be claiming work nobody had handed them, and they
+     * cannot see it to begin with.
+     *
+     * **Live decisions only.** A retired decision is a read-only record
+     * sitting in the archive with `archived_from_category` naming where it
+     * came from; moving it would make that column a lie about a decision
+     * that has stopped governing anyway. And the archive is never a target —
+     * putting a decision there is *archiving* it, which has its own verb, its
+     * own mandatory reason and its own audit line.
+     *
+     * **Refused while a review is open**, for the reason `archive()` is: the
+     * review is with the current category's approvers, and moving the
+     * decision out from under them would leave them holding a question about
+     * a decision that is no longer theirs. Answer the review first.
+     *
+     * The review clock is recomputed from the new category, because the
+     * period belongs to the category and not to the decision — a decision
+     * moved from a six-month category into one that asks for nothing would
+     * otherwise keep falling due forever.
+     *
+     * @return array the serialised decision
+     */
+    public function moveToCategory(
+        string $teamId,
+        int    $decisionId,
+        string $category,
+        string $actingUserId,
+    ): array {
+        $this->assertModuleEnabledForTeam($teamId);
+        $this->memberService->requireMemberLevel($teamId);
+
+        $category = trim($category);
+        if ($category === '') {
+            throw new \InvalidArgumentException('A target category is required');
+        }
+
+        $decision = $this->loadDecisionInTeam($decisionId, $teamId);
+
+        if ($decision->isRetired()) {
+            throw new \RuntimeException(
+                'A retired decision cannot be moved (current status: ' . $decision->getStatus() . ')'
+            );
+        }
+
+        // The approver gate reads the category the decision is in **now**, so
+        // it has to run before anything is written.
+        $this->assertApproverFor($teamId, $decision, $actingUserId);
+
+        if ($this->reviewMapper->findOpenForDecision($decisionId) !== null) {
+            throw new \RuntimeException('A review of this decision is open — answer it first');
+        }
+
+        $from = trim((string)$decision->getCategory());
+        if (mb_strtolower($from) === mb_strtolower($category)) {
+            throw new \InvalidArgumentException('The decision is already in that category');
+        }
+
+        // The target must be one of the team's own categories. A free-text
+        // category is something this module stopped creating when categories
+        // became rows, and a *correction* that writes a name no category
+        // answers to would replace one wrong filing with another.
+        $target = null;
+        foreach ($this->categoryService->listForTeam($teamId) as $cat) {
+            if (mb_strtolower((string)($cat['name'] ?? '')) === mb_strtolower($category)) {
+                $target = $cat;
+                break;
+            }
+        }
+        if ($target === null) {
+            throw new \InvalidArgumentException('No such category in this team');
+        }
+        if (!empty($target['is_archive'])) {
+            throw new \InvalidArgumentException(
+                'The archive is not a category to move a decision into — archive it instead'
+            );
+        }
+
+        // The stored name, not the caller's casing: `category` on this table
+        // is compared against category names elsewhere, and a row that says
+        // `channels` where the category says `Channels` would answer to
+        // neither `assertApproverFor()` nor the landing page's grouping.
+        $to = (string)$target['name'];
+
+        // Who loses the decision from their queue, read before the write.
+        $fromApprovers = $this->categoryApproverUids($teamId, $from);
+
+        $decision->setCategory($to);
+
+        // The clock belongs to the category. An approved decision picks up
+        // the new category's period from now; anything not yet approved has
+        // no clock to set — `approve()` starts it — so it is left null
+        // rather than given a due date it cannot have earned.
+        if ($decision->getStatus() === 'approved') {
+            $months = $this->categoryService->reviewPeriodForCategory($teamId, $to);
+            $decision->setReviewDueAt(ReviewSchedule::dueAt(time(), $months));
+            $decision->setReviewNotifiedAt(null);
+        }
+
+        /** @var Decision $saved */
+        $saved = $this->decisionMapper->update($decision);
+
+        $this->auditService->log($saved, 'category_moved', $actingUserId, [
+            'from' => $from !== '' ? $from : null,
+            'to'   => $to,
+        ]);
+
+        // The markdown copy names the category, so it is now out of date.
+        // Best-effort, like every other caller: the decision has moved
+        // whether or not the file could be rewritten.
+        $this->regenerateProposalDocument($saved);
+
+        // Both sides, and the actor: the old approvers lose the row, the new
+        // ones gain it, and the approver who moved it is in the first list.
+        $this->bumpQueues(array_merge(
+            $fromApprovers,
+            $this->categoryApproverUids($teamId, $to),
+            [$actingUserId, $saved->getProposedBy()],
+        ));
+
+        $this->logger->info('[TeamHub][DecisionService] moveToCategory', [
+            'team_id' => $teamId, 'decision_id' => $decisionId,
+            'from' => $from, 'to' => $to, 'by' => $actingUserId,
+        ]);
+
+        return $this->serialize($saved);
+    }
+
+    /**
+     * The approvers of a named category, or `[]` when nothing answers to
+     * that name.
+     *
+     * Read-only and used only to address a cache invalidation — the
+     * authorisation is always `assertApproverFor()` and never this, which is
+     * the same division `DecisionReviewService::approverUids()` keeps.
+     *
+     * @return string[]
+     */
+    private function categoryApproverUids(string $teamId, ?string $categoryName): array {
+        $categoryName = trim((string)$categoryName);
+        if ($categoryName === '') {
+            return [];
+        }
+        foreach ($this->categoryService->listForTeam($teamId) as $cat) {
+            if (($cat['name'] ?? '') === $categoryName) {
+                return array_values(array_filter(
+                    (array)($cat['approvers'] ?? []),
+                    static fn ($uid): bool => is_string($uid) && $uid !== '',
+                ));
+            }
+        }
+        return [];
+    }
+
+    /**
+     * Invalidate the My Work queue of everyone named, the actor included.
+     *
+     * The static call takes the factory rather than the service, so there is
+     * no cycle to worry about — `MyWorkService` reads decisions.
+     *
+     * @param string[] $uids
+     */
+    private function bumpQueues(array $uids): void {
+        foreach (array_unique(array_filter($uids, static fn ($u): bool => is_string($u) && $u !== '')) as $uid) {
+            MyWorkService::bumpNonce($this->cacheFactory, $uid);
+        }
+    }
+
+    /**
+     * Copy a file the review requester put forward into the decision's
+     * proposal folder, and report the copy (v4.11.30).
+     *
+     * **Why a copy and not a reference.** The requester picks a file from
+     * their own Nextcloud, or uploads one — either way it lands in *their*
+     * files, where an approver has no access at all. That is precisely the
+     * complaint this version answers: *if I create a review I cannot review
+     * the attachment.* The team folder is circle-shared with every member,
+     * so a copy inside `.proposals/{decisionId}/` is readable by all of
+     * them, and the approvers are among them. The copy is taken here, in the
+     * requester's own request, because the requester is the only one who can
+     * read the original.
+     *
+     * **The filename carries a `review-{timestamp}-` prefix.**
+     * `writeProposalDocument()` overwrites attachment copies by name on every
+     * regeneration, so a file landing under its plain name would be clobbered
+     * — or would clobber the proposal's own attachment of the same name,
+     * which is the record this module promises never to rewrite. The prefix
+     * makes the collision impossible and the provenance readable in the Files
+     * app; the panel shows the name the requester knows instead, from the
+     * review row.
+     *
+     * A timestamp rather than the review id, which would read better: the
+     * copy has to be in place **before** the review row is written, so that
+     * a file that cannot be staged leaves no half-promised review behind at
+     * all, and at that point there is no id to name it with.
+     *
+     * @return array{fileId: int, name: string}
+     * @throws \RuntimeException         the team has no team folder
+     * @throws \InvalidArgumentException the file is not one this user can read
+     */
+    public function stageReviewAttachment(
+        string $teamId,
+        int    $decisionId,
+        int    $fileId,
+        string $displayName,
+    ): array {
+        if ($fileId <= 0) {
+            throw new \InvalidArgumentException('A file id is required');
+        }
+
+        $decision = $this->loadDecisionInTeam($decisionId, $teamId);
+
+        $nodes = $this->rootFolder->getById($fileId);
+        if (empty($nodes)) {
+            // Not reachable in this user's mountpoints — which is the only
+            // thing `getById` can tell us, and the only thing that matters.
+            throw new \InvalidArgumentException('The attached file could not be read');
+        }
+        $source = $nodes[0];
+        if (!($source instanceof \OCP\Files\File)) {
+            throw new \InvalidArgumentException('The attachment must be a file, not a folder');
+        }
+
+        $name = $this->sanitizeAttachmentName(
+            trim($displayName) !== '' ? trim($displayName) : $source->getName()
+        );
+
+        $subfolder = $this->proposalSubfolderFor($decision);
+        $destName  = 'review-' . time() . '-' . $name;
+        $info = $this->writeFileInto(
+            $subfolder,
+            $destName,
+            $source->getContent(),
+            self::PROPOSALS_FOLDER . '/' . $decision->getId() . '/' . $destName,
+        );
+
+        $this->logger->info('[TeamHub][DecisionService] review attachment staged', [
+            'decision_id' => $decisionId,
+            'file_id'     => $info['fileId'], 'name' => $name,
+        ]);
+
+        // The id of the **copy**, which is what the review row must hold.
+        return ['fileId' => $info['fileId'], 'name' => $name];
+    }
+
+    /**
+     * Delete a staged review attachment (v4.11.30).
+     *
+     * Called when a review is **denied**: the decision stands exactly as it
+     * was, so its source files must not quietly grow a document nobody
+     * adopted. Best-effort — a file that cannot be deleted is a stale copy
+     * in a hidden folder, and failing the denial over it would leave the
+     * review open instead.
+     */
+    public function discardStagedAttachment(int $fileId): void {
+        if ($fileId <= 0) {
+            return;
+        }
+        try {
+            foreach ($this->rootFolder->getById($fileId) as $node) {
+                $node->delete();
+                return;
+            }
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][DecisionService] could not discard staged review attachment', [
+                'file_id' => $fileId, 'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * The decision's own folder under `.proposals/`, created if missing.
+     *
+     * The subfolder layout every decision has used since v3.71.2. A legacy
+     * flat decision (`.proposals/{id}.md`, pre-3.71.2) gets a subfolder made
+     * for it here, which the `sources` endpoint does not list for that
+     * layout — so a review attachment on one of those is reachable from the
+     * review row's own link rather than from the Source list. That is the
+     * link the approver follows in either case, which is why the panel
+     * carries it.
+     *
+     * @throws \RuntimeException the team has no team folder to write into
+     */
+    private function proposalSubfolderFor(Decision $d): \OCP\Files\Folder {
+        $resources = $this->resourceService->getTeamResources($d->getTeamId());
+        $folderId  = (int)($resources['files']['folder_id'] ?? 0);
+        if ($folderId <= 0) {
+            throw new \RuntimeException(
+                'This team has no team folder, so a file cannot be attached to a review'
+            );
+        }
+
+        $nodes = $this->rootFolder->getById($folderId);
+        if (empty($nodes) || !($nodes[0] instanceof \OCP\Files\Folder)) {
+            throw new \RuntimeException('Team folder not found: ' . $folderId);
+        }
+        /** @var \OCP\Files\Folder $teamFolder */
+        $teamFolder = $nodes[0];
+
+        try {
+            $proposals = $teamFolder->get(self::PROPOSALS_FOLDER);
+            if (!($proposals instanceof \OCP\Files\Folder)) {
+                throw new \RuntimeException('Proposals path exists but is not a folder');
+            }
+        } catch (\OCP\Files\NotFoundException) {
+            $proposals = $teamFolder->newFolder(self::PROPOSALS_FOLDER);
+        }
+
+        $name = (string)$d->getId();
+        try {
+            $sub = $proposals->get($name);
+            if (!($sub instanceof \OCP\Files\Folder)) {
+                throw new \RuntimeException('Proposal subfolder path exists but is not a folder');
+            }
+            return $sub;
+        } catch (\OCP\Files\NotFoundException) {
+            return $proposals->newFolder($name);
+        }
+    }
+
+    /**
      * Finalize an open proposal using its own body as the final wording.
      *
      * **A second finalize path, and it is not a duplicate of `finalize()`.**
@@ -758,8 +1290,10 @@ class DecisionService {
                 'Only open proposals can be finalized (current status: ' . $decision->getStatus() . ')'
             );
         }
+        // v4.11.24 — proposer or team admin, for the same reason as
+        // `updateProposal()`: a reopened decision must not be strandable.
         if ($decision->getProposedBy() !== $actingUserId) {
-            throw new \RuntimeException('Only the proposer can finalize this proposal');
+            $this->memberService->requireAdminLevel($teamId);
         }
 
         $message = $this->messageMapper->find($decision->getMessageId());
@@ -1402,6 +1936,18 @@ class DecisionService {
 
         $decision->setStatus('approved');
         $decision->setResolvedBy($actingUserId);
+        // v4.11.18 — approval is what starts the review clock, because an
+        // approved decision is the only kind there is anything to review.
+        // Computed here rather than in `DecisionReviewService` to keep the
+        // dependency one-way: that service depends on this one, so this one
+        // cannot depend on it, and the arithmetic they share lives in
+        // `Util\ReviewSchedule`. A category with no review period gives
+        // null, which is the whole "0 means never" rule.
+        $decision->setReviewDueAt(ReviewSchedule::dueAt(
+            time(),
+            $this->categoryService->reviewPeriodForCategory($teamId, $decision->getCategory()),
+        ));
+        $decision->setReviewNotifiedAt(null);
         // decidedAt was set at finalize-time. We don't overwrite it here so
         // the timeline retains both moments — v4.5.25 records the second one
         // in its own column instead, because My Work's Completed section needs
@@ -1499,8 +2045,15 @@ class DecisionService {
      *      check the m:n approver list. Pass if user is listed.
      *   2. Decision's category string doesn't match any predefined category
      *      (legacy/free-text row) → fall back to "must be team admin".
+     *
+     * v4.11.18 — public, because retiring a decision is the mirror of
+     * approving it and `DecisionReviewService` gates completing a review and
+     * superseding a decision on exactly this check. One authority, called
+     * from three write paths, rather than a third hand-rolled copy of the
+     * rule; the read-only twin in `DecisionWorkProvider::isApprover()` is
+     * still the only other implementation and still says why.
      */
-    private function assertApproverFor(string $teamId, Decision $d, string $actingUserId): void {
+    public function assertApproverFor(string $teamId, Decision $d, string $actingUserId): void {
         $categoryName = $d->getCategory();
 
         if ($categoryName !== null && $categoryName !== '') {
@@ -1938,6 +2491,9 @@ class DecisionService {
             'approved'   => 'Approved',
             'denied'     => 'Denied',
             'withdrawn'  => 'Withdrawn',
+            // v4.11.18 — the two retirement states.
+            'superseded' => 'Superseded',
+            'archived'   => 'Archived',
             default      => $status,
         };
     }
@@ -2103,6 +2659,66 @@ class DecisionService {
             $serialised['proposalBody'] = null;
         }
 
+        // v4.11.18 — the decision that replaced this one, for the detail
+        // panel's "Superseded by" link. Resolved here and not in
+        // `serialize()` for the same reason as `proposalBody` above: it is a
+        // second query, and only this surface reads it.
+        $serialised['supersededBy'] = null;
+        if ($decision->getStatus() === 'superseded') {
+            try {
+                $successor = $this->decisionMapper->findBySupersedesId($decisionId);
+                if ($successor !== null && $successor->getTeamId() === $teamId) {
+                    $serialised['supersededBy'] = [
+                        'id'       => (int)$successor->getId(),
+                        'question' => $successor->getQuestion(),
+                        'status'   => $successor->getStatus(),
+                    ];
+                }
+            } catch (\Throwable $e) {
+                // Soft: the banner still says the decision is superseded,
+                // it just cannot offer the link. Better than failing the
+                // whole fetch over the one field that is decoration on top
+                // of a true statement.
+                $this->logger->warning('[TeamHub][DecisionService] successor lookup failed', [
+                    'decision_id' => $decisionId, 'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        // v4.11.31 — and the same relationship from the other end: the
+        // decision **this** one replaced. Justin, 2026-10-06: a supersede was
+        // visible on the superseded decision and nowhere on the one that
+        // superseded it, so the panel's Links section had nothing to draw.
+        //
+        // Read straight off `supersedes_id` on this row — no second query,
+        // no second column, and no way for the two directions to disagree:
+        // `supersededBy` above resolves the same column from the other side.
+        // Here as well as there and not in `serialize()`, for the reason
+        // `proposalBody` is not (DESIGN §2.79): one lookup for the one
+        // surface that shows it.
+        $serialised['supersedes'] = null;
+        $supersedesId = $decision->getSupersedesId();
+        if ($supersedesId !== null && (int)$supersedesId > 0) {
+            try {
+                $predecessor = $this->decisionMapper->findById((int)$supersedesId);
+                if ($predecessor !== null && $predecessor->getTeamId() === $teamId) {
+                    $serialised['supersedes'] = [
+                        'id'       => (int)$predecessor->getId(),
+                        'question' => $predecessor->getQuestion(),
+                        'status'   => $predecessor->getStatus(),
+                    ];
+                }
+            } catch (\Throwable $e) {
+                // Soft, like the successor lookup above: the decision is
+                // what it is whether or not the panel can name what it
+                // replaced, and failing the whole fetch over one row would
+                // cost more than the row is worth.
+                $this->logger->warning('[TeamHub][DecisionService] predecessor lookup failed', [
+                    'decision_id' => $decisionId, 'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
         // Task links are fetched via the separate GET /decisions/{id}/tasks
         // endpoint (Session B). No longer embedded in the show() response.
         return $serialised;
@@ -2178,7 +2794,17 @@ class DecisionService {
         $this->assertModuleEnabledForTeam($teamId);
         // 404 if the decision isn't in this team — same gate as other reads.
         $this->loadDecisionInTeam($decisionId, $teamId);
-        return $this->auditService->listForDecision($decisionId);
+        // v4.11.23 — newest first. The mapper orders oldest→newest, which is
+        // what the proposal `.md` document wants (a document is read from
+        // the top down and its history is a narrative), and the opposite of
+        // what the detail panel wants: there, the thing you came to see is
+        // what just happened, and on a decision with twenty events the
+        // newest line was the one you had to scroll to find.
+        //
+        // Reversed here rather than in the mapper so the document keeps its
+        // order, and here rather than in the client so the endpoint has one
+        // defined order instead of two readings of the same list.
+        return array_reverse($this->auditService->listForDecision($decisionId));
     }
 
     // =========================================================================
@@ -2286,7 +2912,260 @@ class DecisionService {
             'audience'            => $d->getShareMode() === self::SHARE_SELECTED
                 ? $this->safeAudience($d->getId())
                 : null,
+            // v4.11.12 — a public record rather than a team-internal one.
+            'isPublic'            => $d->isPublic(),
+            // v4.11.18 — retirement and the review clock. `isRetired` is
+            // sent rather than left to the client to derive from `status`,
+            // because three components each ask the question and one of them
+            // getting the status list wrong is a read-only record that
+            // renders its Edit button.
+            'isRetired'           => $d->isRetired(),
+            'archivedAt'          => $d->getArchivedAt(),
+            'archivedBy'          => $d->getArchivedBy(),
+            'archivedFromCategory' => $d->getArchivedFromCategory(),
+            'reviewDueAt'         => $d->getReviewDueAt(),
         ];
+    }
+
+    /**
+     * Publish a decision, or take it back into the team (v4.11.12, Justin
+     * 2026-09-30).
+     *
+     * **What public means** (Justin, 2026-09-30): readable by every
+     * **logged-in account on this instance**. Not "whoever has the link" —
+     * the flag says the decision *is* a public record, so it can be searched,
+     * listed and later transformed into a knowledge item that links back to
+     * it, none of which a secret-URL grant could support. And not public to
+     * the internet either: nothing here is reachable without signing in, no
+     * route that serves a decision is a `#[PublicPage]`, and there is no
+     * share token. It widens who may **read**; it changes nothing about who
+     * may act, approve, withdraw or comment, which stay the team's.
+     *
+     * **Who may flip it** (v4.11.31, Justin 2026-10-06: *only a category
+     * approver can set a decision in the category as public*): an **approver
+     * of the decision's category** — `assertApproverFor()`, the same
+     * authority that approves, denies, archives, supersedes and refiles it.
+     *
+     * This replaces the team's `decisions_action_min_level`, which gated it
+     * from v4.11.12 and put publishing beside *Link decision* and *Link
+     * task*. The comparison was wrong: attaching a link to a decision adds
+     * to the team's own record, while publishing moves the record **out of
+     * the team** — readable by every logged-in account on the instance, and
+     * the raw material a knowledge item is later built from. That is a
+     * statement about what the decision *is*, and the people who get to make
+     * statements about a decision are its category's approvers. Default 1 on
+     * the old gate meant any member of the team could do it.
+     *
+     * **Both directions, one hand.** Taking a decision back into the team is
+     * approver-gated too. The alternative — publish restricted, unpublish
+     * open — lets an ordinary member withdraw what an approver published,
+     * which is the same authority being argued about from the other side.
+     *
+     * **The archive is team-only** (Justin, same day: *all decisions in the
+     * archive category are team only … there is also no option to make it
+     * public for that category*). Publishing out of the archive is refused
+     * outright rather than left to the approver gate: the archive has no
+     * approvers by design, so the gate would already refuse everybody — but
+     * with "you are not an approver", which sends the reader looking for the
+     * approver who could, and there isn't one and never will be.
+     * `DecisionReviewService::retire()` is the other half, clearing the flag
+     * on the way in.
+     *
+     * Unpublishing *inside* the archive falls back to the old action-level
+     * gate, for the same no-approvers reason: a row left public by a version
+     * before this one must not be unreachable, and the archive refusal above
+     * means nothing can put the flag back up.
+     *
+     * Any live status may be published. An open proposal published on
+     * purpose is a team saying "this is being decided in the open"; refusing
+     * it would mean a desk could not point a requester at the decision it is
+     * waiting for, which is half of what this is for.
+     *
+     * @return array<string, mixed> the serialised decision
+     * @throws \RuntimeException|\InvalidArgumentException
+     */
+    public function setPublic(string $teamId, int $decisionId, bool $public, string $actingUserId): array {
+        $this->assertModuleEnabledForTeam($teamId);
+        $this->memberService->requireMemberLevel($teamId);
+
+        $decision = $this->loadDecisionInTeam($decisionId, $teamId);
+
+        // Read once: it decides both the refusal and which gate applies.
+        $inArchive = $this->categoryService->isArchiveName($teamId, $decision->getCategory());
+
+        if ($public && $inArchive) {
+            throw new \InvalidArgumentException(
+                'Decisions in the archive are team-only and cannot be published',
+            );
+        }
+
+        if ($inArchive) {
+            $this->requireActionLevel($teamId, $actingUserId);
+        } else {
+            $this->assertApproverFor($teamId, $decision, $actingUserId);
+        }
+
+        if ($decision->isPublic() === $public) {
+            return $this->serialize($decision);
+        }
+
+        $decision->setIsPublic($public ? 1 : 0);
+        /** @var Decision $saved */
+        $saved = $this->decisionMapper->update($decision);
+
+        $this->logger->info('[TeamHub][DecisionService] setPublic', [
+            'team_id'     => $teamId,
+            'decision_id' => $saved->getId(),
+            'is_public'   => $public,
+            'by'          => $actingUserId,
+        ]);
+        // Audited either way: publishing a team record outside the team, and
+        // taking it back, are both things the team may need to account for.
+        $this->auditService->log($saved, $public ? 'published' : 'unpublished', $actingUserId);
+
+        return $this->serialize($saved);
+    }
+
+    /**
+     * One team's approved, public decisions matching a search term
+     * (v4.11.12) — what the desk's picker offers when it links a decision
+     * into a request's conversation. **At most four** (Justin, 2026-09-30):
+     * a picker is for recognising the decision you already have in mind, and
+     * a list long enough to scroll is a list somebody reads instead of
+     * narrowing their words.
+     *
+     * **Public only, and no membership needed**: every row this returns is a
+     * public record, which is the whole point of the flag. The caller is
+     * still responsible for its own gate on *asking* — `ServiceTeamController`
+     * admits only an eligible agent of the service team, so the search cannot
+     * be used to enumerate an arbitrary team's records from an arbitrary
+     * account.
+     *
+     * @return array<int, array<string, mixed>> the pill shape, newest first
+     */
+    public function searchPublicInTeam(string $teamId, string $term, int $limit = 4): array {
+        // A team whose Decisions module is switched off offers nothing to
+        // link: the records may still exist, but the team is not running the
+        // module, and the picker must not hand out what the team has put away.
+        if (!$this->isModuleActiveForTeam($teamId)) {
+            return [];
+        }
+        $term = mb_substr(trim($term), 0, 200);
+        $out  = [];
+        foreach ($this->decisionMapper->searchPublicInTeam($teamId, $term, $limit) as $decision) {
+            $out[] = $this->publicSummary($decision, true);
+        }
+        return $out;
+    }
+
+    /**
+     * The pill shape for decisions named by id, as **this reader** may see
+     * them (v4.11.12) — what a page of the service desk's request grid
+     * renders in its Decisions column.
+     *
+     * One query for the whole page, and one authority for what each reader
+     * gets: a decision is readable when it is public, or when the reader is
+     * a member of its team and `canViewDecision()` agrees. A reader who may
+     * not open it gets the row **without its question**: that a decision is
+     * linked to a request is not the secret, the question is.
+     *
+     * A link to a decision that has since been deleted resolves to nothing
+     * and is left out, rather than rendering a pill that opens an error.
+     *
+     * @param int[] $decisionIds
+     * @return array<int, array<string, mixed>> keyed by decision id
+     */
+    public function summariesForReader(array $decisionIds, string $readerUid): array {
+        $out = [];
+        try {
+            $decisions = $this->decisionMapper->findByIds($decisionIds);
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][DecisionService] summariesForReader failed', [
+                'error' => $e->getMessage(),
+            ]);
+            return [];
+        }
+        foreach ($decisions as $id => $decision) {
+            $out[$id] = $this->publicSummary($decision, $this->mayRead($decision, $readerUid));
+        }
+        return $out;
+    }
+
+    /**
+     * May this reader open this decision at all (v4.11.12)?
+     *
+     * Public is the widening: a public decision is readable by every
+     * logged-in account on this instance, because a public record that only
+     * its own team can read is not a public record. Signing in is still
+     * required — "public" is instance-wide, never anonymous. Otherwise it is
+     * the rule that has always applied
+     * — a member of the decision's team, and `canViewDecision()` on top for
+     * an open proposal shared with a selected audience.
+     *
+     * **Fails closed**: a membership lookup that throws denies.
+     */
+    public function mayRead(Decision $decision, string $readerUid): bool {
+        if ($readerUid === '') {
+            return false;
+        }
+        if ($decision->isPublic()) {
+            return true;
+        }
+        try {
+            $level = $this->memberService->getMemberLevelFromDb($this->db, $decision->getTeamId(), $readerUid);
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][DecisionService] mayRead membership lookup failed — denying', [
+                'decision_id' => $decision->getId(), 'error' => $e->getMessage(),
+            ]);
+            return false;
+        }
+        if ($level < 1) {
+            return false;
+        }
+        return $this->canViewDecision($decision, $readerUid);
+    }
+
+    /**
+     * The small shape a pill renders from. `question` is present only when
+     * the reader may read it (see `summariesForReader()`); `canOpen` says
+     * whether the client should offer the link at all, so a pill nobody can
+     * follow is never drawn as one (CLAUDE.md § Permissions).
+     *
+     * @return array<string, mixed>
+     */
+    private function publicSummary(Decision $decision, bool $mayRead): array {
+        return [
+            'id'       => (int)$decision->getId(),
+            'teamId'   => $decision->getTeamId(),
+            // The raw status, as `serialize()` returns it: the client already
+            // renders the legacy 'proposed' / 'decided' values, and a second
+            // mapping here would be a second place to keep them right.
+            'status'   => $decision->getStatus(),
+            'isPublic' => $decision->isPublic(),
+            'canOpen'  => $mayRead,
+            'question' => $mayRead ? $decision->getQuestion() : '',
+        ];
+    }
+
+    /**
+     * The acting user holds at least the team's configured action level —
+     * the same gate `DecisionLinkService` and `DecisionTaskService` apply to
+     * linking, and `setPublic()` to publishing.
+     *
+     * @throws \RuntimeException
+     */
+    private function requireActionLevel(string $teamId, string $actingUserId): void {
+        if ($actingUserId === '') {
+            throw new \RuntimeException('Not authenticated');
+        }
+        $row      = $this->configMapper->findByTeam($teamId);
+        $minLevel = $row !== null ? $row->getDecisionsActionMinLevel() : 1;
+        $actual   = $this->memberService->getMemberLevelFromDb($this->db, $teamId, $actingUserId);
+        if ($actual < $minLevel) {
+            throw new \RuntimeException(
+                'Insufficient permissions — your level (' . $actual . ') is below the required (' . $minLevel . ')'
+            );
+        }
     }
 
     /**

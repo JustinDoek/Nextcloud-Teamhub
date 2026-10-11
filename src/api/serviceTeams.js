@@ -49,6 +49,84 @@ export async function loadQueue(teamId) {
 }
 
 /**
+ * v4.11.7 — one page of the desk's whole request history, filtered:
+ * `{ requests, total, truncated, agents, requesters }`.
+ *
+ * `filters` takes `state` ('open' | 'closed' | 'all'), `assignee` (a uid, or
+ * 'unassigned'), `requester` (a uid), `q`, `offset` and `limit`. Empty
+ * values are left off the query string rather than sent as '', so the
+ * server's own defaults apply.
+ */
+export async function loadDeskRequests(teamId, filters = {}) {
+	const params = {}
+	for (const key of ['state', 'assignee', 'requester', 'q', 'offset', 'limit']) {
+		const value = filters[key]
+		if (value !== undefined && value !== null && value !== '') {
+			params[key] = value
+		}
+	}
+	const { data } = await axios.get(base('/' + encodeURIComponent(teamId) + '/requests'), { params })
+	return {
+		requests: data?.requests || [],
+		total: Number(data?.total) || 0,
+		truncated: !!data?.truncated,
+		agents: data?.agents || [],
+		requesters: data?.requesters || [],
+	}
+}
+
+/**
+ * v4.11.12 — the decisions one request points at, for the desk's grid.
+ *
+ * Each row is `{ id, teamId, status, isPublic, canOpen, question, addedBy,
+ * addedAt }`. `canOpen` is the server's answer for *this* reader, and
+ * `question` is empty when it is false: an agent who is not a member of the
+ * desk's team sees that a request was decided without being handed the
+ * decision's words.
+ *
+ * @return {Promise<object[]>}
+ */
+export async function loadRequestDecisions(id) {
+	const { data } = await axios.get(workflow(id, '/decisions'))
+	return Array.isArray(data?.decisions) ? data.decisions : []
+}
+
+/**
+ * v4.11.12 — point a request at a decision of the service team handling it.
+ * Returns the request's decisions after the link.
+ *
+ * The server takes an id, never a URL: a pasted link is resolved to an id in
+ * the client, where it was pasted.
+ *
+ * @return {Promise<object[]>}
+ */
+export async function linkRequestDecision(id, decisionId) {
+	const { data } = await axios.post(workflow(id, '/decisions'), { decisionId })
+	return Array.isArray(data?.decisions) ? data.decisions : []
+}
+
+/** v4.11.12 — take a decision off a request. Returns what is left. */
+export async function unlinkRequestDecision(id, decisionId) {
+	const { data } = await axios.delete(workflow(id, '/decisions/' + encodeURIComponent(decisionId)))
+	return Array.isArray(data?.decisions) ? data.decisions : []
+}
+
+/**
+ * v4.11.12 — the service team's **public** decisions matching `q`, newest
+ * first: the picker behind *Link a decision*.
+ *
+ * Public only, by design — a decision the team has not published is a dead
+ * end as a link for anybody but the desk itself. Pasting the decision's URL
+ * is the path for one the team keeps internal.
+ *
+ * @return {Promise<object[]>}
+ */
+export async function searchPublicDecisions(teamId, q) {
+	const { data } = await axios.get(base('/' + encodeURIComponent(teamId) + '/public-decisions'), { params: { q } })
+	return Array.isArray(data?.decisions) ? data.decisions : []
+}
+
+/**
  * v4.10.27 — one service team's statistics for a period of 7, 30 or 90 days:
  * `{ days, since, totals, services }`.
  */

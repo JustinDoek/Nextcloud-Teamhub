@@ -1737,6 +1737,41 @@ class TeamService {
             'createTeamGroup'        => $rawGroups,         // legacy flat string — keep for canCreateTeam()
             'createTeamGroups'       => $createTeamGroups, // structured array for the picker
             'groupFoldersDelegation' => $this->safeGetDelegationStatus(),
+            // v4.11.32 — IdP teams: a team per Nextcloud group that came from
+            // a directory. Read through the two services so the defaults, the
+            // validation and the "can this filter even run" question each live
+            // in one place. `idpTeamsLdapDnAvailable` is false when user_ldap
+            // is not installed, and the panel must then not offer the sub-OU
+            // field at all: a filter that cannot be evaluated would silently
+            // stop filtering.
+            'idpTeams'               => $this->idpTeamSettings(),
+            // v4.11.34 — what happens to a team made outside TeamHub:
+            // `accept`, `review` (the default) or `decline`. The key and the
+            // clamp come from TeamAdoptionService, the read happens here:
+            // that service's graph reaches the workflow engine, and nothing
+            // in the admin panel should be able to fail over a one-word
+            // setting. The panel renders it beside the adoption grid on
+            // Import/Export, which is where the consequence is visible.
+            'teamAdoptionMode'       => TeamAdoptionService::normaliseMode($config->getAppValue(
+                Application::APP_ID,
+                TeamAdoptionService::SETTING_MODE,
+                TeamAdoptionService::MODE_REVIEW,
+            )),
+            // v4.11.35 — the pair an automatically accepted team gets.
+            // Raw here, unlike the mode: resolving them needs the template
+            // list and the profile table, which is the adoption service's
+            // job, and the panel renders its own closed lists anyway. An
+            // empty value means "the default", which the panel shows.
+            'teamAdoptionTemplate'   => trim($config->getAppValue(
+                Application::APP_ID,
+                TeamAdoptionService::SETTING_TEMPLATE,
+                TeamAdoptionDecisionService::DEFAULT_TEMPLATE,
+            )),
+            'teamAdoptionProfile'    => trim($config->getAppValue(
+                Application::APP_ID,
+                TeamAdoptionService::SETTING_PROFILE,
+                TeamAdoptionDecisionService::DEFAULT_PROFILE,
+            )),
             // Presence module — default ON (v3.75.4). NC admin can toggle off.
             // Defaults to enabled to give the module visibility on fresh
             // installs; existing installs that have ever explicitly set this
@@ -1802,9 +1837,7 @@ class TeamService {
             // The date the create-team wizard's picker opens on when a user
             // first clicks it. Computed server-side so the wizard, the CSV
             // importer's documentation and this panel cannot drift apart.
-            'expiryDefaultDate'      => (new \DateTimeImmutable('now', new \DateTimeZone('UTC')))
-                ->modify('+' . TeamExpiryService::DEFAULT_PICKER_MONTHS . ' months')
-                ->format('Y-m-d'),
+            'expiryDefaultDate'      => TeamExpiryService::defaultPickerDateFor(),
         ];
     }
 
@@ -1813,6 +1846,55 @@ class TeamService {
      * (e.g. group_folders_applicable table absent on a fresh GF install) cannot
      * break the settings load response and wipe the team-creator group from the UI.
      */
+    /**
+     * The IdP-teams block of the admin panel (v4.11.32).
+     *
+     * Resolved lazily: this panel is read on every admin page load and the
+     * provisioning service pulls in the rest of the creation stack.
+     *
+     * `serviceAccountProblem` is carried rather than a bare bool so the panel
+     * can say *why* provisioning cannot run — no account, a deleted one, a
+     * disabled one, or one that may not create teams — which is the whole
+     * difference between an administrator fixing it and filing a bug.
+     *
+     * @return array<string,mixed>
+     */
+    private function idpTeamSettings(): array {
+        try {
+            $rule = $this->container->get(IdpTeamService::class);
+
+            return [
+                'mode'               => $rule->mode(),
+                'backends'           => $rule->backends(),
+                'ldapOu'             => $rule->ldapOu(),
+                'ldapDnAvailable'    => $rule->ldapDnAvailable(),
+                'pattern'            => $rule->pattern(),
+                'template'           => $rule->template(),
+                'profile'            => $rule->profile(),
+                'serviceAccount'     => $rule->serviceAccount(),
+                'onGroupGone'        => $rule->onGroupGone(),
+                // Reading this needs the provisioning service, which is the
+                // heavier of the two; a failure here must not cost the panel
+                // its other eight values.
+                'serviceAccountProblem' => $this->safeServiceAccountProblem(),
+            ];
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][TeamService] IdP team settings unavailable', [
+                'error' => $e->getMessage(),
+                'app'   => Application::APP_ID,
+            ]);
+            return ['mode' => IdpTeamService::MODE_OFF, 'unavailable' => true];
+        }
+    }
+
+    private function safeServiceAccountProblem(): string {
+        try {
+            return $this->container->get(IdpTeamProvisionService::class)->serviceAccountProblem();
+        } catch (\Throwable $e) {
+            return 'unavailable';
+        }
+    }
+
     private function safeGetDelegationStatus(): array {
         try {
             return $this->groupFolderService->getDelegationStatus();
@@ -1896,6 +1978,117 @@ class TeamService {
                 Application::APP_ID,
                 TeamExpiryService::CONFIG_WARNING_DAYS,
                 (string)TeamExpiryService::clampWarningDays((int)$settings['expiryWarningDays']),
+            );
+        }
+
+        // ── IdP teams (v4.11.32) ─────────────────────────────────────────
+        //
+        // Clamped rather than rejected throughout, like the three settings
+        // above, because this tab autosaves as the administrator types. Every
+        // value is validated against a closed vocabulary where one exists —
+        // an unrecognised mode must not read as "on".
+        // ── Teams made outside TeamHub (v4.11.34) ──────────────────
+        //
+        // Clamped to `review` like every closed vocabulary above: an
+        // unrecognised value must read as "ask somebody", never as
+        // "accept everything" or "refuse everything".
+        if (isset($settings['teamAdoptionMode'])) {
+            $adoptionMode = (string)$settings['teamAdoptionMode'];
+            $config->setAppValue(
+                Application::APP_ID,
+                TeamAdoptionService::SETTING_MODE,
+                TeamAdoptionService::normaliseMode($adoptionMode),
+            );
+        }
+        // Length-capped only, like the IdP pair below: what is a valid
+        // template or profile is the policy tables' answer, and it is given
+        // at the point of use (`defaultTemplate()` / `defaultProfile()`),
+        // where a key that has since been deleted falls back rather than
+        // leaving the setting unreadable.
+        if (isset($settings['teamAdoptionTemplate'])) {
+            $config->setAppValue(
+                Application::APP_ID,
+                TeamAdoptionService::SETTING_TEMPLATE,
+                mb_substr(trim((string)$settings['teamAdoptionTemplate']), 0, 64),
+            );
+        }
+        if (isset($settings['teamAdoptionProfile'])) {
+            $config->setAppValue(
+                Application::APP_ID,
+                TeamAdoptionService::SETTING_PROFILE,
+                mb_substr(trim((string)$settings['teamAdoptionProfile']), 0, 64),
+            );
+        }
+
+        if (isset($settings['idpTeamsMode'])) {
+            $mode = (string)$settings['idpTeamsMode'];
+            $config->setAppValue(
+                Application::APP_ID,
+                IdpTeamService::SETTING_MODE,
+                in_array($mode, IdpTeamService::MODES, true) ? $mode : IdpTeamService::MODE_OFF,
+            );
+        }
+        if (isset($settings['idpTeamsBackends'])) {
+            // Free text by necessity: a backend name comes from whatever user
+            // backend app is installed, so there is no closed list to check
+            // against. Length-capped and comma-normalised; an unknown name
+            // simply matches no group.
+            $names = array_values(array_unique(array_filter(
+                array_map(
+                    static fn (string $n): string => mb_substr(trim($n), 0, 64),
+                    explode(',', (string)$settings['idpTeamsBackends']),
+                ),
+                static fn (string $n): bool => $n !== '',
+            )));
+            $config->setAppValue(Application::APP_ID, IdpTeamService::SETTING_BACKENDS, implode(',', $names));
+        }
+        if (isset($settings['idpTeamsLdapOu'])) {
+            $config->setAppValue(
+                Application::APP_ID,
+                IdpTeamService::SETTING_LDAP_OU,
+                mb_substr(trim((string)$settings['idpTeamsLdapOu']), 0, 1000),
+            );
+        }
+        if (isset($settings['idpTeamsPattern'])) {
+            $config->setAppValue(
+                Application::APP_ID,
+                IdpTeamService::SETTING_PATTERN,
+                mb_substr(trim((string)$settings['idpTeamsPattern']), 0, 512),
+            );
+        }
+        if (isset($settings['idpTeamsTemplate'])) {
+            $config->setAppValue(
+                Application::APP_ID,
+                IdpTeamService::SETTING_TEMPLATE,
+                mb_substr(trim((string)$settings['idpTeamsTemplate']), 0, 64),
+            );
+        }
+        if (isset($settings['idpTeamsProfile'])) {
+            $config->setAppValue(
+                Application::APP_ID,
+                IdpTeamService::SETTING_PROFILE,
+                mb_substr(trim((string)$settings['idpTeamsProfile']), 0, 64),
+            );
+        }
+        if (isset($settings['idpTeamsServiceAccount'])) {
+            // Stored even when the account cannot create teams: the panel
+            // reports the problem from `serviceAccountProblem()` so the
+            // administrator can see what they picked and why it will not work,
+            // rather than having their choice silently discarded.
+            $config->setAppValue(
+                Application::APP_ID,
+                IdpTeamService::SETTING_SERVICE_ACCOUNT,
+                mb_substr(trim((string)$settings['idpTeamsServiceAccount']), 0, 64),
+            );
+        }
+        if (isset($settings['idpTeamsOnGroupGone'])) {
+            $gone = (string)$settings['idpTeamsOnGroupGone'];
+            $config->setAppValue(
+                Application::APP_ID,
+                IdpTeamService::SETTING_ON_GROUP_GONE,
+                in_array($gone, IdpTeamService::GONE_MODES, true)
+                    ? $gone
+                    : IdpTeamService::GONE_KEEP_AND_REPORT,
             );
         }
         if (array_key_exists('createTeamGroup', $settings)) {

@@ -998,7 +998,7 @@ export default {
         t,
         n,
         ...mapActions(['fetchTeams', 'fetchTeamGroups', 'selectTeam']),
-        ...mapMutations(['SET_VIEW', 'SET_DECISIONS_TARGET', 'SET_PENDING_TEAM_ACTION', 'SET_MESSAGE_TARGET']),
+        ...mapMutations(['SET_VIEW', 'SET_DECISIONS_TARGET', 'SET_DECISIONS_COMPOSE_PREFILL', 'SET_PENDING_TEAM_ACTION', 'SET_MESSAGE_TARGET']),
 
         // ------------------------------------------------------------------
         // v4.7.3 — sidebar grouping
@@ -1354,6 +1354,13 @@ export default {
          *   ?team=<teamId>&decision=<decisionId> → open the team, switch to
          *                                          the Decisions tab, and
          *                                          pre-select the proposal
+         *   ?team=<teamId>&propose=1&file=<id>   → open the team's Decisions
+         *                                          tab with the proposal
+         *                                          composer open and the file
+         *                                          linked in its Context
+         *                                          field (v4.11.42 — the
+         *                                          *Propose a decision* entry
+         *                                          in the Files ⋯ menu)
          *
          * The decision id is resolved to its messageId via a single fetch;
          * decisionsTargetMessageId then drives the existing scroll/select
@@ -1374,6 +1381,16 @@ export default {
                 // to it deliberately carries no team id.
                 if (params.has('mywork')) {
                     this.activeView = 'mywork'
+                    return
+                }
+
+                // v4.11.11 — ?services opens the service catalog. What a
+                // unified-search hit on a service links to: the card is not
+                // separately addressable, so the page is the destination.
+                // Cross-team like My Work, so it carries no team id, and it
+                // is checked before the team branch for the same reason.
+                if (params.has('services')) {
+                    this.activeView = 'services'
                     return
                 }
 
@@ -1401,7 +1418,17 @@ export default {
                 await this.selectTeam(teamId)
                 this.activeView = 'team'
 
-                if (decisionId) {
+                if (params.has('propose')) {
+                    // v4.11.42 — the Files ⋯ menu's *Propose a decision*. The
+                    // entry deliberately opens the real composer here rather
+                    // than a second one of its own on the Files page; see
+                    // `src/filesactionsBoot.js`.
+                    //
+                    // First in the chain for the same reason the two below are
+                    // exclusive: all three want the active tab, and a link
+                    // carrying more than one would have them fighting over it.
+                    await this.openProposalForFile(teamId, params.get('file'))
+                } else if (decisionId) {
                     // Resolve the decision's messageId so the existing
                     // scrollAndSelectTarget watcher in TeamDecisionsView
                     // can highlight the right card.
@@ -1449,6 +1476,65 @@ export default {
                 // Never let a bad URL crash the app.
                 console.warn('[TeamHub][App] consumeDeepLink: failed', e?.message)
             }
+        },
+
+        /**
+         * v4.11.42 — open the proposal composer with one file quoted in it.
+         *
+         * The team is already selected by the time this runs. What is left is
+         * the file: whether it may be quoted in a proposal for this team, and
+         * what it is called. Both come from the server rather than from the
+         * link, because the name goes into markdown and a name carried in a
+         * URL is a name anybody can choose.
+         *
+         * The Context field gets a markdown link and nothing else — the field
+         * is the proposer's own reasoning, and a sentence we wrote around their
+         * link would be ours to maintain in six languages for no gain. The
+         * brackets in the file name are escaped so a file called `report [v2]`
+         * does not end the link text early.
+         *
+         * An ineligible file lands on the Decisions tab with a warning instead
+         * of an open composer: the entry's prefix test can disagree with the
+         * server (the module switched off, the folder detached, the file gone
+         * between the click and this request), and that is a sentence to show,
+         * not a modal to open on nothing.
+         *
+         * @param {string} teamId the team the link named, already selected
+         * @param {string|null} fileIdRaw the `file` parameter, unvalidated
+         */
+        async openProposalForFile(teamId, fileIdRaw) {
+            this.SET_VIEW('decisions')
+
+            const fileId = Number(fileIdRaw)
+            if (!Number.isInteger(fileId) || fileId <= 0) {
+                return
+            }
+
+            let context
+            try {
+                const { data } = await axios.get(
+                    generateUrl('/apps/teamhub/api/v1/teams/{teamId}/file-actions/propose-context', { teamId }),
+                    { params: { fileId } },
+                )
+                context = data
+            } catch (e) {
+                console.warn('[TeamHub][App] openProposalForFile: context fetch failed', e?.message)
+                showWarning(t('teamhub', 'The file could not be added to a proposal.'))
+                return
+            }
+
+            if (!context?.eligible) {
+                showWarning(t('teamhub', 'This file cannot be added to a proposal in this team.'))
+                return
+            }
+
+            const label = String(context.fileName || '').replace(/[[\]]/g, '')
+            const link  = `[${label}](${generateUrl('/f/{id}', { id: fileId })})`
+
+            // $nextTick for the same reason the decision branch above uses one:
+            // the prefill has to land after the tab has rendered, so TeamView's
+            // watcher is there to see it.
+            this.$nextTick(() => this.SET_DECISIONS_COMPOSE_PREFILL(link))
         },
 
         /**

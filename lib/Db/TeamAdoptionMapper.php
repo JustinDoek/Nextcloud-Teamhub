@@ -22,7 +22,12 @@ class TeamAdoptionMapper {
     public const STATUS_DECLINED  = 'declined';
     public const STATUS_WITHDRAWN = 'withdrawn';
 
-    /** Accepted by itself: the instance has no team creator group. */
+    /**
+     * Decided by itself, because the instance says so: `teamAdoptionMode` is
+     * `accept` or `decline` and nobody was asked (v4.11.34). Until then this
+     * meant "accepted by itself, because the instance has no team creator
+     * group" — the rule that version moved to the administrator.
+     */
     public const ROUTE_AUTO  = 'auto';
     /** A request in the queue of the team that holds the Nextcloud services. */
     public const ROUTE_DESK  = 'desk';

@@ -386,9 +386,20 @@ export default {
 
 <style scoped>
 .browse-teams-view {
-    padding: 40px;
-    max-width: 1200px;
-    margin: 0 auto;
+    /* v4.11.10 — the same canvas as My Work, What's new and a team page
+       (v4.5.27). The team cards are --color-main-background with a border,
+       so on a white page the borders were doing all the work.
+
+       The centring is in the padding rather than `max-width` + `margin:
+       auto`: a max-width element carries its background only as far as the
+       content, which would have left white gutters either side of a grey
+       page. `max()` keeps the 40px edge on a narrow window and grows it to
+       centre a 1200px column on a wide one — the same result, on a box that
+       is still full width. */
+    padding: 40px max(40px, calc((100% - 1200px) / 2));
+    min-height: 100%;
+    box-sizing: border-box;
+    background: var(--color-background-dark);
 }
 
 .browse-teams-header {

@@ -505,6 +505,128 @@ class Notifier implements INotifier {
                 return $notification;
             }
 
+            // v4.11.15 — a task handed to a colleague, and that task coming
+            // back finished (TaskNotificationService). Two subjects and no
+            // more: a task somebody wrote for themselves or for the whole team
+            // has no other party, so nothing is sent for it. Both link to My
+            // Work, because that is where the row is and the row is the
+            // workflow — the bell is only how you learn it appeared.
+            case 'task_assigned':
+            case 'task_completed': {
+                $params    = $notification->getSubjectParameters();
+                $l         = $this->l10nFactory->get('teamhub', $languageCode);
+                $teamName  = (string)($params['teamName'] ?? '');
+                $teamId    = (string)($params['teamId'] ?? '');
+                $taskTitle = (string)($params['taskTitle'] ?? $l->t('a task'));
+                $actorName = (string)($params['actorName'] ?? $l->t('A colleague'));
+                $actorUid  = (string)($params['actorUid'] ?? $actorName);
+                $actor     = ['type' => 'user', 'id' => $actorUid, 'name' => $actorName];
+                $team      = [
+                    'type' => 'highlight',
+                    'id'   => $teamId !== '' ? $teamId : $teamName,
+                    'name' => $teamName !== '' ? $teamName : $l->t('a team'),
+                ];
+
+                if ($notification->getSubject() === 'task_assigned') {
+                    $notification->setRichSubject($l->t('{actor} gave you a task in {team}'), [
+                        'actor' => $actor, 'team' => $team,
+                    ]);
+                    $notification->setParsedSubject($l->t('%1$s gave you a task in %2$s', [$actorName, $teamName]));
+
+                    $dueAt = (int)($params['dueAt'] ?? 0);
+                    $notification->setParsedMessage($dueAt > 0
+                        ? $l->t('%1$s — due %2$s. It is in My Work → Tasks, where you can tick it off.', [
+                            $taskTitle,
+                            $this->l10nFactory->get('teamhub', $languageCode)
+                                ->l('date', new \DateTime('@' . $dueAt)),
+                        ])
+                        : $l->t('%s — it is in My Work → Tasks, where you can tick it off.', [$taskTitle]));
+                } else {
+                    $notification->setRichSubject($l->t('{actor} completed a task you asked for'), [
+                        'actor' => $actor, 'team' => $team,
+                    ]);
+                    $notification->setParsedSubject($l->t('%s completed a task you asked for', [$actorName]));
+                    $notification->setParsedMessage($l->t('%s is done.', [$taskTitle]));
+                }
+
+                $notification->setIcon($this->urlGenerator->getAbsoluteURL(
+                    $this->urlGenerator->imagePath('teamhub', 'app.svg')
+                ));
+                $notification->setLink(
+                    $this->urlGenerator->linkToRouteAbsolute('teamhub.page.index') . '?mywork'
+                );
+                return $notification;
+            }
+
+            // v4.11.18 — the decision review cycle
+            // (DecisionReviewNotificationService). Three subjects: a member
+            // asked for a review, a review period fell due, and a review a
+            // member asked for was answered. All three link to My Work,
+            // because the row there is the workflow and carries the actions —
+            // the bell is only how you learn it appeared.
+            case 'decision_review_requested':
+            case 'decision_review_due':
+            case 'decision_review_completed': {
+                $params   = $notification->getSubjectParameters();
+                $l        = $this->l10nFactory->get('teamhub', $languageCode);
+                $question = (string)($params['question'] ?? '');
+                if ($question === '') {
+                    $question = $l->t('a decision');
+                }
+                $category  = (string)($params['category'] ?? '');
+                $actorName = (string)($params['actorName'] ?? '');
+                $actorUid  = (string)($params['actorUid'] ?? $actorName);
+                if ($actorName === '') {
+                    $actorName = $l->t('A colleague');
+                }
+                $actor    = ['type' => 'user', 'id' => $actorUid !== '' ? $actorUid : $actorName, 'name' => $actorName];
+                $subjectK = $notification->getSubject();
+
+                if ($subjectK === 'decision_review_requested') {
+                    // TRANSLATORS: notification — a team member asked the approvers to review an approved decision
+                    $notification->setRichSubject($l->t('{actor} asked for a review of a decision'), [
+                        'actor' => $actor,
+                    ]);
+                    $notification->setParsedSubject($l->t('%s asked for a review of a decision', [$actorName]));
+                    $notification->setParsedMessage($category !== ''
+                        // TRANSLATORS: notification body — %1$s is the decision, %2$s its category
+                        ? $l->t('%1$s (%2$s). You are an approver for it — the review is in My Work.', [$question, $category])
+                        : $l->t('%s. You are an approver for it — the review is in My Work.', [$question]));
+                } elseif ($subjectK === 'decision_review_due') {
+                    // TRANSLATORS: notification — a decision's review period has come round
+                    $notification->setRichSubject($l->t('A decision is due for review'));
+                    $notification->setParsedSubject($l->t('A decision is due for review'));
+
+                    $dueAt = (int)($params['dueAt'] ?? 0);
+                    $notification->setParsedMessage($dueAt > 0
+                        // TRANSLATORS: notification body — %1$s is the decision, %2$s the date the review falls due
+                        ? $l->t('%1$s — due %2$s. Keep it or archive it from My Work.', [
+                            $question,
+                            $l->l('date', new \DateTime('@' . $dueAt)),
+                        ])
+                        : $l->t('%s — keep it or archive it from My Work.', [$question]));
+                } else {
+                    $archived = (string)($params['outcome'] ?? '') === 'archived';
+                    // TRANSLATORS: notification — an approver answered the review this person asked for
+                    $notification->setRichSubject($l->t('{actor} answered your review request'), [
+                        'actor' => $actor,
+                    ]);
+                    $notification->setParsedSubject($l->t('%s answered your review request', [$actorName]));
+                    $notification->setParsedMessage($archived
+                        // TRANSLATORS: notification body — %s is the decision
+                        ? $l->t('%s has been archived.', [$question])
+                        : $l->t('%s still stands.', [$question]));
+                }
+
+                $notification->setIcon($this->urlGenerator->getAbsoluteURL(
+                    $this->urlGenerator->imagePath('teamhub', 'app.svg')
+                ));
+                $notification->setLink(
+                    $this->urlGenerator->linkToRouteAbsolute('teamhub.page.index') . '?mywork'
+                );
+                return $notification;
+            }
+
             // v4.10.50 — teams made outside TeamHub (TeamAdoptionService). The
             // notification is the fallback, never the workflow: it is sent
             // only where no request carries the answer — to the

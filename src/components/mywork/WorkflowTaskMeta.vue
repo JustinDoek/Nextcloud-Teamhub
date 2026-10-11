@@ -66,9 +66,11 @@ export default {
 	color: var(--color-text-maxcontrast);
 }
 
+/* v4.11.4 — the primary colour is the whole distinction; the semibold on top
+   of it made a meta line shout louder than the title above it (Justin,
+   2026-09-30). Weight is for emphasis and unread items (`/ui-standards`). */
 .wf-task-meta__value {
 	color: var(--color-primary-element);
-	font-weight: var(--th-font-weight-semibold, 600);
 	overflow-wrap: anywhere;
 }
 </style>

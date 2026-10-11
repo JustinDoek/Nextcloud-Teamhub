@@ -6,6 +6,7 @@ namespace OCA\TeamHub\Listener;
 
 use OCA\TeamHub\AppInfo\Application;
 use OCA\TeamHub\Service\RoomVoxClient;
+use OCA\TeamHub\Util\CalendarBlob;
 use OCP\EventDispatcher\Event;
 use OCP\EventDispatcher\IEventListener;
 use Psr\Log\LoggerInterface;
@@ -57,7 +58,7 @@ class CalendarObjectDeletedListener implements IEventListener {
             return;
         }
 
-        $calendarData = (string)($objectData['calendardata'] ?? '');
+        $calendarData = CalendarBlob::read($objectData['calendardata'] ?? null);
         if ($calendarData === '') {
             return;
         }

@@ -205,6 +205,80 @@ class TeamServiceBuilder {
     }
 
     /**
+     * The default issue process, seeded on a team that has just become a
+     * service team (v4.11.6, Justin 2026-09-30).
+     *
+     * *"A simple requester requests, a user in the service team claims it and
+     * they use chat in the service request to communicate, then the claimer
+     * closes it and the requester acknowledges the result."* That is the
+     * *issue* of `docs/service-builder.md` § 1a — the structured process with
+     * **one** desk step — so it needs no new machinery: the fixed `submit`
+     * and `confirm` steps are the engine's, the conversation is on every
+     * request already, and closing is completing the one step.
+     *
+     * **A draft, never published.** A team created from the Service template
+     * is not yet a desk that has decided to answer the organisation, so this
+     * puts the process in the team's *Services* tab with one *Publish* click
+     * left. Publishing is what calls `activate()`, puts the card on the
+     * Services page and makes the queue and statistics widgets appear — that
+     * remains a team admin's act (Justin, 2026-09-30).
+     *
+     * **Once, and never a second copy**: a team that already has a service of
+     * its own is left alone, so re-saving the type or deleting the draft and
+     * setting the type again does not breed duplicates.
+     *
+     * **Absent, not explained**: with the licence or the administrator's
+     * switch missing there is no seed and no error — the same rule the rest
+     * of the module follows.
+     *
+     * The words are the **creating user's** language, not a per-recipient
+     * lookup: they are not a message sent to somebody, they are content
+     * written into the team's own draft, which the team then owns and edits.
+     * A team's own service is never translated afterwards (`getStepLabel()`
+     * answers null for it), so seeding it in the language of the person
+     * setting the team up is the closest thing to right.
+     *
+     * @return array<string, mixed>|null the new draft, or null when nothing
+     *                                   was seeded
+     */
+    public function seedDefault(string $teamId, string $uid): ?array {
+        if ($teamId === '' || !$this->serviceTeams->isAvailable()) {
+            return null;
+        }
+        if ($this->mapper->countByTeam($teamId) > 0) {
+            return null;
+        }
+
+        $teamName = $this->serviceTeams->teamName($teamId);
+        // TRANSLATORS: the name of a service team's default request, e.g. "Facilities support request". %s is the team's name.
+        $title = $teamName === '' ? $this->l->t('Support request') : $this->l->t('%s support request', [$teamName]);
+        if (mb_strlen($title) > self::MAX_TITLE) {
+            $title = mb_substr($title, 0, self::MAX_TITLE);
+        }
+
+        return $this->create($teamId, [
+            'title'       => $title,
+            'description' => $this->l->t('Ask this team for help. Describe what you need and a team member will pick it up.'),
+            // '' is the support category: `normalise()` resolves it against
+            // the administrator's own list, which may have renamed it.
+            'category'    => '',
+            'icon'        => '',
+            // No lead time: a desk promises one when it knows what it can keep.
+            'leadDays'    => 0,
+            // The team the request is for is asked, and may be left empty —
+            // an issue is as often personal as it is a team's.
+            'askTeam'     => true,
+            'steps'       => [[
+                'kind'  => TeamServiceDefinition::KIND_DESK,
+                // TRANSLATORS: the single step of the default issue process — the team member who claimed the request does the work and completes this step
+                'label' => $this->l->t('Handle the request'),
+                'tasks' => [['label' => '', 'role' => '', 'nonBlocking' => false, 'links' => []]],
+            ]],
+            'files'       => [],
+        ], $uid);
+    }
+
+    /**
      * Save the draft. A published service keeps answering on its published
      * version until the draft is published.
      *

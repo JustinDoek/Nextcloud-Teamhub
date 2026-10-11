@@ -207,72 +207,8 @@ class FileReviewService {
     }
 
     // ---------------------------------------------------------------------
-    // Discovery — what the Files-app script asks before it renders anything
+    // Discovery — what the Files-app dialog asks before it renders anything
     // ---------------------------------------------------------------------
-
-    /**
-     * The team folders this user has, as path prefixes.
-     *
-     * The Files app's file actions decide visibility in a **synchronous**
-     * callback, so the script cannot ask the server about the file under the
-     * cursor. It asks this once instead and then answers every subsequent
-     * question itself with a prefix test. A user in no team gets an empty
-     * array and the action never appears for them.
-     *
-     * Teams with the module switched off are omitted rather than returned with
-     * a flag: the caller's only use for this is "may I offer the action here",
-     * and an off team is indistinguishable from no team for that purpose.
-     *
-     * **The paths are root-relative** — `/Team Alpha`, not
-     * `/alice/files/Team Alpha`. Internally TeamHub compares absolute paths,
-     * because that is what `Node::getPath()` gives; the Files app's client-side
-     * `Node.path` is relative to the user's files root. Converting here rather
-     * than in the browser keeps the two representations from being confused in
-     * the place where a wrong answer is silent: a prefix test that never
-     * matches simply means the action never appears.
-     *
-     * @param string[] $teamIds the caller's own teams, resolved by the caller
-     * @return list<array{teamId:string, teamName:string, paths:string[]}>
-     */
-    public function listScopes(string $uid, array $teamIds): array {
-        if (!$this->isEnabledGlobally()) {
-            return [];
-        }
-
-        $enabled = array_values(array_filter(
-            $teamIds,
-            fn ($teamId): bool => is_string($teamId) && $teamId !== '' && $this->isEnabledForTeam($teamId),
-        ));
-        if ($enabled === []) {
-            return [];
-        }
-
-        $userFolder = $this->fileScope->userFolder($uid);
-        if ($userFolder === null) {
-            return [];
-        }
-
-        $out = [];
-        foreach ($this->fileScope->pathsByTeam($uid, $enabled, $userFolder) as $teamId => $paths) {
-            $relative = [];
-            foreach ($paths as $path) {
-                $rel = $userFolder->getRelativePath($path);
-                if ($rel !== null && $rel !== '') {
-                    $relative[] = '/' . ltrim($rel, '/');
-                }
-            }
-            if ($relative === []) {
-                continue;
-            }
-            $out[] = [
-                'teamId'   => (string)$teamId,
-                'teamName' => $this->getTeamName((string)$teamId),
-                'paths'    => $relative,
-            ];
-        }
-
-        return $out;
-    }
 
     /**
      * Everything the request modal needs about one file, in one round trip.

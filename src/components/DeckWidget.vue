@@ -99,8 +99,15 @@
                                 {{ t('teamhub', 'OpenProject') }}
                             </NcChip>
                         </template>
+                        <!--
+                            v4.11.16 — every VTODO used to be chipped
+                            "Personal task", which stopped being true the
+                            moment a task could say who it is for. The chip
+                            now says that: your own, a colleague's, or the
+                            team's.
+                        -->
                         <NcChip no-close variant="tertiary" v-else>
-                            {{ t('teamhub', 'Personal task') }}
+                            {{ taskOwnerLabel(task) }}
                         </NcChip>
 
                         <!-- Assignee avatars (Deck only) -->
@@ -293,6 +300,9 @@ export default {
                     duedate: task.duedate || null,
                     overdue: task.duedate ? new Date(task.duedate) < now : false,
                     url:     task.url || '/apps/tasks',
+                    // v4.11.16 — who it is for, for the chip.
+                    mine:         !!task.mine,
+                    assigneeName: task.assigneeName || '',
                 }))
                 : []
 
@@ -362,6 +372,29 @@ export default {
         n,
         formatIsoDate,
         ...mapMutations(['SET_VIEW', 'SET_SELECTED_DECK_BOARD']),
+
+        /**
+         * Who a VTODO is for, for its chip (v4.11.16).
+         *
+         * A task written before the *Who the task is for* field names nobody,
+         * which is the team case — so an old task reads "Team task" rather
+         * than claiming to belong to whoever happens to be looking.
+         *
+         * @param {object} task the mapped row
+         * @return {string}
+         */
+        taskOwnerLabel(task) {
+            if (task.mine) {
+                // TRANSLATORS: chip on a task in the Upcoming tasks widget — the task is the viewer's own
+                return t('teamhub', 'My task')
+            }
+            if (task.assigneeName) {
+                // TRANSLATORS: chip on a task in the Upcoming tasks widget — {name} is the colleague the task is for
+                return t('teamhub', 'For {name}', { name: task.assigneeName })
+            }
+            // TRANSLATORS: chip on a task in the Upcoming tasks widget — the task is for the whole team, nobody in particular
+            return t('teamhub', 'Team task')
+        },
 
         // ── OpenProject (v4.9.5) ──────────────────────────────────────────
 

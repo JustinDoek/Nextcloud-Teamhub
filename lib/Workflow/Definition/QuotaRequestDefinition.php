@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace OCA\TeamHub\Workflow\Definition;
 
+use OCA\TeamHub\MyWork\SourceGroup;
 use OCA\TeamHub\Constants\ServiceCatalogue;
 use OCA\TeamHub\Db\WorkflowInstance;
 use OCA\TeamHub\Exception\ValidationException;
@@ -11,6 +12,7 @@ use OCA\TeamHub\Service\ServiceTeam\ServiceTeamService;
 use OCA\TeamHub\Service\TeamSpaceService;
 use OCA\TeamHub\Service\Workflow\WorkflowActorResolver;
 use OCA\TeamHub\Workflow\IWorkflowDefinition;
+use OCA\TeamHub\Workflow\IWorkflowDefinitionSource;
 use OCA\TeamHub\Workflow\IWorkflowDefinitionHooks;
 use OCA\TeamHub\Workflow\WorkflowActor;
 use OCA\TeamHub\Workflow\WorkflowDefinitionRegistry;
@@ -57,7 +59,8 @@ use OCP\Util;
  * cannot start without one. The ledger version was licensed too, so no
  * instance loses anything it had.
  */
-class QuotaRequestDefinition implements IWorkflowDefinition, IWorkflowDefinitionHooks {
+class QuotaRequestDefinition implements IWorkflowDefinition,
+    IWorkflowDefinitionSource, IWorkflowDefinitionHooks {
 
     public const KEY     = 'teamspace_quota';
     /** v2 (v4.10.29): the desk's three steps. v1 (decide → close) never ran. */
@@ -132,6 +135,14 @@ class QuotaRequestDefinition implements IWorkflowDefinition, IWorkflowDefinition
         }
         $serviceTeamId = $this->serviceTeams->serviceTeamForDefinition(self::KEY);
         return $serviceTeamId === null ? null : WorkflowActor::serviceAgent($serviceTeamId);
+    }
+
+    /**
+     * v4.11.41 — the My Work source chip these requests appear under.
+     * About one team's space, asked by somebody who administers it.
+     */
+    public function sourceGroup(): string {
+        return SourceGroup::TEAMS;
     }
 
     public function getConcurrency(): string {

@@ -150,91 +150,441 @@
                 </div>
             </NcDialog>
 
-            <NcSettingsSection
-                :name="t('teamhub', 'Team creation wizard')"
-                :description="t('teamhub', 'This text is shown at the top of the Create new team dialog. Leave empty to show no description.')">
-                <!-- v4.6.2 — debounced autosave, mirroring the IntraVox path
-                     field on the Integrations tab. The value is not a secret
-                     and the write is idempotent, so saving once the admin
-                     stops typing is safe. -->
-                <NcTextArea
-                    v-model="form.wizardDescription"
-                    :placeholder="t('teamhub', 'e.g. Fill in the details below to create a new team.')"
-                    :rows="3"
-                    @update:model-value="onWizardDescriptionInput" />
-            </NcSettingsSection>
-
-            <!-- v4.6.13 — team expiration. Lives on this tab because the date
-                 itself is chosen in the create wizard; this is the one knob
-                 that governs it instance-wide. -->
-            <NcSettingsSection
-                :name="t('teamhub', 'Team expiration')"
-                :description="t('teamhub', 'Collaboration and Project teams can be given an optional expiration date in the create-team wizard. Departments cannot — they are not time-bound. Nothing is deleted when the date passes: the team keeps working, and its administrators plus every Nextcloud administrator get a reminder in My Work that they can act on.')">
-                <div class="admin-inline-field">
-                    <label for="admin-expiry-warning-days" class="admin-inline-field__label">
-                        {{ t('teamhub', 'Warn this many days before the date') }}
+            <!-- ── Team creation (v4.11.33) ───────────────────────────────
+                 Three sections until now — Team creation wizard, Team
+                 expiration and Creation permissions — each with a heading and
+                 a paragraph for one control. Justin: *shouldn't be a section,
+                 just a label and an input field.* So one section, and the
+                 three controls line up in a grid with their explanations
+                 behind an (i). -->
+            <NcSettingsSection :name="t('teamhub', 'Team creation')">
+                <div class="admin-grid">
+                    <!-- Who may create a team: the highest-consequence
+                         default in the app, so it comes first. -->
+                    <label id="admin-creators-label" class="admin-grid__label" for="admin-creators">
+                        {{ t('teamhub', 'Team create permissions') }}
+                        <InfoHint
+                            controls="admin-creators-hint"
+                            :open="hintOpen('creators')"
+                            :label="t('teamhub', 'About team create permissions')"
+                            @toggle="toggleHint('creators')" />
                     </label>
-                    <NcTextField
-                        id="admin-expiry-warning-days"
-                        v-model.number="form.expiryWarningDays"
-                        type="number"
-                        class="admin-number-input"
-                        :min="expiryWarningDaysMin"
-                        :max="expiryWarningDaysMax"
-                        aria-describedby="admin-expiry-warning-hint"
-                        @change="onExpiryWarningDaysInput"
-                        label-outside />
+                    <div class="admin-grid__control">
+                        <!-- v4.10.10: selected groups are removable NcChips
+                             (design guide § Chips). -->
+                        <div v-if="selectedGroups.length" class="admin-group-chips">
+                            <NcChip
+                                v-for="g in selectedGroups"
+                                :key="g.id"
+                                variant="primary"
+                                :text="g.displayName"
+                                :aria-label-close="t('teamhub', 'Remove {name}', { name: g.displayName })"
+                                @close="removeGroup(g)">
+                                <template #icon>
+                                    <AccountGroup :size="ICON_INLINE" />
+                                </template>
+                            </NcChip>
+                        </div>
+                        <div class="admin-group-search">
+                            <NcTextField
+                                id="admin-creators"
+                                v-model="groupQuery"
+                                :label="t('teamhub', 'Team create permissions')"
+                                :placeholder="t('teamhub', 'Search for group, leave empty for all')"
+                                label-outside
+                                @input="onGroupSearch" />
+                            <ul v-if="groupResults.length" class="admin-group-results">
+                                <li
+                                    v-for="g in groupResults"
+                                    :key="g.id"
+                                    class="admin-group-result"
+                                    @mousedown.prevent="addGroup(g)">
+                                    <AccountGroup :size="ICON_BODY" />
+                                    <span class="admin-group-result__name">{{ g.displayName }}</span>
+                                    <span class="admin-group-result__id">{{ g.id }}</span>
+                                </li>
+                            </ul>
+                            <p v-else-if="groupSearching" class="admin-group-hint">
+                                <NcLoadingIcon :size="ICON_BODY" /> {{ t('teamhub', 'Searching') }}
+                            </p>
+                            <p v-else-if="groupQuery.length >= 1 && !groupSearching" class="admin-group-hint">
+                                {{ t('teamhub', 'No groups found') }}
+                            </p>
+                        </div>
+                    </div>
+                    <p v-if="hintOpen('creators')" id="admin-creators-hint" class="admin-grid__hint">
+                        {{ t('teamhub', 'Only members of the selected groups can create teams. Leave empty and everyone on this server can, which is not the same as admins only: every new team provisions a conversation, a board, a calendar and a folder.') }}
+                    </p>
+
+                    <!-- v4.6.13 — the expiration date itself is chosen in the
+                         create wizard; this is the one knob that governs it
+                         instance-wide. -->
+                    <label class="admin-grid__label" for="admin-expiry-warning-days">
+                        {{ t('teamhub', 'Team expiration warning') }}
+                        <InfoHint
+                            controls="admin-expiry-hint"
+                            :open="hintOpen('expiry')"
+                            :label="t('teamhub', 'About the team expiration warning')"
+                            @toggle="toggleHint('expiry')" />
+                    </label>
+                    <div class="admin-grid__control">
+                        <NcTextField
+                            id="admin-expiry-warning-days"
+                            v-model.number="form.expiryWarningDays"
+                            type="number"
+                            class="admin-number-input"
+                            :label="t('teamhub', 'Team expiration warning')"
+                            :placeholder="t('teamhub', 'Days in advance')"
+                            :min="expiryWarningDaysMin"
+                            :max="expiryWarningDaysMax"
+                            label-outside
+                            @change="onExpiryWarningDaysInput" />
+                    </div>
+                    <p v-if="hintOpen('expiry')" id="admin-expiry-hint" class="admin-grid__hint">
+                        {{ t('teamhub', 'Collaboration and Project teams can be given an expiration date in the create wizard; Departments cannot. Nothing is deleted when the date passes: the team keeps working, and its admins plus every Nextcloud administrator get a reminder in My Work. Between {min} and {max} days; a value outside that range is stored as the nearest allowed one.', { min: expiryWarningDaysMin, max: expiryWarningDaysMax }) }}
+                    </p>
+
+                    <label class="admin-grid__label" for="admin-wizard-description">
+                        {{ t('teamhub', 'Create team dialog text') }}
+                        <InfoHint
+                            controls="admin-wizard-hint"
+                            :open="hintOpen('wizard')"
+                            :label="t('teamhub', 'About the create team dialog text')"
+                            @toggle="toggleHint('wizard')" />
+                    </label>
+                    <div class="admin-grid__control">
+                        <!-- v4.6.2 — debounced autosave, mirroring the IntraVox
+                             path field on the Integrations tab. The value is
+                             not a secret and the write is idempotent, so
+                             saving once the admin stops typing is safe. -->
+                        <NcTextArea
+                            id="admin-wizard-description"
+                            v-model="form.wizardDescription"
+                            :label="t('teamhub', 'Create team dialog text')"
+                            :placeholder="t('teamhub', 'e.g. Fill in the details below to create a new team.')"
+                            :rows="3"
+                            label-outside
+                            @update:model-value="onWizardDescriptionInput" />
+                    </div>
+                    <p v-if="hintOpen('wizard')" id="admin-wizard-hint" class="admin-grid__hint">
+                        {{ t('teamhub', 'Shown at the top of the Create new team dialog, to everybody who creates a team. Leave empty to show no text.') }}
+                    </p>
                 </div>
-                <p id="admin-expiry-warning-hint" class="admin-section-hint">
-                    {{ t('teamhub', 'Between {min} and {max}. A value outside that range is stored as the nearest allowed one.', { min: expiryWarningDaysMin, max: expiryWarningDaysMax }) }}
-                </p>
+            </NcSettingsSection>
+
+            <!-- ── Teams from Nextcloud groups (v4.11.32, grid v4.11.33) ──
+                 DESIGN §2.166. Sits directly under Team creation because it
+                 answers the same question from the other side: that section
+                 says who may create a team, this one says when one is created
+                 without anybody asking.
+
+                 The heading says *Nextcloud groups*, not *your directory*,
+                 on purpose (Justin, 2026-10-06). TeamHub never talks to an
+                 identity provider: it reads Nextcloud's groups, which the
+                 administrator has to fill from LDAP or OIDC first. Calling
+                 this "teams from your directory" invited the reading that
+                 pointing TeamHub at a directory was a thing you could do
+                 here. -->
+            <!-- v4.11.38 — the rule for a team made outside TeamHub
+                 lives with the other team-creation rules (Justin,
+                 2026-10-09), directly above the one for Nextcloud groups:
+                 both answer *where may a team come from*, and reading them
+                 together is the point. The queue they feed stays on
+                 Import/Export, which is where teams are brought in. -->
+            <NcSettingsSection
+                :name="t('teamhub', 'Teams made outside TeamHub')"
+                :description="t('teamhub', 'Teams made in Contacts, on the Teams page or by a provisioning tool are not in TeamHub until this instance accepts them, with a template and a policy. Choose below what happens to one; anything waiting for a decision is on the Import/Export tab.')">
+
+                <!-- v4.11.34 — the customer's rule, not ours (Justin,
+                     2026-10-06: *i have decided for customers how we
+                     handle teams from outside TeamHub. But this should be
+                     set by the customer*). This retires the first of the
+                     four routing rules of 2026-09-26, which adopted every
+                     such team by itself on any instance with no team
+                     creator group. See DESIGN §2.168. -->
+                <div class="admin-grid">
+                    <label class="admin-grid__label" for="admin-adoption-mode">
+                        {{ t('teamhub', 'When a team is made outside TeamHub') }}
+                        <InfoHint
+                            controls="admin-adoption-mode-hint"
+                            :open="hintOpen('adoptionMode')"
+                            :label="t('teamhub', 'About teams made outside TeamHub')"
+                            @toggle="toggleHint('adoptionMode')" />
+                    </label>
+                    <div class="admin-grid__control">
+                        <NcSelect
+                            input-id="admin-adoption-mode"
+                            :model-value="teamAdoptionModeOption"
+                            :options="teamAdoptionModeOptions"
+                            :reduce="o => o.id"
+                            :clearable="false"
+                            label-outside
+                            :aria-label-combobox="t('teamhub', 'When a team is made outside TeamHub')"
+                            @update:model-value="onTeamAdoptionModeChange" />
+                    </div>
+                    <p v-if="hintOpen('adoptionMode')" id="admin-adoption-mode-hint" class="admin-grid__hint">
+                        {{ t('teamhub', 'With Ask before accepting it, the team goes to whoever this instance has for the job: the request queue of the team that holds the Nextcloud services, otherwise a task in the Nextcloud administrators’ My Work, otherwise this list alone. The other two answers need nobody — TeamHub decides within a few minutes of the team being made and tells its owner. Either way the team itself is left alone in Nextcloud until it is accepted.') }}
+                    </p>
+                </div>
+
+                <NcNoteCard v-if="form.teamAdoptionMode === 'accept'" type="info">
+                    {{ t('teamhub', 'Nothing waits for a decision. Every team made elsewhere is added with the template and policy below, and its owner is told. The Import/Export tab keeps the record of what was added.') }}
+                </NcNoteCard>
+
+                <!-- v4.11.35 — what an automatic acceptance applies
+                     (Justin, 2026-10-06). Only in accept mode: in review
+                     the grid asks per team, and in decline nothing is
+                     ever accepted. Without this the pair was implicit,
+                     and on a SCIM team it resolved to no policy at all. -->
+                <div v-if="form.teamAdoptionMode === 'accept'" class="admin-grid">
+                    <label class="admin-grid__label" for="admin-adoption-template">
+                        {{ t('teamhub', 'Template for an accepted team') }}
+                    </label>
+                    <div class="admin-grid__control">
+                        <NcSelect
+                            input-id="admin-adoption-template"
+                            :model-value="adoptionTemplateOption"
+                            :options="adoptionTemplateOptions"
+                            :reduce="o => o.id"
+                            :clearable="false"
+                            label-outside
+                            :aria-label-combobox="t('teamhub', 'Template for an accepted team')"
+                            @update:model-value="onAdoptionTemplateChange" />
+                    </div>
+
+                    <label class="admin-grid__label" for="admin-adoption-profile">
+                        {{ t('teamhub', 'Policy profile for an accepted team') }}
+                    </label>
+                    <div class="admin-grid__control">
+                        <NcSelect
+                            input-id="admin-adoption-profile"
+                            :model-value="adoptionProfileOption"
+                            :options="adoptionProfileOptions"
+                            :reduce="o => o.id"
+                            :clearable="false"
+                            label-outside
+                            :aria-label-combobox="t('teamhub', 'Policy profile for an accepted team')"
+                            @update:model-value="onAdoptionProfileChange" />
+                    </div>
+                </div>
+                <NcNoteCard v-else-if="form.teamAdoptionMode === 'decline'" type="warning">
+                    {{ t('teamhub', 'Nothing waits for a decision. Every team made elsewhere stays a plain Nextcloud team, its owner is told it was not added, and it is never offered again. The Import/Export tab keeps the record of what was refused.') }}
+                </NcNoteCard>
             </NcSettingsSection>
 
             <NcSettingsSection
-                :name="t('teamhub', 'Creation permissions')"
-                :description="t('teamhub', 'Only members of the selected groups can create teams. Leave empty to allow all users.')">
+                :name="t('teamhub', 'Teams from Nextcloud groups')"
+                :description="t('teamhub', 'Give a Nextcloud group its own team, and the team’s members then follow the group. TeamHub reads Nextcloud groups only, so connect your directory to Nextcloud first: LDAP or Active Directory through the LDAP app, or an identity provider through OpenID Connect with group provisioning switched on.')">
 
-                <!-- Selected group chips -->
-                <!-- v4.10.10: selected groups are removable NcChips (design guide § Chips). -->
-                <div v-if="selectedGroups.length" class="admin-group-chips">
-                    <NcChip
-                        v-for="g in selectedGroups"
-                        :key="g.id"
-                        variant="primary"
-                        :text="g.displayName"
-                        :aria-label-close="t('teamhub', 'Remove {name}', { name: g.displayName })"
-                        @close="removeGroup(g)">
-                        <template #icon>
-                            <AccountGroup :size="ICON_INLINE" />
+                <div class="admin-grid">
+                    <label class="admin-grid__label" for="admin-idp-mode">
+                        {{ t('teamhub', 'When a group has no team') }}
+                        <InfoHint
+                            controls="admin-idp-mode-hint"
+                            :open="hintOpen('idpMode')"
+                            :label="t('teamhub', 'About creating teams from groups')"
+                            @toggle="toggleHint('idpMode')" />
+                    </label>
+                    <div class="admin-grid__control">
+                        <NcSelect
+                            input-id="admin-idp-mode"
+                            :model-value="idpModeOption"
+                            :options="idpModeOptions"
+                            :reduce="o => o.id"
+                            :clearable="false"
+                            label-outside
+                            :aria-label-combobox="t('teamhub', 'When a group has no team')"
+                            @update:model-value="onIdpModeChange" />
+                    </div>
+                    <p v-if="hintOpen('idpMode')" id="admin-idp-mode-hint" class="admin-grid__hint">
+                        {{ t('teamhub', 'A group qualifies when it matches the rules below. Membership then stays in step with the group on its own: somebody added to the group in your directory becomes a team member within minutes, and nobody has to connect anything.') }}
+                    </p>
+
+                    <template v-if="form.idpTeamsMode !== 'off'">
+                        <!-- The service account. First, because nothing below
+                             it works until this is right, and the backend
+                             tells us exactly what is wrong. -->
+                        <label class="admin-grid__label" for="admin-idp-service-account">
+                            {{ t('teamhub', 'Account that creates the teams') }}
+                            <InfoHint
+                                controls="admin-idp-account-hint"
+                                :open="hintOpen('idpAccount')"
+                                :label="t('teamhub', 'About the account that creates the teams')"
+                                @toggle="toggleHint('idpAccount')" />
+                        </label>
+                        <div class="admin-grid__control">
+                            <div v-if="form.idpTeamsServiceAccount" class="admin-group-chips">
+                                <NcChip
+                                    variant="primary"
+                                    :text="form.idpTeamsServiceAccount"
+                                    :aria-label-close="t('teamhub', 'Remove {name}', { name: form.idpTeamsServiceAccount })"
+                                    @close="clearIdpServiceAccount">
+                                    <template #icon>
+                                        <AccountGroup :size="ICON_INLINE" />
+                                    </template>
+                                </NcChip>
+                            </div>
+                            <div class="admin-group-search">
+                                <NcTextField
+                                    id="admin-idp-service-account"
+                                    v-model="idpUserQuery"
+                                    :label="t('teamhub', 'Account that creates the teams')"
+                                    :placeholder="t('teamhub', 'Search for an account')"
+                                    label-outside
+                                    @input="onIdpUserSearch" />
+                                <ul v-if="idpUserResults.length" class="admin-owner-results">
+                                    <li
+                                        v-for="u in idpUserResults"
+                                        :key="u.id"
+                                        class="admin-group-result"
+                                        @mousedown.prevent="pickIdpServiceAccount(u)">
+                                        <span class="admin-group-result__name">{{ u.displayName }}</span>
+                                        <span class="admin-group-result__id">{{ u.id }}</span>
+                                    </li>
+                                </ul>
+                            </div>
+                            <NcNoteCard v-if="idpServiceAccountMessage" :type="idpServiceAccountNoteType">
+                                {{ idpServiceAccountMessage }}
+                            </NcNoteCard>
+                        </div>
+                        <p v-if="hintOpen('idpAccount')" id="admin-idp-account-hint" class="admin-grid__hint">
+                            {{ t('teamhub', 'Create a Nextcloud service account, put it in a group that can create teams in TeamHub, and select it here. It owns each new team and its folder, conversation and calendar until you hand the team over.') }}
+                        </p>
+
+                        <!-- Which groups qualify. -->
+                        <span class="admin-grid__label">
+                            {{ t('teamhub', 'Which groups get a team') }}
+                            <InfoHint
+                                controls="admin-idp-which-hint"
+                                :open="hintOpen('idpWhich')"
+                                :label="t('teamhub', 'About which groups get a team')"
+                                @toggle="toggleHint('idpWhich')" />
+                        </span>
+                        <div class="admin-grid__control">
+                            <div class="admin-idp__checks" role="group" :aria-label="t('teamhub', 'Which groups get a team')">
+                                <NcCheckboxRadioSwitch
+                                    :model-value="idpBackendLdap"
+                                    @update:model-value="v => onIdpBackendToggle('LDAP', v)">
+                                    {{ t('teamhub', 'Groups Nextcloud reads from LDAP or Active Directory') }}
+                                </NcCheckboxRadioSwitch>
+                                <NcCheckboxRadioSwitch
+                                    :model-value="idpBackendDatabase"
+                                    @update:model-value="v => onIdpBackendToggle('Database', v)">
+                                    {{ t('teamhub', 'Groups created in Nextcloud, including those an identity provider provisions') }}
+                                </NcCheckboxRadioSwitch>
+                            </div>
+                        </div>
+                        <p v-if="hintOpen('idpWhich')" id="admin-idp-which-hint" class="admin-grid__hint">
+                            {{ t('teamhub', 'Nextcloud marks a group it reads from LDAP, so those are recognised on their own. A group an identity provider created over OpenID Connect is stored exactly like one an administrator typed in, so Nextcloud cannot tell them apart: pick those out by name below.') }}
+                        </p>
+
+                        <label class="admin-grid__label" for="admin-idp-pattern">
+                            {{ t('teamhub', 'Only groups whose name matches') }}
+                            <InfoHint
+                                controls="admin-idp-pattern-hint"
+                                :open="hintOpen('idpPattern')"
+                                :label="t('teamhub', 'About matching group names')"
+                                @toggle="toggleHint('idpPattern')" />
+                        </label>
+                        <div class="admin-grid__control">
+                            <NcTextField
+                                id="admin-idp-pattern"
+                                v-model="form.idpTeamsPattern"
+                                :label="t('teamhub', 'Only groups whose name matches')"
+                                :placeholder="t('teamhub', 'Leave empty for every group above')"
+                                label-outside
+                                @update:model-value="onIdpSettingInput" />
+                        </div>
+                        <p v-if="hintOpen('idpPattern')" id="admin-idp-pattern-hint" class="admin-grid__hint">
+                            {{ t('teamhub', 'Plain text matches the start of a name, so team- matches team-sales. A value between slashes is read as an expression, so /^team-/ does the same thing and /sales$/ matches names ending in sales.') }}
+                        </p>
+
+                        <!-- The sub-OU filter is offered only when user_ldap
+                             can actually answer the question. A filter that
+                             cannot be evaluated must not look set: it would
+                             quietly stop filtering and provision teams for
+                             the groups the customer excluded. -->
+                        <template v-if="idpTeams.ldapDnAvailable">
+                            <label class="admin-grid__label" for="admin-idp-ou">
+                                {{ t('teamhub', 'Only LDAP groups below') }}
+                                <InfoHint
+                                    controls="admin-idp-ou-hint"
+                                    :open="hintOpen('idpOu')"
+                                    :label="t('teamhub', 'About narrowing to part of the directory')"
+                                    @toggle="toggleHint('idpOu')" />
+                            </label>
+                            <div class="admin-grid__control">
+                                <NcTextField
+                                    id="admin-idp-ou"
+                                    v-model="form.idpTeamsLdapOu"
+                                    :label="t('teamhub', 'Only LDAP groups below')"
+                                    :placeholder="t('teamhub', 'e.g. OU=TeamGroups,DC=example,DC=local')"
+                                    label-outside
+                                    @update:model-value="onIdpSettingInput" />
+                            </div>
+                            <p v-if="hintOpen('idpOu')" id="admin-idp-ou-hint" class="admin-grid__hint">
+                                {{ t('teamhub', 'Leave empty to accept every LDAP group Nextcloud knows. Which groups reach Nextcloud at all is set in Nextcloud under LDAP, as the base group tree; this narrows it further.') }}
+                            </p>
                         </template>
-                    </NcChip>
-                </div>
 
-                <!-- Group typeahead search -->
-                <div class="admin-group-search">
-                    <NcTextField
-                        v-model="groupQuery"
-                        :label="t('teamhub', 'Search for a group')"
-                        :placeholder="t('teamhub', 'Type to search groups…')"
-                        @input="onGroupSearch" />
+                        <!-- What the new team looks like. -->
+                        <label class="admin-grid__label" for="admin-idp-template">
+                            {{ t('teamhub', 'Template for a new team') }}
+                        </label>
+                        <div class="admin-grid__control">
+                            <NcSelect
+                                input-id="admin-idp-template"
+                                :model-value="idpTemplateOption"
+                                :options="idpTemplateOptions"
+                                :reduce="o => o.id"
+                                :clearable="false"
+                                label-outside
+                                :aria-label-combobox="t('teamhub', 'Template for a new team')"
+                                @update:model-value="onIdpTemplateChange" />
+                        </div>
 
-                    <ul v-if="groupResults.length" class="admin-group-results">
-                        <li
-                            v-for="g in groupResults"
-                            :key="g.id"
-                            class="admin-group-result"
-                            @mousedown.prevent="addGroup(g)">
-                            <AccountGroup :size="ICON_BODY" />
-                            <span class="admin-group-result__name">{{ g.displayName }}</span>
-                            <span class="admin-group-result__id">{{ g.id }}</span>
-                        </li>
-                    </ul>
-                    <p v-else-if="groupSearching" class="admin-group-hint">
-                        <NcLoadingIcon :size="ICON_BODY" /> {{ t('teamhub', 'Searching…') }}
-                    </p>
-                    <p v-else-if="groupQuery.length >= 1 && !groupSearching" class="admin-group-hint">
-                        {{ t('teamhub', 'No groups found') }}
-                    </p>
+                        <label class="admin-grid__label" for="admin-idp-profile">
+                            {{ t('teamhub', 'Policy profile for a new team') }}
+                        </label>
+                        <div class="admin-grid__control">
+                            <NcSelect
+                                input-id="admin-idp-profile"
+                                :model-value="idpProfileOption"
+                                :options="idpProfileOptions"
+                                :reduce="o => o.id"
+                                :clearable="false"
+                                label-outside
+                                :aria-label-combobox="t('teamhub', 'Policy profile for a new team')"
+                                @update:model-value="onIdpProfileChange" />
+                        </div>
+
+                        <!-- The lifecycle choice. -->
+                        <label class="admin-grid__label" for="admin-idp-gone">
+                            {{ t('teamhub', 'When the group is removed') }}
+                            <InfoHint
+                                controls="admin-idp-gone-hint"
+                                :open="hintOpen('idpGone')"
+                                :label="t('teamhub', 'About removing the group')"
+                                @toggle="toggleHint('idpGone')" />
+                        </label>
+                        <div class="admin-grid__control">
+                            <NcSelect
+                                input-id="admin-idp-gone"
+                                :model-value="idpGoneOption"
+                                :options="idpGoneOptions"
+                                :reduce="o => o.id"
+                                :clearable="false"
+                                label-outside
+                                :aria-label-combobox="t('teamhub', 'When the group is removed')"
+                                @update:model-value="onIdpGoneChange" />
+                            <NcNoteCard v-if="idpArchiveWarning" type="warning">
+                                {{ idpArchiveWarning }}
+                            </NcNoteCard>
+                        </div>
+                        <p v-if="hintOpen('idpGone')" id="admin-idp-gone-hint" class="admin-grid__hint">
+                            {{ t('teamhub', 'Nothing is ever removed because your directory could not be reached: if Nextcloud reports no groups at all, every team is left alone. Archiving writes the team’s contents to the location on the Archive tab first.') }}
+                        </p>
+                    </template>
                 </div>
             </NcSettingsSection>
 
@@ -265,7 +615,7 @@
                         :disabled="true"
                         type="checkbox">
                         {{ t('teamhub', 'Local users') }}
-                        <template #description>{{ t('teamhub', 'Always enabled — local Nextcloud accounts') }}</template>
+                        <template #description>{{ t('teamhub', 'Always enabled, local Nextcloud accounts') }}</template>
                     </NcCheckboxRadioSwitch>
                     <NcCheckboxRadioSwitch
                         :model-value="inviteGroup"
@@ -296,83 +646,6 @@
                         <template #description>{{ t('teamhub', 'Invite users from other Nextcloud instances (requires Circles federation)') }}</template>
                     </NcCheckboxRadioSwitch>
                 </div>
-            </NcSettingsSection>
-
-            <!-- ── Telling people apart (v4.10.7) ──────────────────────────
-                 Two colleagues with the same name: the line under the name
-                 in every picker (invite, wizard, bulk create, owner picker,
-                 audit filter, @mentions) is built from the profile fields
-                 ticked here, in this order, two values at most. The email or
-                 the uid — Nextcloud's own fallback — says nothing in most
-                 organisations; the job title, the organisation or the
-                 department-as-group does. Which of those is filled in is a
-                 property of this instance, hence a setting. Autosaves like
-                 the invite types above. -->
-            <NcSettingsSection
-                :name="t('teamhub', 'Telling people apart')"
-                :description="t('teamhub', 'When two people share a name, the line under the name in every search result says which one it is. Choose the profile fields that line is built from; the first two that are filled in are shown, in this order. A field a person set to private on their profile is only shown to administrators.')">
-                <div class="admin-invite-types">
-                    <NcCheckboxRadioSwitch
-                        v-for="field in sublineFieldsAvailable"
-                        :key="field"
-                        :model-value="sublineFields.includes(field)"
-                        type="checkbox"
-                        @update:model-value="toggleSublineField(field, $event)">
-                        {{ sublineFieldLabel(field) }}
-                        <template #description>{{ sublineFieldHint(field) }}</template>
-                    </NcCheckboxRadioSwitch>
-                </div>
-                <p v-if="sublineFields.length === 0" class="admin-section-hint">
-                    {{ t('teamhub', 'No field is selected: search results show the name only.') }}
-                </p>
-            </NcSettingsSection>
-
-            <!-- ── Team Folders integration status ────────────────────────── -->
-            <NcSettingsSection
-                :name="t('teamhub', 'Team Folders integration')"
-                :description="t('teamhub', 'When Team Folders is installed and properly configured, TeamHub will automatically create a Team Folder for each new team instead of a shared personal folder. Team Folders are owned by the server, not by individual users.')">
-
-                <!-- v4.10.51 — the checklist's row style (round MDI status
-                     icon, label, hint) and NcNoteCard for the verdict, in
-                     place of ✓ ✗ ⚠ glyphs and hand-tinted banners. -->
-                <ul class="admin-setup__rows admin-gf-status">
-                    <li class="admin-setup__row">
-                        <span class="admin-setup__status" :class="gfDelegation.groupFoldersInstalled ? 'admin-setup__status--ok' : 'admin-setup__status--warn'">
-                            <component :is="setupStatusIcon(gfDelegation.groupFoldersInstalled ? 'ok' : 'warn')" :size="ICON_INLINE" />
-                            <span class="admin-setup__sr">{{ setupStatusLabel(gfDelegation.groupFoldersInstalled ? 'ok' : 'warn') }}</span>
-                        </span>
-                        <div class="admin-setup__body">
-                            <span class="admin-setup__label">{{ t('teamhub', 'Team Folders app installed') }}</span>
-                            <p v-if="!gfDelegation.groupFoldersInstalled" class="admin-setup__hint">
-                                {{ t('teamhub', 'Install the Team Folders app to enable automatic team folder creation.') }}
-                            </p>
-                        </div>
-                    </li>
-                    <li class="admin-setup__row">
-                        <span class="admin-setup__status" :class="gfDelegation.teamCreatorGroupsConfigured ? 'admin-setup__status--ok' : 'admin-setup__status--warn'">
-                            <component :is="setupStatusIcon(gfDelegation.teamCreatorGroupsConfigured ? 'ok' : 'warn')" :size="ICON_INLINE" />
-                            <span class="admin-setup__sr">{{ setupStatusLabel(gfDelegation.teamCreatorGroupsConfigured ? 'ok' : 'warn') }}</span>
-                        </span>
-                        <div class="admin-setup__body">
-                            <span class="admin-setup__label">{{ t('teamhub', 'Team-creator group configured above') }}</span>
-                            <p v-if="!gfDelegation.teamCreatorGroupsConfigured" class="admin-setup__hint">
-                                {{ t('teamhub', 'Set a team-creator group above. Without one, group creation permissions cannot be verified.') }}
-                            </p>
-                        </div>
-                    </li>
-                </ul>
-
-                <NcNoteCard
-                    v-if="gfDelegation.groupFoldersInstalled && gfDelegation.teamCreatorGroupsConfigured"
-                    type="success">
-                    {{ t('teamhub', 'Team Folders is correctly configured. New teams will automatically get a Team Folder.') }}
-                </NcNoteCard>
-                <NcNoteCard v-else-if="gfDelegation.groupFoldersInstalled" type="warning">
-                    {{ t('teamhub', 'Team Folders is installed but not fully configured. New teams will fall back to shared personal folders until the issues above are resolved.') }}
-                </NcNoteCard>
-                <NcNoteCard v-else type="info">
-                    {{ t('teamhub', 'Team Folders is not installed. New teams will use shared personal folders.') }}
-                </NcNoteCard>
             </NcSettingsSection>
 
         </div>
@@ -412,11 +685,28 @@
                  bringing teams in, which is what this tab is for. -->
             <div id="team-adoption">
                 <NcSettingsSection
-                    :name="t('teamhub', 'Teams made outside TeamHub')"
-                    :description="t('teamhub', 'Teams made in Contacts, on the Teams page or by a provisioning tool are not in TeamHub until they are accepted here, with a template and a policy. Without a team creator group they are accepted by themselves; when a team holds the Nextcloud services, its members decide too.')">
-                    <TeamAdoptionGrid v-if="activeTab === 'importexport'" />
+                    :name="t('teamhub', 'Waiting to join TeamHub')"
+                    :description="t('teamhub', 'Teams made elsewhere in Nextcloud, and Nextcloud groups that have no team yet. Both are decided here; the rules that put them in this list are on the Team creation tab.')">
+
+                    <!-- v4.11.36 — the rule goes down as a prop rather than
+                         the grid refetching it. Keying on the mode remounted
+                         it, but the remount raced the save that was still in
+                         flight, so the empty state answered with the mode
+                         before last. Nothing about the rows changes when the
+                         rule changes, so there was never a reason to refetch. -->
+                    <!-- v4.11.38 — one queue, both kinds, pills to tell
+                         them apart (Justin, 2026-10-09). `directory` also
+                         moves the groups' own decided list in here, so the
+                         tab has one history rather than two. -->
+                    <TeamAdoptionGrid
+                        v-if="activeTab === 'importexport'"
+                        directory
+                        :mode="form.teamAdoptionMode"
+                        :directory-template="form.idpTeamsTemplate"
+                        :directory-profile="form.idpTeamsProfile" />
                 </NcSettingsSection>
             </div>
+
 
             <NcSettingsSection
                 :name="t('teamhub', 'Bulk team import')"
@@ -1977,6 +2267,35 @@
             class="teamhub-admin-panel">
 
             <PolicyAdminPanel v-if="activeTab === 'policy'" />
+
+            <!-- ── Telling people apart (v4.10.7, moved here v4.11.33) ─────
+                 Was the sixth section of the Team creation tab, which is
+                 about who may make a team and what a new one gets. This is
+                 about how a person is identified in every picker on the
+                 instance, which is the same kind of instance-wide policy the
+                 rest of this tab holds. -->
+            <NcSettingsSection
+                v-if="activeTab === 'policy'"
+                :name="t('teamhub', 'Telling people apart')"
+                :description="t('teamhub', 'The line under a person\'s name in every search result. The first two fields that are filled in are shown, in this order.')">
+                <div class="admin-invite-types">
+                    <NcCheckboxRadioSwitch
+                        v-for="field in sublineFieldsAvailable"
+                        :key="field"
+                        :model-value="sublineFields.includes(field)"
+                        type="checkbox"
+                        @update:model-value="toggleSublineField(field, $event)">
+                        {{ sublineFieldLabel(field) }}
+                        <template #description>{{ sublineFieldHint(field) }}</template>
+                    </NcCheckboxRadioSwitch>
+                </div>
+                <p v-if="sublineFields.length === 0" class="admin-section-hint">
+                    {{ t('teamhub', 'No field is selected: search results show the name only.') }}
+                </p>
+                <p class="admin-section-hint">
+                    {{ t('teamhub', 'A field somebody set to private on their profile is shown to administrators only.') }}
+                </p>
+            </NcSettingsSection>
         </div>
 
         <!-- ─────────────────────────────────────────────────────────────────
@@ -2420,9 +2739,16 @@
             </NcSettingsSection>
 
             <!-- ── Audit log (existing) ────────────────────────────────────── -->
+            <!-- v4.11.39 — the anchor the grid's "Open the audit log" link
+                 and anything else pointing here uses. `#tab-panel-audit`
+                 looks like it would work and does nothing: the panel div
+                 exists, but the page only switches tabs for a hash it
+                 handles in mounted(), so a link to the panel id lands on
+                 the default tab. -->
+            <div id="audit-log">
             <NcSettingsSection
                 :name="t('teamhub', 'Audit log')"
-                :description="t('teamhub', 'Per-team activity log capturing membership, file, and share events for governance and compliance.')">
+                :description="t('teamhub', 'Activity log for governance and compliance: membership, file and share events per team, and everything TeamHub records about the installation itself. Narrow it by team, event type or date.')">
 
             <!-- Always-visible info banner: explains hourly cadence -->
             <div class="audit-banner audit-banner--info">
@@ -2483,7 +2809,7 @@
                         v-model="auditSelectedTeamId"
                         class="audit-controls__team-select"
                         :disabled="auditTeamsLoading"
-                        :options="[{ id: '', label: t('teamhub', 'Select a team') }, ...auditTeams.map(team => ({ id: team.team_id, label: `${team.display_name} (${team.event_count})` }))]"
+                        :options="auditTeamOptions"
                         :reduce="o => o.id"
                         :clearable="false"
                         @update:model-value="onAuditTeamChanged" />
@@ -2501,7 +2827,11 @@
 
                 <div v-if="auditTeamsError" class="admin-save-err">{{ auditTeamsError }}</div>
 
-                <div v-if="auditSelectedTeamId" class="audit-controls__row">
+                <!-- v4.11.39 — the filters no longer wait for a team: the
+                     log opens on every team, and narrowing by event type or
+                     date is as useful across the installation as within one
+                     team. -->
+                <div class="audit-controls__row">
                     <label class="audit-controls__label" for="audit-event-filter">
                         {{ t('teamhub', 'Event types') }}
                     </label>
@@ -2516,7 +2846,7 @@
                         :clearable="false" />
                 </div>
 
-                <div v-if="auditSelectedTeamId" class="audit-controls__row">
+                <div class="audit-controls__row">
                     <label class="audit-controls__label" for="audit-from">
                         {{ t('teamhub', 'From') }}
                     </label>
@@ -2535,9 +2865,14 @@
                         type="date"
                         class="audit-controls__date"
                         @change="resetAndLoadAuditEvents">
+                    <!-- The ZIP is one team's whole log, so it needs a team
+                         picked. Hidden rather than disabled while the view is
+                         on every team: nothing an administrator could do here
+                         would make it work. -->
                     <NcButton
+                        v-if="auditExportableTeam"
                         variant="secondary"
-                        :disabled="auditExporting || !auditSelectedTeamId"
+                        :disabled="auditExporting"
                         @click="exportAuditTeam">
                         <template #icon>
                             <NcLoadingIcon v-if="auditExporting" :size="ICON_BODY" />
@@ -2548,14 +2883,8 @@
                 </div>
             </div>
 
-            <!-- Empty state when no team selected -->
-            <div v-if="!auditSelectedTeamId && !auditTeamsLoading" class="audit-empty">
-                <ShieldCheckIcon :size="ICON_XL" />
-                <p>{{ t('teamhub', 'Select a team to view its audit log.') }}</p>
-            </div>
-
             <!-- Events table -->
-            <div v-if="auditSelectedTeamId" class="audit-events">
+            <div class="audit-events">
                 <div v-if="auditEventsLoading" class="audit-events__loading">
                     <NcLoadingIcon :size="ICON_LARGE" />
                 </div>
@@ -2567,6 +2896,10 @@
                     <thead>
                         <tr>
                             <th>{{ t('teamhub', 'When') }}</th>
+                            <!-- Only when the rows can come from more than one
+                                 team: inside one team it would repeat the
+                                 dropdown on every line. -->
+                            <th v-if="!auditSelectedTeamId">{{ t('teamhub', 'Team') }}</th>
                             <th>{{ t('teamhub', 'Event') }}</th>
                             <th>{{ t('teamhub', 'Actor') }}</th>
                             <th>{{ t('teamhub', 'Target') }}</th>
@@ -2576,6 +2909,9 @@
                     <tbody>
                         <tr v-for="ev in auditEvents" :key="ev.id">
                             <td class="audit-table__when">{{ formatAuditTimestamp(ev.created_at) }}</td>
+                            <td v-if="!auditSelectedTeamId" class="audit-table__team">
+                                {{ auditRowTeamLabel(ev) }}
+                            </td>
                             <td class="audit-table__event">{{ ev.event_type }}</td>
                             <td>{{ ev.actor_uid || '—' }}</td>
                             <td class="audit-table__target">
@@ -2614,6 +2950,7 @@
                 </div>
             </div>
             </NcSettingsSection>
+            </div>
             </template>
         </div>
 
@@ -3492,12 +3829,12 @@
 </template>
 
 <script>
-import { ICON_BODY, ICON_INLINE, ICON_LARGE, ICON_XL } from '../constants/uiTokens.js'
+import { ICON_BODY, ICON_INLINE, ICON_LARGE, ICON_HERO } from '../constants/uiTokens.js'
 import axios from '@nextcloud/axios'
 import { todayIso, shiftToday, formatDate as fmtDate, formatDateTime as fmtDateTime } from '../lib/localDate.js'
 import { generateUrl } from '@nextcloud/router'
 import { showError, showSuccess } from '@nextcloud/dialogs'
-import { NcSettingsSection, NcButton, NcLoadingIcon, NcChip, NcNoteCard, NcTextField, NcTextArea, NcCheckboxRadioSwitch, NcDialog, NcActions, NcActionText, NcSelect } from '@nextcloud/vue'
+import { NcSettingsSection, NcButton, NcLoadingIcon, NcChip, NcNoteCard, NcTextField, NcTextArea, NcCheckboxRadioSwitch, NcDialog, NcActions, NcActionText, NcSelect, NcEmptyContent } from '@nextcloud/vue'
 import ContentSave from 'vue-material-design-icons/ContentSave.vue'
 import AccountGroup from 'vue-material-design-icons/AccountGroup.vue'
 import AccountPlusIcon from 'vue-material-design-icons/AccountPlus.vue'
@@ -3562,6 +3899,7 @@ import TeamExportPanel         from './admin/TeamExportPanel.vue'
 // v4.8.2 — Track F2a. Templates and classification profiles. Its own file for
 // the same reason the two above are: this one is already ~7 900 lines.
 import PolicyAdminPanel        from './admin/PolicyAdminPanel.vue'
+import InfoHint                from './admin/InfoHint.vue'
 // v4.10.45 — the service catalog's categories and links.
 import ServicesAdminPanel      from './admin/ServicesAdminPanel.vue'
 // v4.9.6 — Phase 2: the provisioning operations list on the Maintenance tab.
@@ -3575,10 +3913,20 @@ import { isoControlLabel, buildControlCoverage } from '../constants/isoControls.
 // `check:l10n` scans src/ only and a name defined in PHP is outside its reach.
 import { FIELD, appLabel, fieldLabel, profileDisplayName, templateDisplayName } from '../constants/policy.js'
 
+/**
+ * What a team built from a directory group gets when the administrator has
+ * not chosen (v4.11.34). Mirrors `IdpTeamService::DEFAULT_TEMPLATE` and
+ * `DEFAULT_PROFILE`, which are the authority — these two exist so the two
+ * pickers can preselect the right row before any save, now that neither
+ * list carries an empty "whatever the default is" option.
+ */
+const IDP_DEFAULT_TEMPLATE = 'collaboration'
+const IDP_DEFAULT_PROFILE  = 'internal'
+
 export default {
     name: 'AdminSettings',
     components: {
-         NcSelect, NcSettingsSection, NcButton, NcLoadingIcon, NcChip, NcNoteCard,
+         NcSelect, NcSettingsSection, NcButton, NcLoadingIcon, NcChip, NcNoteCard, NcEmptyContent,
         NcTextField, NcTextArea, NcCheckboxRadioSwitch, NcDialog,
         NcActions, NcActionText,
         ContentSave, AccountGroup, AccountPlusIcon, SwapHorizontalIcon, MessageTextIcon, PuzzleIcon,
@@ -3592,7 +3940,7 @@ export default {
         LifebuoyIcon,
         TeamImportPanel, TeamExportPanel, PersonRow, TeamAdoptionGrid,
         CalendarClockIcon, CalendarRemoveIcon, EmailOutlineIcon,
-        PolicyAdminPanel, ShieldLockOutlineIcon, ServicesAdminPanel,
+        PolicyAdminPanel, ShieldLockOutlineIcon, ServicesAdminPanel, InfoHint,
         ProvisioningAdminPanel,
     },
     data() {
@@ -3600,7 +3948,7 @@ export default {
             ICON_BODY,
             ICON_INLINE,
             ICON_LARGE,
-            ICON_XL,
+            ICON_HERO,
             activeTab: 'creation',
 
             // v3.100.0 — Track F licensing tab state. All under one
@@ -3640,6 +3988,27 @@ export default {
                 // checklist. Starts true so a fresh page load doesn't flash
                 // the checklist before load() reports the stored value.
                 onboardingChecklistDismissed: true,
+                // v4.11.32 — IdP teams (DESIGN §2.166). 'off' by default: a
+                // feature that creates teams unattended is opted into.
+                idpTeamsMode: 'off',
+                idpTeamsBackends: ['LDAP'],
+                idpTeamsLdapOu: '',
+                idpTeamsPattern: '',
+                // v4.11.34 — stated defaults, not an empty "whatever the
+                // default is" option: there is no default template, and
+                // "whatever the template sets" was no policy at all on a
+                // default install. See IdpTeamService::template()/profile().
+                idpTeamsTemplate: 'collaboration',
+                idpTeamsProfile: 'internal',
+                idpTeamsServiceAccount: '',
+                idpTeamsOnGroupGone: 'archive_then_delete',
+                // v4.11.34 — what happens to a team made outside TeamHub:
+                // 'accept', 'review' (the default) or 'decline'. The picker
+                // is on Import/Export, beside the grid it governs.
+                teamAdoptionMode: 'review',
+                // v4.11.35 — and what an automatically accepted team gets.
+                teamAdoptionTemplate: 'collaboration',
+                teamAdoptionProfile: 'internal',
                 // v4.6.13 — days before a team's expiration date that the
                 // warning reaches My Work. Server clamps to [min, max].
                 expiryWarningDays: 7,
@@ -3812,11 +4181,20 @@ export default {
             auditTeamsLoading: false,
             auditTeamsError: null,
             auditActivityMissing: false,
+            // v4.11.39 — '' is "every team", not "nothing picked yet": the
+            // log opens on the whole installation and the dropdown narrows it.
             auditSelectedTeamId: '',
+            // The instance-scope bucket, as listTeams reports it. Events that
+            // are about the installation rather than one team — policy
+            // profiles, blueprints, provisioning runs, the directory-group
+            // history — had no reader at all before this version.
+            auditInstanceCount: 0,
+            auditInstanceScopeId: '_instance',
             auditEvents: [],
             auditEventsTotal: 0,
             auditEventsPage: 1,
-            auditEventsPerPage: 50,
+            // Fifteen, not fifty: the all-teams view is read, not scanned.
+            auditEventsPerPage: 15,
             auditEventsLoading: false,
             auditEventsError: null,
             auditEventTypeFilter: '',  // comma-separated list, empty = all
@@ -3852,6 +4230,16 @@ export default {
                 // entries rather than repeating that.
                 'message.created', 'message.updated', 'message.deleted',
                 'comment.updated', 'comment.deleted',
+                // v4.11.39 — everything waiting to join TeamHub, both kinds.
+                // The team half has been written since 4.10.50 and was never
+                // in this list, so it was logged and un-filterable; the group
+                // half is new in this version and files under the instance
+                // scope, because a declined or failed group never had a team
+                // (DESIGN §2.172).
+                'team.adopted', 'team.adoption_declined', 'team.adoption_withdrawn',
+                'directory.group_found', 'directory.group_accepted',
+                'directory.group_declined', 'directory.group_failed',
+                'directory.group_orphaned', 'directory.group_forgotten',
                 'invite.sent',
                 'join.requested', 'join.approved', 'join.rejected',
                 'file.created', 'file.edited', 'file.deleted',
@@ -3860,6 +4248,24 @@ export default {
             // ── Audit tab — Find teams for a user ──────────────────────────
             audit_userQuery: '',
             audit_userResults: [],
+
+            // v4.11.32 — IdP teams. `idpTeams` is the server's read-only
+            // half: whether the LDAP DN lookup is usable, and why the service
+            // account cannot provision if it cannot.
+            idpTeams: { ldapDnAvailable: false, serviceAccountProblem: '' },
+            idpUserQuery: '',
+            idpUserResults: [],
+            idpUserSearchTimer: null,
+            // v4.11.35 — renamed from idp*Loaded: these two lists now
+            // feed the directory pickers on Team creation *and* the pair on
+            // Import/Export that an automatic adoption applies.
+            policyTemplatesLoaded: [],
+            policyProfilesLoaded: [],
+            // v4.11.33 — which (i) explanations are open, keyed by the short
+            // id each row passes. One map rather than a flag per row: there
+            // are a dozen of them and they are all the same question.
+            openHints: {},
+            // The review queue: groups waiting for a decision.
             audit_userSearching: false,
             audit_userSearchTimer: null,
             audit_selectedUser: null,    // { uid, displayName }
@@ -3889,6 +4295,171 @@ export default {
         }
     },
     computed: {
+        // ── IdP teams (v4.11.32, DESIGN §2.166) ──────────────────────────
+        idpModeOptions() {
+            return [
+                { id: 'off',    label: this.t('teamhub', 'Do nothing') },
+                { id: 'review', label: this.t('teamhub', 'Ask an administrator first') },
+                { id: 'auto',   label: this.t('teamhub', 'Create the team') },
+            ]
+        },
+        idpModeOption() {
+            return this.idpModeOptions.find(o => o.id === this.form.idpTeamsMode) || this.idpModeOptions[0]
+        },
+        idpGoneOptions() {
+            // v4.11.33 — two choices, both of which delete (Justin: *this
+            // should be only Archive the team, then delete it, or delete it*).
+            // The old third option kept the team and only reported it, which
+            // left an estate of teams whose groups were gone.
+            return [
+                { id: 'archive_then_delete', label: this.t('teamhub', 'Archive the team, then delete it') },
+                { id: 'delete',              label: this.t('teamhub', 'Delete the team') },
+            ]
+        },
+        idpGoneOption() {
+            return this.idpGoneOptions.find(o => o.id === this.form.idpTeamsOnGroupGone) || this.idpGoneOptions[0]
+        },
+        /**
+         * v4.11.33 — these two read `templateKey` / `profileKey` and the
+         * shared display-name helpers. They used to read `t.key` and
+         * `t.name`, which exist on neither row, so every option rendered
+         * "undefined" with an empty id and nothing could be selected.
+         *
+         * `openproject` and `service` are left out: both are templates for a
+         * team somebody sets up deliberately, and neither makes sense applied
+         * unattended to a directory group.
+         *
+         * v4.11.34 — **no empty option in either list** (Justin,
+         * 2026-10-06: *these say nothing as there is no default template*).
+         * *The default template* and *Whatever the template sets* both stood
+         * for an empty stored value; the first resolved two layers down to
+         * `collaboration`, and the second resolved to **nothing at all**,
+         * because `teamhub_team_template.default_profile_key` is not seeded
+         * and `defaultProfileForTemplate()` then answers null. So the two
+         * answers are now named: Collaboration and Internal.
+         */
+        idpTemplateOptions() {
+            const skip = ['openproject', 'service']
+            return this.policyTemplatesLoaded
+                .filter(row => !skip.includes(row.templateKey))
+                .map(row => ({
+                    id: row.templateKey,
+                    label: templateDisplayName(row.templateKey, row.label, row.isSeeded),
+                }))
+        },
+        idpTemplateOption() {
+            return this.pickOption(this.idpTemplateOptions, this.form.idpTeamsTemplate, IDP_DEFAULT_TEMPLATE)
+        },
+        idpProfileOptions() {
+            return this.policyProfilesLoaded.map(row => ({
+                id: row.profileKey,
+                label: profileDisplayName(row.profileKey, row.label, row.isSeeded),
+            }))
+        },
+        idpProfileOption() {
+            return this.pickOption(this.idpProfileOptions, this.form.idpTeamsProfile, IDP_DEFAULT_PROFILE)
+        },
+
+        // ── Teams made outside TeamHub (v4.11.34, DESIGN §2.168) ───────
+        //
+        // Three answers, and the customer picks (Justin, 2026-10-06). Until
+        // this version TeamHub decided: an instance with no team creator
+        // group adopted every team made elsewhere by itself, and one with a
+        // creator group always asked somebody. Neither is a rule a customer
+        // ever chose.
+        teamAdoptionModeOptions() {
+            return [
+                { id: 'accept',  label: this.t('teamhub', 'Accept it automatically') },
+                { id: 'review',  label: this.t('teamhub', 'Ask before accepting it') },
+                { id: 'decline', label: this.t('teamhub', 'Never accept it') },
+            ]
+        },
+        teamAdoptionModeOption() {
+            return this.teamAdoptionModeOptions.find(o => o.id === this.form.teamAdoptionMode)
+                || this.teamAdoptionModeOptions[1]
+        },
+
+        /**
+         * The pair an automatic acceptance applies (v4.11.35). The same two
+         * lists the directory pickers use — one policy vocabulary, named
+         * the same way wherever it is offered — and `openproject` and
+         * `service` are left out here for the same reason: neither is a
+         * template to apply to a team nobody set up deliberately.
+         */
+        adoptionTemplateOptions() {
+            return this.policyTemplatesLoaded
+                .filter(row => !['openproject', 'service'].includes(row.templateKey))
+                .map(row => ({
+                    id: row.templateKey,
+                    label: templateDisplayName(row.templateKey, row.label, row.isSeeded),
+                }))
+        },
+        adoptionTemplateOption() {
+            return this.pickOption(this.adoptionTemplateOptions, this.form.teamAdoptionTemplate, IDP_DEFAULT_TEMPLATE)
+        },
+        adoptionProfileOptions() {
+            return this.policyProfilesLoaded.map(row => ({
+                id: row.profileKey,
+                label: profileDisplayName(row.profileKey, row.label, row.isSeeded),
+            }))
+        },
+        adoptionProfileOption() {
+            return this.pickOption(this.adoptionProfileOptions, this.form.teamAdoptionProfile, IDP_DEFAULT_PROFILE)
+        },
+        idpBackendLdap() {
+            return (this.form.idpTeamsBackends || []).includes('LDAP')
+        },
+        idpBackendDatabase() {
+            return (this.form.idpTeamsBackends || []).includes('Database')
+        },
+        /**
+         * The service account's state, in the administrator's words.
+         *
+         * The backend answers a reason code rather than a bool precisely so
+         * this can be specific: "pick an account" and "that account may not
+         * create teams" send the reader to different places.
+         */
+        idpServiceAccountMessage() {
+            switch (this.idpTeams.serviceAccountProblem) {
+            case 'no_account':
+                return this.t('teamhub', 'No account is selected yet, so no team will be created. Pick one below.')
+            case 'no_such_account':
+                return this.t('teamhub', 'The selected account no longer exists, so no team will be created. Pick another one.')
+            case 'account_disabled':
+                return this.t('teamhub', 'The selected account is disabled, so no team will be created. Enable it, or pick another one.')
+            case 'account_may_not_create_teams':
+                return this.t('teamhub', 'The selected account may not create teams. Add it to a group under Creation permissions above, or pick an administrator.')
+            case 'unavailable':
+                return this.t('teamhub', 'The account could not be checked. Reload the page to try again.')
+            default:
+                return ''
+            }
+        },
+        idpServiceAccountNoteType() {
+            return this.idpTeams.serviceAccountProblem === 'no_account' ? 'info' : 'warning'
+        },
+        /**
+         * Archiving a team whose group has gone writes into the archive
+         * location from the Archive tab. When that is left empty the archive
+         * falls back to the *team owner's* own Files — which works for a team
+         * this account created, and cannot work for a team Circles created
+         * from a SCIM group, because that one has no human owner at all.
+         */
+        idpArchiveWarning() {
+            if (this.form.idpTeamsOnGroupGone !== 'archive_then_delete') {
+                return ''
+            }
+            if (!this.archiveSettings || this.archiveSettings.archiveLocation) {
+                return ''
+            }
+            // v4.11.33 — only the location matters now. Choosing *archive the
+            // team, then delete it* here IS the instruction to archive, so the
+            // Archive tab's own archiveBeforeDelete switch is not consulted;
+            // what it cannot supply is a destination, and with none set the
+            // archive falls back to the team owner's own Files.
+            return this.t('teamhub', 'No archive location is set on the Archive tab, so an archive falls back to the team owner’s own files. Set a location there to be sure a team can always be archived before it is deleted.')
+        },
+
         tabs() {
             const list = [
                 { id: 'creation',      label: this.t('teamhub', 'Team creation'), icon: 'AccountPlusIcon' },
@@ -3987,8 +4558,17 @@ export default {
          * The Compliance checks (Code integrity, Telemetry) are a licensed
          * feature. Unlocked whenever the customer has a currently-honoured
          * license — Active, Trial, or Grace. Soft-lock and Unlicensed hide
-         * the checks and surface a "License required" banner instead. The
-         * Audit log section on the same tab is not gated.
+         * the checks and surface a "License required" banner instead.
+         *
+         * **The whole tab is gated, the Audit log included.** This sentence
+         * used to claim the Audit log was not — it has been wrong since the
+         * tab was built: the banner is the `v-if`, and every section on the
+         * panel sits in the matching `v-else`. Corrected 2026-10-10 after it
+         * sent a walk looking for a gating bug that does not exist. Whether an
+         * append-only audit log *should* stay readable when a licence lapses
+         * is a product question and still open — if it is ever answered yes,
+         * move that section out of the `v-else`, and change this sentence
+         * with it rather than leaving the two to disagree again.
          */
         complianceUnlocked() {
             return this.licenseActive
@@ -4131,6 +4711,30 @@ export default {
                 label,
                 value,
                 hint: '',
+            })
+
+            // ── The Team folders app (v4.11.33) ──────────────────────────
+            // Directly under "Who can create teams", because the two
+            // together decide what a new team's Files resource actually is:
+            // with the app, a team folder owned by the server; without it, a
+            // folder shared from whoever created the team. This replaced a
+            // whole "Team Folders integration" section whose three states and
+            // two sub-rows said less than one checklist line.
+            //
+            // • rather than ⚠ when absent: an instance without the app works,
+            // it just gets shared personal folders.
+            const gfInstalled = !!this.gfDelegation.groupFoldersInstalled
+            rows.push({
+                id:    'teamfolders',
+                state: gfInstalled ? 'ok' : 'info',
+                glyph: gfInstalled ? '✓' : '•',
+                label: this.t('teamhub', 'Team folders app'),
+                value: gfInstalled
+                    ? this.t('teamhub', 'Installed')
+                    : this.t('teamhub', 'Not installed'),
+                hint:  gfInstalled
+                    ? ''
+                    : this.t('teamhub', 'Install it to give every new team a team folder owned by the server. Without it a new team gets a folder shared from the person who created it.'),
             })
 
             // ── Templates and policy profiles (v4.8.15, Track F) ─────────
@@ -4282,56 +4886,39 @@ export default {
                 })
             }
 
-            // ── Optional modules ─────────────────────────────────────────
-            // v4.4.15 — modules read positively: enabled is the "healthy"
-            // state (feature is on, users can use it), disabled is the
-            // suppressed state. Independent of the shipped default: an
-            // admin looking at the checklist wants ✓ next to features
-            // that are working, not next to ones they turned off.
-            // One row per module rather than a single composed line —
-            // "Presence {x} · Decisions {y}" out of translated on/off
-            // fragments would be exactly the concatenation SKILLS.md
-            // § Translation standards forbids.
-            rows.push(preferenceRow(
-                'presence',
-                this.t('teamhub', 'Presence module'),
-                this.form.presenceModuleEnabled ? this.t('teamhub', 'Enabled') : this.t('teamhub', 'Disabled'),
+            // ── Optional modules, one row (v4.11.33) ─────────────────────
+            // Five rows until now — Presence, Decisions, File reviews,
+            // OpenProject, Service teams — each reading "Enabled" or
+            // "Disabled". Justin: *remove the module rows, just have one item
+            // that reads Modules: X of X modules enabled.* Five lines of a
+            // ten-line checklist went to one axis of the product, and the
+            // detail they carried is on the switches themselves a few
+            // sections down.
+            //
+            // Counted the way the five rows each decided: a licensed module
+            // needs the licence **and** its switch, and File reviews has no
+            // switch at all, so the licence alone enables it.
+            const moduleStates = [
                 this.form.presenceModuleEnabled,
-            ))
-            rows.push(preferenceRow(
-                'decisions',
-                this.t('teamhub', 'Decisions module'),
-                this.form.decisionsModuleEnabled ? this.t('teamhub', 'Enabled') : this.t('teamhub', 'Disabled'),
                 this.form.decisionsModuleEnabled,
-            ))
-            // v4.8.31 — derived from the licence, not a stored preference, so
-            // the checklist reports it as a state rather than a setting an
-            // administrator forgot to turn on.
-            rows.push(preferenceRow(
-                'file_reviews',
-                this.t('teamhub', 'File reviews'),
-                this.licenseActive ? this.t('teamhub', 'Available') : this.t('teamhub', 'Needs a license'),
                 this.licenseActive,
-            ))
-            // v4.9.16 — licence and switch both; the value names whichever is
-            // missing, the mark is ✓ only when the module actually exists.
-            rows.push(preferenceRow(
-                'openproject',
-                this.t('teamhub', 'OpenProject module'),
-                !this.licenseActive
-                    ? this.t('teamhub', 'Needs a license')
-                    : (this.form.openProjectModuleEnabled ? this.t('teamhub', 'Enabled') : this.t('teamhub', 'Disabled')),
                 this.licenseActive && this.form.openProjectModuleEnabled,
-            ))
-            // v4.10.46 — licence and switch both, exactly like OpenProject.
-            rows.push(preferenceRow(
-                'service_teams',
-                this.t('teamhub', 'Service teams module'),
-                !this.licenseActive
-                    ? this.t('teamhub', 'Needs a license')
-                    : (this.form.serviceTeamsModuleEnabled ? this.t('teamhub', 'Enabled') : this.t('teamhub', 'Disabled')),
                 this.licenseActive && this.form.serviceTeamsModuleEnabled,
-            ))
+            ]
+            const modulesOn = moduleStates.filter(Boolean).length
+            rows.push({
+                id:    'modules',
+                // ✓ once anything is on; • on an instance running none, which
+                // is a working instance, not a misconfigured one.
+                state: modulesOn > 0 ? 'ok' : 'info',
+                glyph: modulesOn > 0 ? '✓' : '•',
+                label: this.t('teamhub', 'Modules'),
+                // TRANSLATORS: {n} of {total} optional modules are switched on. t() not
+                // n(): the noun that inflects is governed by {total}, which is fixed, so a
+                // plural pair would be two identical forms.
+                value: this.t('teamhub', '{n} of {total} modules enabled', { n: modulesOn, total: moduleStates.length }),
+                hint:  '',
+            })
 
             // ── App integrations (v4.4.13) ───────────────────────────────
             // v4.4.14 — ✓ when set / configured, • when empty (the shipped
@@ -4535,6 +5122,37 @@ export default {
                 : null
         },
 
+        /**
+         * The team dropdown's vocabulary (v4.11.39). *All teams* first,
+         * because that is where the log now opens; *Not about one team* only
+         * when the instance scope actually holds rows.
+         */
+        auditTeamOptions() {
+            const options = [{ id: '', label: this.t('teamhub', 'All teams') }]
+            if (this.auditInstanceCount > 0) {
+                options.push({
+                    id: this.auditInstanceScopeId,
+                    // TRANSLATORS: audit-log filter for events about the whole installation rather than one team; {n} is a number of events
+                    label: this.t('teamhub', 'Not about one team ({n})', { n: this.auditInstanceCount }),
+                })
+            }
+            for (const team of this.auditTeams) {
+                options.push({ id: team.team_id, label: `${team.display_name} (${team.event_count})` })
+            }
+            return options
+        },
+
+        /**
+         * The team whose ZIP the export button offers, or '' when there is
+         * none. The instance scope is not a team and has no circle, so its
+         * rows have nothing to export.
+         */
+        auditExportableTeam() {
+            return this.auditSelectedTeamId && this.auditSelectedTeamId !== this.auditInstanceScopeId
+                ? this.auditSelectedTeamId
+                : ''
+        },
+
         auditEventsTotalPages() {
             return Math.max(1, Math.ceil(this.auditEventsTotal / this.auditEventsPerPage))
         },
@@ -4670,6 +5288,16 @@ export default {
                 document.getElementById('team-adoption')?.scrollIntoView({ block: 'start' })
             })
         }
+        // v4.11.39 — and the other direction: the grid's link to where the
+        // decisions are kept. Assigning activeTab here is what makes the
+        // tab's watcher load the log, exactly as above; a hash alone never
+        // switches tabs on this page.
+        if (window.location.hash === '#audit-log') {
+            this.activeTab = 'audit'
+            this.$nextTick(() => {
+                document.getElementById('audit-log')?.scrollIntoView({ block: 'start' })
+            })
+        }
     },
     beforeUnmount() {
         // v4.4.13 — a pending IntraVox autosave must not fire after the
@@ -4727,6 +5355,32 @@ export default {
                 this.form.expiryDefaultDate  = data.expiryDefaultDate || ''
                 this.expiryWarningDaysMin    = Number(data.expiryWarningDaysMin) || 1
                 this.expiryWarningDaysMax    = Number(data.expiryWarningDaysMax) || 365
+                // v4.11.32 — IdP teams. The server's read-only half is kept
+                // apart from `form` so a save never echoes it back.
+                const idp = data.idpTeams || {}
+                this.idpTeams = {
+                    ldapDnAvailable:       !!idp.ldapDnAvailable,
+                    serviceAccountProblem: idp.serviceAccountProblem || '',
+                }
+                this.form.idpTeamsMode           = idp.mode || 'off'
+                this.form.idpTeamsBackends       = Array.isArray(idp.backends) ? idp.backends : ['LDAP']
+                this.form.idpTeamsLdapOu         = idp.ldapOu || ''
+                this.form.idpTeamsPattern        = idp.pattern || ''
+                this.form.idpTeamsTemplate       = idp.template || IDP_DEFAULT_TEMPLATE
+                this.form.idpTeamsProfile        = idp.profile || IDP_DEFAULT_PROFILE
+                this.form.idpTeamsServiceAccount = idp.serviceAccount || ''
+                this.form.idpTeamsOnGroupGone    = idp.onGroupGone || 'archive_then_delete'
+                // v4.11.34 — teams made outside TeamHub. The server clamps an
+                // unrecognised value to 'review', so this only fills in a
+                // response that is missing the key altogether.
+                this.form.teamAdoptionMode       = data.teamAdoptionMode || 'review'
+                this.form.teamAdoptionTemplate   = data.teamAdoptionTemplate || IDP_DEFAULT_TEMPLATE
+                this.form.teamAdoptionProfile    = data.teamAdoptionProfile || IDP_DEFAULT_PROFILE
+                // The lists feed both sections, so either one wanting them
+                // is reason enough to fetch (v4.11.35).
+                if (this.form.idpTeamsMode !== 'off' || this.form.teamAdoptionMode === 'accept') {
+                    this.loadPolicyLists()
+                }
                 // Reset the token write field on each load — never echo
                 // back a stored token.
                 this.form.roomvoxApiToken = ''
@@ -4952,6 +5606,165 @@ export default {
             this.save()
         },
 
+        /** Is this row's (i) explanation open? (v4.11.33) */
+        hintOpen(id) {
+            return !!this.openHints[id]
+        },
+
+        toggleHint(id) {
+            // Reassigned rather than mutated: Vue 3's reactivity tracks the
+            // property fine either way, but a new object keeps the read in
+            // `hintOpen()` honest if this ever moves to a computed.
+            this.openHints = { ...this.openHints, [id]: !this.openHints[id] }
+        },
+
+        // ── IdP teams (v4.11.32, DESIGN §2.166) ──────────────────────────
+
+        onIdpModeChange(value) {
+            this.form.idpTeamsMode = typeof value === 'string' ? value : (value?.id || 'off')
+            this.save()
+            // The template and profile pickers only exist once the feature is
+            // on, and their lists come from the policy endpoints.
+            if (this.form.idpTeamsMode !== 'off') {
+                this.loadPolicyLists()
+            }
+        },
+
+        onIdpGoneChange(value) {
+            this.form.idpTeamsOnGroupGone = typeof value === 'string' ? value : (value?.id || 'archive_then_delete')
+            this.save()
+        },
+
+        onIdpTemplateChange(value) {
+            this.form.idpTeamsTemplate = typeof value === 'string' ? value : (value?.id || IDP_DEFAULT_TEMPLATE)
+            this.save()
+        },
+
+        /**
+         * The option object for a picker with no empty choice (v4.11.34):
+         * what is stored, else the stated default, else the first row. The
+         * middle step is what keeps a stored value that is no longer offered
+         * — a template an administrator deleted — from silently reading as
+         * some unrelated row.
+         */
+        pickOption(options, stored, fallbackId) {
+            return options.find(o => o.id === stored)
+                || options.find(o => o.id === fallbackId)
+                || options[0]
+        },
+
+        onTeamAdoptionModeChange(value) {
+            this.form.teamAdoptionMode = typeof value === 'string' ? value : (value?.id || 'review')
+            this.save()
+            // The pair below only exists in accept mode, and its lists come
+            // from the policy endpoints (v4.11.35).
+            if (this.form.teamAdoptionMode === 'accept') {
+                this.loadPolicyLists()
+            }
+        },
+
+        onAdoptionTemplateChange(value) {
+            this.form.teamAdoptionTemplate = typeof value === 'string' ? value : (value?.id || IDP_DEFAULT_TEMPLATE)
+            this.save()
+        },
+
+        onAdoptionProfileChange(value) {
+            this.form.teamAdoptionProfile = typeof value === 'string' ? value : (value?.id || IDP_DEFAULT_PROFILE)
+            this.save()
+        },
+
+        onIdpProfileChange(value) {
+            this.form.idpTeamsProfile = typeof value === 'string' ? value : (value?.id || IDP_DEFAULT_PROFILE)
+            this.save()
+        },
+
+        /**
+         * A backend toggle, written as a set rather than two booleans so the
+         * stored value stays the comma list the service reads — and so a
+         * backend name some future user backend reports is preserved rather
+         * than dropped by a checkbox that does not know about it.
+         */
+        onIdpBackendToggle(name, enabled) {
+            const current = new Set(this.form.idpTeamsBackends || [])
+            if (enabled) {
+                current.add(name)
+            } else {
+                current.delete(name)
+            }
+            this.form.idpTeamsBackends = [...current]
+            this.save()
+        },
+
+        onIdpSettingInput() {
+            this.save()
+        },
+
+        clearIdpServiceAccount() {
+            this.form.idpTeamsServiceAccount = ''
+            this.idpUserQuery = ''
+            this.idpUserResults = []
+            this.save()
+        },
+
+        pickIdpServiceAccount(user) {
+            this.form.idpTeamsServiceAccount = user.id
+            this.idpUserQuery = ''
+            this.idpUserResults = []
+            this.save()
+        },
+
+        /**
+         * Debounced account lookup, reusing the admin user-search endpoint
+         * the Compliance tab's audit lookup already uses.
+         */
+        onIdpUserSearch() {
+            if (this.idpUserSearchTimer) {
+                clearTimeout(this.idpUserSearchTimer)
+            }
+            if (!this.idpUserQuery || this.idpUserQuery.length < 1) {
+                this.idpUserResults = []
+                return
+            }
+            this.idpUserSearchTimer = setTimeout(async () => {
+                try {
+                    const { data } = await axios.get(
+                        generateUrl('/apps/teamhub/api/v1/admin/users/search'),
+                        { params: { q: this.idpUserQuery, limit: 10 } },
+                    )
+                    this.idpUserResults = Array.isArray(data?.users) ? data.users : (Array.isArray(data) ? data : [])
+                } catch (e) {
+                    // A failed lookup leaves the list empty; the field still
+                    // works and the backend validates whatever is stored.
+                    this.idpUserResults = []
+                }
+            }, 300)
+        },
+
+        /**
+         * The template and profile lists for the two pickers. Loaded on
+         * demand rather than with the tab: an instance with the feature off
+         * never needs them, and both endpoints are admin-only reads.
+         */
+        async loadPolicyLists() {
+            try {
+                const [templates, profiles] = await Promise.all([
+                    axios.get(generateUrl('/apps/teamhub/api/v1/admin/policy/templates')),
+                    axios.get(generateUrl('/apps/teamhub/api/v1/admin/policy/profiles')),
+                ])
+                const t = templates?.data
+                const p = profiles?.data
+                this.policyTemplatesLoaded = Array.isArray(t?.templates) ? t.templates : (Array.isArray(t) ? t : [])
+                this.policyProfilesLoaded  = Array.isArray(p?.profiles) ? p.profiles : (Array.isArray(p) ? p : [])
+            } catch (e) {
+                // Every picker that reads these falls back to its stated
+                // default, which is the value the server uses for an empty
+                // key anyway — so an empty list costs the label, not the
+                // behaviour.
+                this.policyTemplatesLoaded = []
+                this.policyProfilesLoaded = []
+            }
+        },
+
         /**
          * v4.6.2 — Compliance-tab autosave for the audit retention period.
          *
@@ -5051,6 +5864,20 @@ export default {
             params.set('openProjectModuleEnabled', this.form.openProjectModuleEnabled ? '1' : '0')
             params.set('serviceTeamsModuleEnabled', this.form.serviceTeamsModuleEnabled ? '1' : '0')
             params.set('expiryWarningDays',      String(this.form.expiryWarningDays ?? 7))
+            // v4.11.32 — IdP teams. Backends go as the comma list the
+            // service parses; every other value is validated server-side.
+            params.set('idpTeamsMode',           this.form.idpTeamsMode)
+            params.set('idpTeamsBackends',       (this.form.idpTeamsBackends || []).join(','))
+            params.set('idpTeamsLdapOu',         this.form.idpTeamsLdapOu)
+            params.set('idpTeamsPattern',        this.form.idpTeamsPattern)
+            params.set('idpTeamsTemplate',       this.form.idpTeamsTemplate)
+            params.set('idpTeamsProfile',        this.form.idpTeamsProfile)
+            params.set('idpTeamsServiceAccount', this.form.idpTeamsServiceAccount)
+            params.set('idpTeamsOnGroupGone',    this.form.idpTeamsOnGroupGone)
+            // v4.11.34 — teams made outside TeamHub.
+            params.set('teamAdoptionMode',       this.form.teamAdoptionMode)
+            params.set('teamAdoptionTemplate',   this.form.teamAdoptionTemplate)
+            params.set('teamAdoptionProfile',    this.form.teamAdoptionProfile)
             // Only send the token if the user actually typed something —
             // an empty buffer means "keep the stored value unchanged" per
             // backend contract (see TeamService::saveAdminSettings).
@@ -6714,21 +7541,40 @@ export default {
                 const { data } = await axios.get(generateUrl('/apps/teamhub/api/v1/admin/audit/teams'))
                 this.auditTeams = Array.isArray(data.teams) ? data.teams : []
                 this.auditActivityMissing = !!data.activity_missing
+                // v4.11.39 — how many events are about the installation rather
+                // than one team. Zero hides the option: an instance with no
+                // such rows should not be offered a filter that finds nothing.
+                this.auditInstanceCount = Number(data.instance_scope?.event_count || 0)
+                this.auditInstanceScopeId = String(data.instance_scope?.team_id || '_instance')
             } catch (e) {
                 this.auditTeamsError = e?.response?.data?.error || this.t('teamhub', 'Failed to load teams')
                 this.auditTeams = []
             } finally {
                 this.auditTeamsLoading = false
             }
+            // The teams are only the dropdown's vocabulary; the page itself
+            // opens on every team, so the rows are loaded either way.
+            this.loadAuditEvents()
         },
 
         onAuditTeamChanged() {
             this.auditEventsPage = 1
-            this.auditEvents = []
-            this.auditEventsTotal = 0
-            if (this.auditSelectedTeamId) {
-                this.loadAuditEvents()
+            this.loadAuditEvents()
+        },
+
+        /**
+         * What the Team column shows for one row (v4.11.39). The server
+         * resolves a display name where there is a circle; the instance
+         * sentinel gets the same phrase as its dropdown option, and a team
+         * that has since been hard-deleted falls back to its id so the row
+         * is still identifiable.
+         */
+        auditRowTeamLabel(ev) {
+            const teamId = String(ev?.team_id || '')
+            if (teamId === this.auditInstanceScopeId) {
+                return this.t('teamhub', 'Not about one team')
             }
+            return ev?.team_name || teamId || '—'
         },
 
         resetAndLoadAuditEvents() {
@@ -6742,14 +7588,23 @@ export default {
             this.loadAuditEvents()
         },
 
+        /**
+         * v4.11.39 — one endpoint for both views. The team is a query
+         * parameter rather than a path segment, so an empty one means every
+         * team and no code path is conditional on having picked one; before
+         * this the only read was per-team, which is why nothing ever showed
+         * the instance-scoped rows.
+         */
         async loadAuditEvents() {
-            if (!this.auditSelectedTeamId) return
             this.auditEventsLoading = true
             this.auditEventsError = null
             try {
                 const params = {
                     page: this.auditEventsPage,
                     perPage: this.auditEventsPerPage,
+                }
+                if (this.auditSelectedTeamId) {
+                    params.teamId = this.auditSelectedTeamId
                 }
                 if (this.auditEventTypeFilter) {
                     params.eventTypes = this.auditEventTypeFilter
@@ -6760,10 +7615,10 @@ export default {
                 if (this.auditToDate) {
                     params.to = Math.floor(new Date(this.auditToDate + 'T23:59:59').getTime() / 1000)
                 }
-                const url = generateUrl(
-                    `/apps/teamhub/api/v1/admin/audit/teams/${encodeURIComponent(this.auditSelectedTeamId)}/events`
+                const { data } = await axios.get(
+                    generateUrl('/apps/teamhub/api/v1/admin/audit/events'),
+                    { params },
                 )
-                const { data } = await axios.get(url, { params })
                 this.auditEvents = Array.isArray(data.rows) ? data.rows : []
                 this.auditEventsTotal = data.total || 0
             } catch (e) {
@@ -6776,7 +7631,9 @@ export default {
         },
 
         async exportAuditTeam() {
-            if (!this.auditSelectedTeamId) return
+            // The computed, not the raw selection: the instance scope is not
+            // a team and has nothing to export (v4.11.39).
+            if (!this.auditExportableTeam) return
             this.auditExporting = true
             try {
                 const url = generateUrl(
@@ -8139,6 +8996,70 @@ a.maint-op-link__name:focus-visible {
     width: 96px;
 }
 
+/* ── The settings grid (v4.11.33) ──────────────────────────────────────
+   Justin's rule for this panel: a label and its control line up in two
+   columns, every row under the one above, and the explanation opens behind
+   an (i). The hint spans both columns, which is why it has to be a direct
+   child of the grid rather than live inside the label cell. */
+.admin-grid {
+    display: grid;
+    grid-template-columns: minmax(160px, max-content) minmax(0, 1fr);
+    gap: var(--th-space-md);
+    align-items: start;
+    max-width: 760px;
+}
+
+.admin-grid__label {
+    display: inline-flex;
+    align-items: center;
+    grid-column: 1;
+    /* Nudged down so the text sits on the control's own first line rather
+       than the top of its box. */
+    padding-block-start: var(--th-space-xs);
+    font-size: var(--th-font-body);
+}
+
+.admin-grid__control {
+    display: flex;
+    flex-direction: column;
+    gap: var(--th-space-xs);
+    grid-column: 2;
+    min-width: 0;
+}
+
+.admin-grid__hint {
+    grid-column: 1 / -1;
+    margin: 0;
+    padding: var(--th-space-sm) var(--th-space-md);
+    border-radius: var(--th-radius-card);
+    background: var(--color-background-hover);
+    font-size: var(--th-font-meta);
+    color: var(--color-main-text);
+}
+
+/* On a narrow panel the two columns stop being two columns. */
+@media (max-width: 680px) {
+    .admin-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .admin-grid__label,
+    .admin-grid__control,
+    .admin-grid__hint {
+        grid-column: 1;
+    }
+}
+
+/* ── IdP teams (v4.11.32, DESIGN §2.166) ────────────────────────────
+   v4.11.33 — `.admin-idp__field`, `__select` and `__text` were retired with
+   the section's own layout: every control is a row of `.admin-grid` now, so
+   the width and the stacking come from the grid. */
+.admin-idp__checks {
+    display: flex;
+    flex-direction: column;
+    gap: var(--th-space-xs);
+}
+
 /* ── Membership integrity ─────────────────────────────────────────── */
 .maint-divider {
     height: 1px;
@@ -8384,6 +9305,15 @@ a.maint-op-link__name:focus-visible {
     white-space: nowrap;
     color: var(--color-text-maxcontrast);
     font-variant-numeric: tabular-nums;
+}
+
+/* v4.11.39 — only present in the all-teams view. */
+.audit-table__team {
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--color-text-maxcontrast);
 }
 
 .audit-table__event {

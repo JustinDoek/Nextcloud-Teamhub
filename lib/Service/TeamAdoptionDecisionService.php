@@ -53,6 +53,17 @@ class TeamAdoptionDecisionService {
     public const DEFAULT_TEMPLATE = 'collaboration';
 
     /**
+     * The policy profile an **automatically** accepted team gets when the
+     * administrator has not chosen one (v4.11.35).
+     *
+     * Not `defaultProfileForTemplate()`, which is what the grid falls back to
+     * for a team a person is deciding: that answers null on any instance
+     * whose templates carry no `default_profile_key`, and an automatic
+     * acceptance has nobody to notice that the team came out unclassified.
+     */
+    public const DEFAULT_PROFILE = 'internal';
+
+    /**
      * Templates the grid does not offer: `openproject` needs the provisioning
      * wizard (a workspace in another system), `service` is made in the
      * creation wizard where the Nextcloud services are claimed.
@@ -189,7 +200,19 @@ class TeamAdoptionDecisionService {
 
         // The actor recorded on the team's own facts: the decider, or the
         // owner when TeamHub accepted it by itself.
+        //
+        // v4.11.35 — and `ACTOR_SYSTEM` when there is neither, which is
+        // every automatic acceptance of a SCIM team: Circles makes
+        // `app:circles` its owner, so `ownerUid` is empty and the decider is
+        // empty because nobody decided. An empty actor made
+        // `assignAtCreation()` return at its no-session guard, so the team
+        // arrived with a template and **no policy at all** (found on the
+        // test instance, 2026-10-06). The classification is TeamHub's own
+        // act here, and the row now says so.
         $actor = $deciderUid !== '' ? $deciderUid : (string)$current['ownerUid'];
+        if ($actor === '') {
+            $actor = PolicyService::ACTOR_SYSTEM;
+        }
 
         $this->registry->registerAdopted($teamId, (string)$current['ownerUid']);
         $this->teamTypes->upsert($teamId, $template, $actor);

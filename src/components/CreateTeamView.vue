@@ -1460,7 +1460,6 @@ export default {
         // overrides them: template proposes, profile constrains.
         await this.loadPolicyContext()
         this.applyPolicyToForm()
-        await this.loadWizardDescription()
         await this.loadLicenseEntitlements()
         await this.loadBulkEntitlement()
         await this.loadOpenProjectCapabilities()
@@ -1536,6 +1535,13 @@ export default {
             try {
                 const { data } = await axios.get(generateUrl('/apps/teamhub/api/v1/templates'))
                 this.templates = data.templates || []
+                // v4.11.33 — the dialog's own two render values ride along
+                // here. They used to come from `/api/v1/admin/settings`,
+                // which is NC-admin gated, so for everybody else the request
+                // 403'd and the description an administrator had written was
+                // silently replaced by the template's built-in subtitle.
+                this.wizardDescription = data.wizardDescription || ''
+                this.expiryDefaultDate = data.expiryDefaultDate || ''
             } catch (e) {
                 this.templates = []
             }
@@ -2388,19 +2394,13 @@ export default {
             }
         },
 
-        async loadWizardDescription() {
-            try {
-                const { data } = await axios.get(generateUrl('/apps/teamhub/api/v1/admin/settings'))
-                this.wizardDescription = data.wizardDescription || ''
-                // v4.6.13 — same fetch, so the expiry picker's default costs no
-                // extra request. Empty falls back to a local calculation in
-                // onExpiryFocus().
-                this.expiryDefaultDate = data.expiryDefaultDate || ''
-            } catch {
-                this.wizardDescription = ''
-                this.expiryDefaultDate = ''
-            }
-        },
+        // v4.11.33 — `loadWizardDescription()` was here. It fetched
+        // `/api/v1/admin/settings`, which requires a Nextcloud administrator,
+        // so the description and the expiry picker's default date reached
+        // administrators only and everybody else got a 403. Both values now
+        // ride along with `loadTemplates()`, whose endpoint is non-admin by
+        // design. One request fewer, and the setting finally reaches the
+        // people it was written for.
 
         /**
          * v3.100.1 — Check whether the instance's TeamHub Business

@@ -6,6 +6,7 @@ namespace OCA\TeamHub\Service;
 use OCA\TeamHub\AppInfo\Application;
 use OCA\TeamHub\Db\AuditLogMapper;
 use OCA\TeamHub\Exception\AppNotAvailableException;
+use OCA\TeamHub\Util\CalendarBlob;
 use OCA\TeamHub\Util\IcalText;
 use OCP\App\IAppManager;
 use OCP\IUserManager;
@@ -610,7 +611,7 @@ class ActivityService {
 
                 while ($row = $evResult->fetch()) {
                     try {
-                        $vcalendar = \Sabre\VObject\Reader::read($row['calendardata']);
+                        $vcalendar = \Sabre\VObject\Reader::read(CalendarBlob::read($row['calendardata']));
                         if (!isset($vcalendar->VEVENT)) {
                             continue;
                         }
@@ -1373,7 +1374,7 @@ class ActivityService {
 
                 while ($row = $evRes->fetch()) {
                     try {
-                        $vcalendar = \Sabre\VObject\Reader::read($row['calendardata']);
+                        $vcalendar = \Sabre\VObject\Reader::read(CalendarBlob::read($row['calendardata']));
                         if (!isset($vcalendar->VEVENT)) {
                             continue;
                         }

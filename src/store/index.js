@@ -50,6 +50,18 @@ export default createStore({
         teamGroupAssignments: {},
         currentTeamId: null,
         currentView: 'msgstream',
+        // v4.11.7 — which pane the Services tab opens on: 'services' (the
+        // team's own services and the builder) or 'requests' (the desk's
+        // whole request history). Set before SET_VIEW by whatever navigates
+        // there; cleared by SET_VIEW on leaving the tab.
+        servicesTabPane: 'services',
+        // v4.11.12 — a request the Services tab's request grid should open as
+        // soon as it mounts. Set with the pane by whatever sends a service
+        // worker there — the queue widget's *Process* — so opening a request
+        // from the team's home lands in the grid with that request open and a
+        // way back to it. One-shot: the grid clears it when it has read it,
+        // and SET_VIEW clears it on leaving the tab like the pane itself.
+        servicesTabRequestId: null,
         // When set, the files view embeds this specific file URL instead of the
         // team folder. Set by file widgets (shared/favourites/recent) so files
         // open inside TeamHub's iframe rather than a new browser tab. Cleared
@@ -109,6 +121,15 @@ export default createStore({
         decisionsConfig: { decisions_enabled: false, decisions_level_enabled: false, decisions_action_min_level: 1 },
         decisionsModuleEnabled: false,
         decisionsTargetMessageId: null, // set by widget/stream to highlight a decision in the tab
+        // v4.11.42 — { body, nonce } | null. Set when something outside the
+        // team view wants the proposal composer opened with its Context field
+        // already filled: today the *Propose a decision* entry in the Files ⋯
+        // menu, which deep-links to ?team=…&propose=1&file=… and arrives with
+        // a markdown link to the file. TeamView opens ComposeDecisionModal on
+        // it and clears it. The nonce is there for the same reason
+        // SET_MANAGE_TEAM_DEEP_LINK carries one: proposing about the same file
+        // twice in a row has to re-trigger the watcher.
+        decisionsComposePrefill: null,
         // v4.5.26 — { messageId, nonce } | null. Set when something outside the
         // stream wants a specific message brought into view (the Open button in
         // "What's new"). MessageStream loads the page it lives on and
@@ -554,6 +575,13 @@ export default createStore({
             if (view !== 'deck') {
                 state.deckEmbedCardUrl = null
             }
+            // v4.11.7 — the Services tab has two panes (the team's services,
+            // and the desk's request grid). Leaving the tab returns it to its
+            // own default, the same clear-on-leave as the deep-links above.
+            if (view !== 'services') {
+                state.servicesTabPane = 'services'
+                state.servicesTabRequestId = null
+            }
             // Landing on Home is the signal to refresh home-view widgets. Also
             // covers picking a team, since selectTeam commits this with
             // 'msgstream'; widgets key off (teamId, nonce) together so that
@@ -562,6 +590,12 @@ export default createStore({
                 state.widgetRefreshNonce++
             }
             state.currentView = view
+        },
+        SET_SERVICES_TAB_PANE(state, pane) { state.servicesTabPane = pane === 'requests' ? 'requests' : 'services' },
+        /** v4.11.12 — see `servicesTabRequestId`. A number, or null to clear. */
+        SET_SERVICES_TAB_REQUEST(state, id) {
+            const numeric = Number(id)
+            state.servicesTabRequestId = Number.isSafeInteger(numeric) && numeric > 0 ? numeric : null
         },
         SET_FILES_EMBED_FILE_URL(state, url) { state.filesEmbedFileUrl = url },
         SET_CALENDAR_EMBED_EVENT(state, ev) { state.calendarEmbedEvent = ev },
@@ -782,6 +816,18 @@ export default createStore({
         },
         SET_DECISIONS_MODULE_ENABLED(state, val) { state.decisionsModuleEnabled = val },
         SET_DECISIONS_TARGET(state, messageId) { state.decisionsTargetMessageId = messageId },
+        /**
+         * v4.11.42 — open the proposal composer with this Context body.
+         *
+         * Payload is the markdown to seed the field with, or null to clear
+         * (which is what TeamView does once it has consumed it, so a later
+         * team switch does not reopen the modal).
+         */
+        SET_DECISIONS_COMPOSE_PREFILL(state, body) {
+            state.decisionsComposePrefill = body
+                ? { body, nonce: Date.now() }
+                : null
+        },
 
         /**
          * v4.5.26 — the message a deep link wants brought into view.

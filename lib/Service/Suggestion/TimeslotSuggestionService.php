@@ -7,6 +7,7 @@ namespace OCA\TeamHub\Service\Suggestion;
 use OCA\TeamHub\AppInfo\Application;
 use OCA\TeamHub\Service\MemberService;
 use OCA\TeamHub\Service\TimezoneService;
+use OCA\TeamHub\Util\CalendarBlob;
 use OCP\IConfig;
 use OCP\IDBConnection;
 use OCP\DB\QueryBuilder\IQueryBuilder;
@@ -390,7 +391,7 @@ class TimeslotSuggestionService {
             $intervals = [];
             while ($row = $res->fetch()) {
                 try {
-                    $vcalendar = \Sabre\VObject\Reader::read($row['calendardata']);
+                    $vcalendar = \Sabre\VObject\Reader::read(CalendarBlob::read($row['calendardata']));
                     if (!isset($vcalendar->VEVENT)) {
                         continue;
                     }

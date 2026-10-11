@@ -1,7 +1,13 @@
 <template>
 	<div class="svc-cat">
+		<!-- v4.11.12 — a request opened from the catalog takes the whole page,
+		     with *Back to catalog* (Justin, 2026-09-30). The requester's own
+		     requests live in the aside; opening one there is not a glance at a
+		     card, it is reading where their request stands and taking the step
+		     that is theirs, so the catalogue steps aside for it.
+		     `MyRequestsWidget` draws the request itself and says so here. -->
 		<!-- ── Header ───────────────────────────────────────────────────── -->
-		<header class="svc-cat__head">
+		<header v-if="!requestOpen" class="svc-cat__head">
 			<div>
 				<!-- v4.10.44 — "Service catalog" (was "Services"; Justin, 2026-09-25):
 				     a team's own Services tab is where a team builds them. -->
@@ -24,6 +30,70 @@
 			</NcButton>
 		</header>
 
+		<!-- v4.11.7 — the catalogue on the left, the requester's own requests
+		     on the right (Justin, 2026-09-30). The aside renders whatever the
+		     catalogue does: somebody with no service left to request still has
+		     requests to follow. -->
+		<div class="svc-cat__layout" :class="{ 'svc-cat__layout--request': requestOpen }">
+		<!-- v4.11.13 — the pills sit in a row of their own above the two
+		     columns, so *My requests* starts level with the first service card
+		     instead of with the filters (Justin, 2026-10-01). A grid row rather
+		     than an offset on the aside: the pills wrap at narrow widths and the
+		     row grows with them, which a margin would not. -->
+		<template v-if="!requestOpen">
+		<div v-if="entries.length" class="svc-cat__pills">
+			<!-- ── Categories ───────────────────────────────────────────
+			     A tile per category that has something in it, counted for
+			     this viewer. A category nothing is in is not shown: a tile
+			     reading "Apps and tools - 0" advertises what this server
+			     does not have. -->
+			<!-- v4.11.8 — the pills of What's new: one shape for a filter that
+			     carries an icon, a name and a number (Justin, 2026-09-30). -->
+			<div class="svc-cat__filters" role="group" :aria-label="t('teamhub', 'Filter the services by category')">
+				<TogglePill
+					:label="t('teamhub', 'All services')"
+					:count="entries.length"
+					:pressed="activeCategory === ALL_CATEGORIES"
+					@click="activeCategory = ALL_CATEGORIES" />
+
+				<TogglePill
+					v-for="tile in tiles"
+					:key="tile.id"
+					:label="tile.label"
+					:count="tile.count"
+					:pressed="activeCategory === tile.id"
+					@click="activeCategory = tile.id">
+					<template #icon>
+						<ServiceIcon :name="tile.icon" :size="ICON_INLINE" />
+					</template>
+				</TogglePill>
+			</div>
+
+			<!-- ── The two readings of one list ─────────────────────────
+			     A–Z is the requester who knows what they need; by team is
+			     the requester who knows which desk they deal with. One
+			     payload, a client-side toggle. -->
+			<!-- The same pill: this row sits directly under the categories and
+			     is the same kind of control, so it reads as one family. It
+			     carries no number — the pill's is optional. -->
+			<div class="svc-cat__views" role="group" :aria-label="t('teamhub', 'How the services are ordered')">
+				<TogglePill
+					:label="t('teamhub', 'A to Z')"
+					:pressed="view === CATALOGUE_VIEW.ALPHABETICAL"
+					@click="view = CATALOGUE_VIEW.ALPHABETICAL">
+					<template #icon><SortAlphabeticalVariant :size="ICON_INLINE" /></template>
+				</TogglePill>
+				<TogglePill
+					:label="t('teamhub', 'By team')"
+					:pressed="view === CATALOGUE_VIEW.BY_TEAM"
+					@click="view = CATALOGUE_VIEW.BY_TEAM">
+					<template #icon><AccountGroupOutline :size="ICON_INLINE" /></template>
+				</TogglePill>
+			</div>
+		</div>
+
+		<div class="svc-cat__main">
+
 		<!-- Nothing to start is not an error: an instance without a service
 		     team, or one whose licence has lapsed, has no catalogue and the
 		     navigation entry is absent. This page is still reachable by a
@@ -41,55 +111,6 @@
 		</div>
 
 		<template v-else>
-			<!-- ── Categories ───────────────────────────────────────────
-			     A tile per category that has something in it, counted for
-			     this viewer. A category nothing is in is not shown: a tile
-			     reading "Apps and tools - 0" advertises what this server
-			     does not have. -->
-			<div class="svc-cat__filters" role="group" :aria-label="t('teamhub', 'Filter the services by category')">
-				<NcButton
-					variant="secondary"
-					:pressed="activeCategory === ALL_CATEGORIES"
-					@click="activeCategory = ALL_CATEGORIES">
-					{{ t('teamhub', 'All services') }}
-					<NcCounterBubble class="svc-cat__count" :count="entries.length" />
-				</NcButton>
-
-				<NcButton
-					v-for="tile in tiles"
-					:key="tile.id"
-					variant="secondary"
-					:pressed="activeCategory === tile.id"
-					@click="activeCategory = tile.id">
-					<template #icon>
-						<ServiceIcon :name="tile.icon" :size="ICON_BODY" />
-					</template>
-					{{ tile.label }}
-					<NcCounterBubble class="svc-cat__count" :count="tile.count" />
-				</NcButton>
-			</div>
-
-			<!-- ── The two readings of one list ─────────────────────────
-			     A–Z is the requester who knows what they need; by team is
-			     the requester who knows which desk they deal with. One
-			     payload, a client-side toggle. -->
-			<div class="svc-cat__views" role="group" :aria-label="t('teamhub', 'How the services are ordered')">
-				<NcButton
-					variant="tertiary"
-					:pressed="view === CATALOGUE_VIEW.ALPHABETICAL"
-					@click="view = CATALOGUE_VIEW.ALPHABETICAL">
-					<template #icon><SortAlphabeticalVariant :size="ICON_BODY" /></template>
-					{{ t('teamhub', 'A to Z') }}
-				</NcButton>
-				<NcButton
-					variant="tertiary"
-					:pressed="view === CATALOGUE_VIEW.BY_TEAM"
-					@click="view = CATALOGUE_VIEW.BY_TEAM">
-					<template #icon><AccountGroupOutline :size="ICON_BODY" /></template>
-					{{ t('teamhub', 'By team') }}
-				</NcButton>
-			</div>
-
 			<p v-if="!visible.length" class="svc-cat__empty">
 				{{ t('teamhub', 'No service in this category.') }}
 			</p>
@@ -154,10 +175,18 @@
 			</template>
 		</template>
 
+		</div>
+		</template>
+
+		<aside class="svc-cat__aside" :class="{ 'svc-cat__aside--request': requestOpen }">
+			<MyRequestsWidget @detail="requestOpen = $event" />
+		</aside>
+		</div>
+
 		<!-- v4.10.45 — where to go when the catalog does not have it: the
 		     service desk and the knowledge portal an administrator set on
 		     Settings → TeamHub → Services. Absent when neither is set. -->
-		<footer v-if="links.serviceDesk || links.knowledgePortal" class="svc-cat__links">
+		<footer v-if="!requestOpen && (links.serviceDesk || links.knowledgePortal)" class="svc-cat__links">
 			<p class="svc-cat__links-text">{{ t('teamhub', 'Not finding what you need?') }}</p>
 			<div class="svc-cat__links-actions">
 				<NcButton
@@ -230,6 +259,8 @@ import Refresh from 'vue-material-design-icons/Refresh.vue'
 import SortAlphabeticalVariant from 'vue-material-design-icons/SortAlphabeticalVariant.vue'
 
 import ExpiryRequestDialog from './services/ExpiryRequestDialog.vue'
+import MyRequestsWidget from './services/MyRequestsWidget.vue'
+import TogglePill from './TogglePill.vue'
 import QuotaRequestDialog from './services/QuotaRequestDialog.vue'
 import ServiceIcon from './services/ServiceIcon.vue'
 import ServiceRequestDialog from './services/ServiceRequestDialog.vue'
@@ -268,7 +299,7 @@ export default {
 
 	components: {
 		NcButton, NcCounterBubble, NcEmptyContent, NcLoadingIcon,
-		ExpiryRequestDialog, QuotaRequestDialog, ServiceIcon, ServiceRequestDialog,
+		ExpiryRequestDialog, MyRequestsWidget, QuotaRequestDialog, ServiceIcon, ServiceRequestDialog, TogglePill,
 		// v4.10.45 — the card and tile glyphs are ServiceIcon's, by name.
 		AccountGroupOutline, BookOpenOutline, ClockOutline, LifebuoyIcon,
 		Refresh, SortAlphabeticalVariant,
@@ -288,6 +319,12 @@ export default {
 			loading: false,
 			/** The catalogue entry whose form is open, or null. */
 			chosen: null,
+			/**
+			 * v4.11.12 — one of the viewer's own requests has the page.
+			 * `MyRequestsWidget` owns the request and says when it does; this
+			 * page's job is to step out of the way while it is open.
+			 */
+			requestOpen: false,
 			requestError: '',
 			/** v4.10.29 — the quota card's teams, read when its form opens; null while loading. */
 			quotaTeams: null,
@@ -520,6 +557,83 @@ export default {
 	flex-direction: column;
 	gap: var(--th-space-lg, 16px);
 	padding: var(--th-space-lg, 16px);
+	/* v4.11.10 — the same canvas as My Work, What's new and a team page
+	   (v4.5.27): the service cards and the My requests panel are
+	   --color-main-background with a border, so on a white page the borders
+	   were carrying the whole layout. On grey they read as cards, and the
+	   pages in the sidebar look like one product.
+	   No own scroll box — NcAppContent is the scroller. */
+	min-height: 100%;
+	box-sizing: border-box;
+	background: var(--color-background-dark);
+}
+
+/* v4.11.7 — the catalogue and the requester's own requests, side by side.
+   The aside keeps a readable width and the catalogue takes the rest; below
+   the breakpoint they stack, the requests last, because the page's job is
+   still to start one.
+   v4.11.13 — a grid of two rows: the pills across the catalogue column only,
+   then the services beside the requests. The second row is what lines the
+   aside up with the first service card. */
+.svc-cat__layout {
+	--svc-aside-width: 320px;
+
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) var(--svc-aside-width);
+	grid-template-areas:
+		"pills ."
+		"main  aside";
+	align-items: start;
+	gap: var(--th-space-lg, 16px);
+}
+
+.svc-cat__pills {
+	grid-area: pills;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	gap: var(--th-space-lg, 16px);
+}
+
+.svc-cat__main {
+	grid-area: main;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	gap: var(--th-space-lg, 16px);
+}
+
+.svc-cat__aside {
+	grid-area: aside;
+	min-width: 0;
+	position: sticky;
+	inset-block-start: var(--th-space-lg, 16px);
+}
+
+/* v4.11.12 — while a request has the page there is one column, and the aside
+   is that column: no sticky 320px rail, no gap beside an empty main. */
+.svc-cat__layout--request {
+	display: block;
+}
+
+.svc-cat__aside--request {
+	inline-size: 100%;
+	position: static;
+}
+
+@media (max-width: 1024px) {
+	.svc-cat__layout {
+		grid-template-columns: minmax(0, 1fr);
+		grid-template-areas:
+			"pills"
+			"main"
+			"aside";
+	}
+
+	.svc-cat__aside {
+		inline-size: 100%;
+		position: static;
+	}
 }
 
 .svc-cat__head {
@@ -580,10 +694,6 @@ export default {
 	display: flex;
 	flex-wrap: wrap;
 	gap: var(--th-space-sm, 8px);
-}
-
-.svc-cat__count {
-	margin-inline-start: var(--th-space-xs, 4px);
 }
 
 .svc-cat__empty {

@@ -41,6 +41,63 @@ class DecisionAuditService {
         // to DecisionService without being added here writes nothing and
         // nobody finds out. Both of these were doing exactly that.
         'proposal_updated', 'shared_for_discussion',
+        // v4.11.18 — the review and retirement cycle. Justin: every step of
+        // a review goes into the audit stream, so all six are here and each
+        // is written by exactly one place in `DecisionReviewService`:
+        //   review_requested — a member asked, with their motivation
+        //   review_due       — the period fell due; the approvers were told
+        //   review_kept      — a reviewer let the decision stand
+        //   review_archived  — a reviewer retired it
+        //   superseded       — a newer decision took over, naming it
+        //   archived         — the row moved into the archive category
+        // `archived` is written alongside `review_archived` or `superseded`
+        // rather than instead of them: the first says what happened to the
+        // record, the second says why, and a reader of the stream wants both.
+        'review_requested', 'review_due', 'review_kept', 'review_archived',
+        'superseded', 'archived',
+        // v4.11.24 — a requested review is a request, so it is answered
+        // `denied` or `accepted` rather than kept or archived:
+        //   review_denied   — the decision stands as it is
+        //   review_accepted — the decision is to be altered, and
+        //   revised         — what that did to the record: the wording was
+        //                     rewritten in place, with the previous text in
+        //                     the payload. Two lines, like `superseded` and
+        //                     `archived`: one says why, one says what.
+        //
+        // v4.11.26 — `reopened` is **not** in this list and must not come
+        // back. It was the 4.11.24 pairing for `review_accepted`, when
+        // accepting sent the decision to `open` to be redrafted; that handed
+        // an approved decision back to a lifecycle whose `denied` is
+        // terminal, and a review that can destroy the decision it was asked
+        // about is the bug this version fixes. Rows written by 4.11.24 keep
+        // their `reopened` line — the panel still renders the label — but
+        // nothing writes another one, and `log()` would now drop it.
+        'review_denied', 'review_accepted', 'revised',
+        // v4.11.31 — `supersedes` is the *other* half of a supersede, and
+        // the half that was missing. `superseded` is written against the
+        // decision that stops governing; this one is written against the
+        // decision that takes over, so the arc is readable from either end.
+        // Justin, 2026-10-06: *when we supersede a decision this is visible
+        // on the superseded decision, but not on the decision that
+        // supersedes it.*
+        //
+        // Two rows for one act, like `superseded` and `archived` — but these
+        // two sit on *different decisions*, which is the point: an audit
+        // trail is per decision, and a reader of the newer one was being
+        // told nothing at all.
+        'supersedes',
+        // v4.11.31 — publishing. These two have been *written* since
+        // v4.11.12 and dropped on the floor ever since: `setPublic()` calls
+        // `log()` with them and `log()` silently discards a transition that
+        // is not in this list. Exactly the failure the v4.5.42 note above
+        // describes, which is why that note is there.
+        'published', 'unpublished',
+        // v4.11.30 — a decision filed under the wrong category, moved into
+        // the right one by an approver of the one it was in. The payload
+        // carries `from` and `to`, because "moved" without them cannot
+        // answer the question it invites, and `category` on the row now
+        // holds only the second of the two.
+        'category_moved',
     ];
 
     private const MAX_COMMENT_EXCERPT_LEN = 200;
