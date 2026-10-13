@@ -133,14 +133,25 @@ class TeamSpaceAdminWorkProvider implements IWorkProvider {
      * Available exactly when Nextcloud has a team-folder provider. On 33/34
      * the question the rows answer does not exist, and an empty queue would
      * read as "nothing to do" — rule 3 of the contract.
+     *
+     * v4.12.12 — and unavailable, with its own reason, while the conversion is
+     * halted (DESIGN §2.184). Every row this source has carries conversion
+     * work — a conflict to decide, a shared folder to move, a report of what a
+     * pass removed; the quota request left in v4.10.29 — so there is nothing
+     * here for an administrator to do while nothing is converting. Rule 3
+     * again: say why rather than show an empty queue.
      */
     public function isAvailable(): bool {
-        if ($this->teamSpaceService->isAvailable()) {
-            $this->unavailableReason = null;
-            return true;
+        if (!$this->teamSpaceService->isAvailable()) {
+            $this->unavailableReason = $this->l->t('Team spaces need Nextcloud 35 with the Team folders app.');
+            return false;
         }
-        $this->unavailableReason = $this->l->t('Team spaces need Nextcloud 35 with the Team folders app.');
-        return false;
+        if (!$this->teamSpaceService->isConversionEnabled()) {
+            $this->unavailableReason = $this->l->t('Converting team folders to team spaces is paused in this version.');
+            return false;
+        }
+        $this->unavailableReason = null;
+        return true;
     }
 
     public function getUnavailableReason(): ?string {
@@ -160,7 +171,7 @@ class TeamSpaceAdminWorkProvider implements IWorkProvider {
     // ---------------------------------------------------------------------
 
     public function fetchItems(WorkQuery $query): WorkItemPage {
-        if (!$this->isNcAdmin($query->userId) || !$this->teamSpaceService->isAvailable()) {
+        if (!$this->isNcAdmin($query->userId) || !$this->teamSpaceService->isConversionEnabled()) {
             return WorkItemPage::empty();
         }
         $items     = [];
@@ -216,7 +227,7 @@ class TeamSpaceAdminWorkProvider implements IWorkProvider {
 
     /** `$allowedTeamIds` unused on purpose — the boundary is administrator-or-not. */
     public function getItem(string $userId, string $itemId, array $allowedTeamIds): ?WorkItem {
-        if (!$this->isNcAdmin($userId) || !$this->teamSpaceService->isAvailable()) {
+        if (!$this->isNcAdmin($userId) || !$this->teamSpaceService->isConversionEnabled()) {
             return null;
         }
         $parts = explode(':', $itemId, 2);

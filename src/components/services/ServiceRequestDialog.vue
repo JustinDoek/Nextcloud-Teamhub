@@ -60,6 +60,19 @@
 				maxlength="255"
 				:disabled="busy" />
 
+			<!-- v4.12.4 — the new-team card asks for the shape of the team as
+			     well, with the same component as the sidebar's *Request team*
+			     dialog: the template and the profile are the two answers the
+			     desk needs before it can open the create-team wizard, and a
+			     service asked for in two places must ask the same thing in
+			     both. Every other service in the catalogue is unaffected. -->
+			<TeamShapeFields
+				v-if="isNewTeam"
+				id-prefix="svc-request"
+				:disabled="busy"
+				@update:template-key="templateKey = $event"
+				@update:profile-key="profileKey = $event" />
+
 			<label class="svc-request__field">
 				<span>{{ isNewTeam ? t('teamhub', 'What is the team for?') : t('teamhub', 'Describe what you need') }}</span>
 				<NcTextArea
@@ -125,6 +138,7 @@ import { NcButton, NcLoadingIcon, NcModal, NcNoteCard, NcSelect, NcTextArea, NcT
 import LifebuoyIcon from 'vue-material-design-icons/Lifebuoy.vue'
 import FileAttachField from '../mywork/FileAttachField.vue'
 import WorkflowStepLinks from '../mywork/WorkflowStepLinks.vue'
+import TeamShapeFields from './TeamShapeFields.vue'
 import { fileSharingOf, ownOpenTasks, shareNote, stepLinks } from '../../constants/workflows.js'
 import { SERVICE } from '../../constants/serviceTeams.js'
 import { ICON_BODY, ICON_INLINE } from '../../constants/uiTokens.js'
@@ -153,6 +167,7 @@ export default {
 		LifebuoyIcon,
 		FileAttachField,
 		WorkflowStepLinks,
+		TeamShapeFields,
 	},
 
 	props: {
@@ -182,6 +197,9 @@ export default {
 			details: '',
 			/** v4.10.38 — `[{ fileId, name }]` from the paperclip. */
 			files: [],
+			// v4.12.4 — the new-team card only; TeamShapeFields reports them.
+			templateKey: '',
+			profileKey: '',
 		}
 	},
 
@@ -238,6 +256,10 @@ export default {
 				summary: this.summary.trim(),
 				details: this.details.trim(),
 				fileIds: this.fileSettings.allowed ? this.files.map(f => f.fileId) : [],
+				// v4.12.4 — only the new-team request has a shape to ask for;
+				// every other definition would drop these in validateStart()
+				// anyway, but sending them would still be a lie about the form.
+				...(this.isNewTeam ? { templateKey: this.templateKey, profileKey: this.profileKey } : {}),
 			})
 		},
 	},

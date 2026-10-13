@@ -419,8 +419,44 @@ class TeamExpiryService {
      */
     public function setExpiry(string $teamId, ?string $expiresOn): ?array {
         $this->requireNcAdmin();
-        $actor = $this->requireUid();
-        $now   = time();
+
+        return $this->setResolved($teamId, $expiresOn, $this->requireUid());
+    }
+
+    /**
+     * Set, change or clear the expiry of a **sub-team**, with no administrator
+     * gate (v4.12.9, DESIGN §2.183).
+     *
+     * **Trusts its caller**, as {@see extendByServiceTeam()} and
+     * {@see setAtCreation()} do, and for the same reason: the one caller is
+     * {@see \OCA\TeamHub\Service\SubTeamService::setExpiry()}, which has
+     * already required admin of the **governing** team and proven the sub-team
+     * is a child of it. A sub-team has no Manage team of its own, so the
+     * Nextcloud-admin route — Maintenance → pick a team — was the only way a
+     * date could be put on one; Justin decided on 2026-10-12 that the parent's
+     * administrators own that date, as they own the template and the policy.
+     *
+     * The accepted cost is the one §2.180 already names for the policy
+     * profile: a date a Nextcloud administrator set on a sub-team can be
+     * changed or cleared by the parent's admin.
+     *
+     * **Do not call this from a controller.** The authority is the caller's
+     * whole contribution; a second caller that forgets it is a team admin
+     * clearing the expiry of a main team.
+     *
+     * @param string|null $expiresOn 'YYYY-MM-DD', or null to clear.
+     */
+    public function setExpiryForSubTeam(string $subTeamId, ?string $expiresOn, string $actorUid): ?array {
+        return $this->setResolved($subTeamId, $expiresOn, $actorUid);
+    }
+
+    /**
+     * The body of {@see setExpiry()} with the actor decided.
+     *
+     * @param string|null $expiresOn 'YYYY-MM-DD', or null to clear.
+     */
+    private function setResolved(string $teamId, ?string $expiresOn, string $actor): ?array {
+        $now = time();
 
         if (!$this->isEligible($teamId)) {
             throw new ValidationException(

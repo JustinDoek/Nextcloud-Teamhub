@@ -501,6 +501,10 @@ return [
         ['name' => 'teamGroup#createGroup', 'url' => '/api/v1/team-groups',           'verb' => 'POST'],
         ['name' => 'teamGroup#updateGroup', 'url' => '/api/v1/team-groups/{groupId}', 'verb' => 'PUT'],
         ['name' => 'teamGroup#deleteGroup', 'url' => '/api/v1/team-groups/{groupId}', 'verb' => 'DELETE'],
+        // v4.12.2 - the sub-team chevron, remembered per reader. Under
+        // /team-groups because it is the same preference blob and the same
+        // service, not because it is a group.
+        ['name' => 'teamGroup#setTeamExpanded', 'url' => '/api/v1/team-groups/teams/{teamId}/expanded', 'verb' => 'PUT'],
         // Which group a team sits in is a property of the (team, user) pair,
         // so it lives under the team rather than beside the group list —
         // which also keeps it clear of the {groupId} slot above.
@@ -637,6 +641,25 @@ return [
         // Team template label (v4.0.2) — collaboration | project | department.
         // Written once by the create wizard; read by the Team info widget and
         // Browse Teams to render a template badge.
+        // ── Sub-teams (v4.12.2, DESIGN §2.175) ───────────────────────────
+        // Nested under the parent because the parent id IS the authority: a
+        // sub-team has no administration of its own, so every one of these
+        // starts by checking admin of {teamId} — and then that {subTeamId} is
+        // really a child of it, or the authority would reach any sub-team on
+        // the instance. Ship 1 was read + create; the rest is Ship 2 (v4.12.5).
+        //
+        // `candidates` is declared before the `{subTeamId}` routes on purpose:
+        // the router matches in order, so the reverse would read the literal
+        // word "candidates" as a sub-team id.
+        ['name' => 'subTeam#index',      'url' => '/api/v1/teams/{teamId}/sub-teams',            'verb' => 'GET'],
+        ['name' => 'subTeam#candidates', 'url' => '/api/v1/teams/{teamId}/sub-teams/candidates', 'verb' => 'GET'],
+        ['name' => 'subTeam#create',     'url' => '/api/v1/teams/{teamId}/sub-teams',            'verb' => 'POST'],
+        ['name' => 'subTeam#members',      'url' => '/api/v1/teams/{teamId}/sub-teams/{subTeamId}/members',          'verb' => 'GET'],
+        ['name' => 'subTeam#addMembers',   'url' => '/api/v1/teams/{teamId}/sub-teams/{subTeamId}/members',          'verb' => 'POST'],
+        ['name' => 'subTeam#removeMember', 'url' => '/api/v1/teams/{teamId}/sub-teams/{subTeamId}/members/{userId}', 'verb' => 'DELETE'],
+        ['name' => 'subTeam#update',       'url' => '/api/v1/teams/{teamId}/sub-teams/{subTeamId}',                  'verb' => 'PUT'],
+        ['name' => 'subTeam#destroy',      'url' => '/api/v1/teams/{teamId}/sub-teams/{subTeamId}',                  'verb' => 'DELETE'],
+
         ['name' => 'team#getTeamType',  'url' => '/api/v1/teams/{teamId}/type', 'verb' => 'GET'],
         ['name' => 'team#saveTeamType', 'url' => '/api/v1/teams/{teamId}/type', 'verb' => 'PUT'],
 

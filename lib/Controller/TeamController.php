@@ -121,7 +121,13 @@ class TeamController extends Controller {
     #[NoCSRFRequired]
     public function listTeams(): JSONResponse {
         try {
-            $teams = $this->teamService->getUserTeams();
+            // v4.12.2 — the sidebar's shape: the same teams, with each
+            // sub-team nested inside its parent. The *only* caller that gets
+            // the nested form; everything else keeps the flat
+            // `getUserTeams()`, because My Work and the two Files-app
+            // controllers scope themselves off it and nesting would quietly
+            // drop every sub-team out of their reach.
+            $teams = $this->teamService->getSidebarTeams();
             return new JSONResponse($teams);
         } catch (\Throwable $e) {
             $this->logger->error('Failed to list teams', [

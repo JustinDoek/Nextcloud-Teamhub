@@ -151,7 +151,37 @@ class ServiceTeamService {
         // archived before deletion (which retires the archiving service).
         private ServiceCategoryService    $categories,
         private IConfig                   $config,
+        // v4.12.5 — whether a team is a sub-team, for the one refusal below.
+        // The *mapper*, a DI leaf (IDBConnection only), and never
+        // `SubTeamService`, which depends on `MemberService` as this class
+        // does: what is needed here is the fact, not the behaviour.
+        private \OCA\TeamHub\Db\SubTeamMapper $subTeams,
     ) {
+    }
+
+    /**
+     * Refuse a sub-team becoming a service desk (v4.12.5).
+     *
+     * A desk is a standing commitment to people outside the team: its card is
+     * on the Services page, requests queue against it, and `WorkflowActor`
+     * resolves its agents. A sub-team is a hand-picked selection inside one
+     * team with no administration of its own — it cannot hold that, and
+     * `browseAllTeams()` already keeps it out of every list a stranger reads.
+     *
+     * DESIGN §2.175 listed this refusal as decided in 4.12.2 and it was never
+     * written. Enforced on **both** entry points — publishing a built service
+     * ({@see activate()}) and claiming the Nextcloud bundle
+     * ({@see claimNextcloudServices()}) — rather than on one of them, because
+     * either makes the team a desk.
+     *
+     * @throws ValidationException
+     */
+    private function refuseSubTeam(string $teamId): void {
+        if ($teamId !== '' && $this->subTeams->isSubTeam($teamId)) {
+            throw new ValidationException(
+                $this->l->t('A sub-team cannot answer service requests. Use its main team instead.'),
+            );
+        }
     }
 
     /**
@@ -538,6 +568,7 @@ class ServiceTeamService {
      */
     public function claimNextcloudServices(string $teamId, string $byUid): ServiceTeam {
         $this->requireLicence();
+        $this->refuseSubTeam($teamId);
 
         if ($teamId === '') {
             throw new ValidationException($this->l->t('Pick the team that will answer requests.'));
@@ -625,6 +656,7 @@ class ServiceTeamService {
      */
     public function activate(string $teamId, string $byUid): ServiceTeam {
         $this->requireLicence();
+        $this->refuseSubTeam($teamId);
         $now  = $this->timeFactory->getTime();
         $team = $this->teams->findByTeam($teamId);
         if ($team === null) {

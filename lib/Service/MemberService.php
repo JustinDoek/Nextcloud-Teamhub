@@ -8,6 +8,7 @@ use OCA\TeamHub\Constants\CirclesConfig;
 use OCA\TeamHub\Constants\CirclesMemberType;
 use OCA\TeamHub\Constants\PolicyField;
 use OCA\TeamHub\Db\PendingDeletionMapper;
+use OCA\TeamHub\Db\SubTeamMapper;
 use OCA\TeamHub\Db\TeamRegistryMapper;
 use OCA\TeamHub\Exception\AccessDeniedException;
 use OCA\TeamHub\Service\AuditService;
@@ -77,7 +78,35 @@ class MemberService {
         private TeamRegistryMapper   $teamRegistry,
         // v4.10.7 — the subline under a person's name. A DI leaf.
         private PersonSublineService $sublineService,
+        // v4.12.2 — which teams are sub-teams, and of whom. A DI leaf
+        // (IDBConnection only), and it has to be: a sub-team's administrator
+        // is its parent's administrator, so the admin gate below needs the
+        // parent link, and SubTeamService depends on this class.
+        private SubTeamMapper        $subTeams,
     ) {
+    }
+
+    /**
+     * v4.12.2 — is `$userId` an admin of the team that governs `$teamId`?
+     *
+     * A sub-team has no administration of its own by design (DESIGN §2.175):
+     * its members, name, visibility and deletion are all managed from the
+     * main team's Manage team, so the main team's admins are the only
+     * administrators it has. Circles levels do not inherit — the gates below
+     * all read a *direct* `circles_member` row — so that authority is this
+     * explicit check and nothing else.
+     *
+     * Deliberately one hop. A sub-team cannot have sub-teams, so there is no
+     * chain to walk, and a recursive version would silently grant authority
+     * the depth-1 rule says cannot exist.
+     */
+    private function isParentTeamAdmin(string $teamId, string $userId): bool {
+        $parentId = $this->subTeams->parentOf($teamId);
+        if ($parentId === null) {
+            return false;
+        }
+        $db = $this->container->get(\OCP\IDBConnection::class);
+        return $this->getMemberLevelFromDb($db, $parentId, $userId) >= 8;
     }
 
     /**
@@ -1425,6 +1454,14 @@ class MemberService {
         $db    = $this->container->get(\OCP\IDBConnection::class);
         $level = $this->getMemberLevelFromDb($db, $teamId, $user->getUID());
 
+        // v4.12.2 — an admin of the parent administers its sub-teams. Tested
+        // before the level throws rather than after, because a parent admin
+        // who did not create the sub-team has no row in it at all and would
+        // otherwise be refused as "not a member".
+        if ($level < 8 && $this->isParentTeamAdmin($teamId, $user->getUID())) {
+            return;
+        }
+
         if ($level === 0) {
             throw new AccessDeniedException('You are not a member of this team');
         }
@@ -1435,9 +1472,22 @@ class MemberService {
 
     /**
      * Asserts the current user is the team owner (level 9).
-     * Used for actions that only an owner may perform (e.g. transfer ownership).
      *
-     * @throws \Exception if user is not authenticated, not a member, or not owner
+     * **Transferring ownership is its only caller**, and that is what the
+     * sub-team refusal below rests on. §2.175 reads as though this method were
+     * left unwidened *because* it also guards transfer; what it actually
+     * guards is transfer and nothing else, so "you are the owner" and "this is
+     * a team whose ownership may move" are one question here.
+     *
+     * A sub-team's ownership may not move, and the reason is not a policy
+     * preference: a sub-team owned from outside its parent would have **no
+     * administrator at all**, since every gate on it resolves authority
+     * through the parent. If a second owner-only action ever appears that a
+     * sub-team *may* do, split this method at that point rather than loosening
+     * the check here.
+     *
+     * @throws \Exception if the user is not authenticated, not a member, not
+     *         the owner, or the team is a sub-team
      */
     public function requireOwnerLevel(string $teamId): void {
         $user = $this->userSession->getUser();
@@ -1445,6 +1495,17 @@ class MemberService {
             throw new AccessDeniedException('User not authenticated');
         }
         $this->assertTeamHubTeam($teamId);
+
+        // v4.12.5 — before the level, because it is a fact about the team and
+        // not about the caller: the sub-team's creator *is* its owner and
+        // would otherwise pass. DESIGN §2.175 listed this refusal as decided
+        // in 4.12.2 and it was never written — `assertNotSubTeam()`'s only
+        // caller was the depth check inside `createSubTeam()`.
+        if ($this->subTeams->isSubTeam($teamId)) {
+            throw new AccessDeniedException(
+                'A sub-team is governed by its main team, so its ownership cannot be transferred.',
+            );
+        }
 
         $db    = $this->container->get(\OCP\IDBConnection::class);
         $level = $this->getMemberLevelFromDb($db, $teamId, $user->getUID());
@@ -1472,6 +1533,12 @@ class MemberService {
 
         $db    = $this->container->get(\OCP\IDBConnection::class);
         $level = $this->getMemberLevelFromDb($db, $teamId, $user->getUID());
+
+        // v4.12.2 — same reasoning as requireAdminLevel(): a parent admin
+        // outranks a sub-team's moderator gate too.
+        if ($level < 4 && $this->isParentTeamAdmin($teamId, $user->getUID())) {
+            return;
+        }
 
         if ($level === 0) {
             throw new AccessDeniedException('You are not a member of this team');
@@ -2076,6 +2143,35 @@ class MemberService {
             }
 
             if (!$memberId || ($memberType === 1 && $memberId === $user->getUID())) {
+                continue;
+            }
+
+            // v4.12.5 — **a sub-team is never a member of another team.**
+            //
+            // This is the boundary, not the picker. DESIGN §2.175 forbids a
+            // `circles_member` row between a parent and its child because
+            // Circles propagates membership *upward*, from the contained
+            // circle to the container — so the sub-team's invited outsiders
+            // would become effective members of the container, and would
+            // appear in its member list as a circle rather than as people.
+            // Nothing stopped that row being made against a **third,
+            // unrelated** team: the invite picker offered every sub-team on
+            // the instance by name, and `team:<name>` in the CSV importer
+            // resolved one too.
+            //
+            // Refused here because this is the one place both doors go
+            // through, and because any future door goes through it as well.
+            // `searchUsers()` excludes them and the importer drops the token
+            // with its own warning, but those are affordances: search results
+            // go stale and this method is reachable directly. Same reasoning
+            // the circular-nesting gate below records for itself.
+            if ($memberType === 16 && $this->subTeams->isSubTeam($memberId)) {
+                $results[$memberId] = 'failed: a sub-team cannot be added as a member of another team';
+                $this->logger->warning('[TeamHub][MemberService] inviteMembers: sub-team rejected as a member circle', [
+                    'teamId'    => $teamId,
+                    'subTeamId' => $memberId,
+                    'app'       => Application::APP_ID,
+                ]);
                 continue;
             }
 
@@ -3479,6 +3575,21 @@ class MemberService {
                         $cQb->createFunction('(c.config & ' . \OCA\TeamHub\Constants\CirclesConfig::CFG_ROOT . ')') . ' = 0'
                     )
                     ->setMaxResults($limit);
+
+                // v4.12.5 — and never a sub-team, for the reason written out
+                // at the refusal in inviteMembers(): attaching one to a third
+                // team hands its invited outsiders that team's files, Talk
+                // room and calendar, through Circles' upward propagation.
+                //
+                // It also closes a disclosure. This query has **no membership
+                // or visibility filter** — `source = 16`, a name LIKE and the
+                // CFG_ROOT bit, and that is all — so three letters typed by an
+                // admin of any team returned the names of every team on the
+                // instance, private sub-teams included. Private is a
+                // sub-team's default and "only its own members and this team's
+                // administrators know it exists" is what the creation dialog
+                // promises.
+                $this->subTeams->excludeSubTeams($cQb, 'c');
 
                 if (!empty($excludeIds)) {
                     $cQb->andWhere(

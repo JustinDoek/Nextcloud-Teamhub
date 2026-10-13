@@ -48,6 +48,13 @@ export default createStore({
         // teamId -> groupId. Only deliberate placements are stored; a team
         // with no entry is loose. See TeamGroupService's class docblock.
         teamGroupAssignments: {},
+        // v4.12.2 - parentId -> the sub-teams the Sub-teams tab shows.
+        subTeamsByParent: {},
+        // v4.12.2 - teamId -> true for a team whose sub-teams are showing.
+        // Only `true` is ever stored, so a team with no entry is collapsed -
+        // the same implicit-default rule the assignments map above follows.
+        // Rides in the same preference blob, hence the same SET_TEAM_GROUPS.
+        expandedTeams: {},
         currentTeamId: null,
         currentView: 'msgstream',
         // v4.11.7 — which pane the Services tab opens on: 'services' (the
@@ -331,6 +338,12 @@ export default createStore({
          *
          * @return {{groups: Array<object>, ungrouped: Array<object>}}
          */
+        /** v4.12.2 - is this team's sub-team list showing? */
+        isTeamExpanded: (state) => (teamId) => !!(state.expandedTeams || {})[teamId],
+
+        /** v4.12.2 - the sub-teams of one team, as the Sub-teams tab lists them. */
+        subTeamsOf: (state) => (parentId) => (state.subTeamsByParent || {})[parentId] || [],
+
         sidebarTeamGroups: (state) => {
             const teams = state.teams || []
 
@@ -525,6 +538,33 @@ export default createStore({
             state.teamGroupAssignments = (payload?.assignments && typeof payload.assignments === 'object')
                 ? payload.assignments
                 : {}
+            // v4.12.2 - same blob, same commit. An older server that does not
+            // send the key leaves the map empty, which reads as "everything
+            // collapsed" rather than as an error.
+            state.expandedTeams = (payload?.expandedTeams && typeof payload.expandedTeams === 'object')
+                ? payload.expandedTeams
+                : {}
+        },
+
+        // v4.12.2 - the administrative sub-team list, per parent.
+        SET_SUB_TEAMS(state, { parentId, subTeams }) {
+            state.subTeamsByParent = {
+                ...state.subTeamsByParent,
+                [parentId]: Array.isArray(subTeams) ? subTeams : [],
+            }
+        },
+
+        // v4.12.2 - the sub-team chevron, optimistic for the same reason
+        // SET_TEAM_GROUP_EXPANDED below is: the animation should not wait for
+        // a round trip, and the PUT re-commits the server's own state.
+        SET_TEAM_EXPANDED(state, { teamId, expanded }) {
+            if (expanded) {
+                state.expandedTeams = { ...state.expandedTeams, [teamId]: true }
+            } else {
+                const next = { ...state.expandedTeams }
+                delete next[teamId]
+                state.expandedTeams = next
+            }
         },
 
         // Optimistic chevron: the collapse animation should not wait for a
@@ -1093,6 +1133,119 @@ export default createStore({
                 { expanded },
             )
             commit('SET_TEAM_GROUPS', data)
+        },
+
+        /**
+         * v4.12.2 - persist whether a team's sub-teams are showing. Same
+         * optimistic shape as setTeamGroupExpanded above, and the same
+         * preference blob behind it.
+         */
+        async setTeamExpanded({ commit }, { teamId, expanded }) {
+            commit('SET_TEAM_EXPANDED', { teamId, expanded })
+            const { data } = await axios.put(
+                generateUrl(`/apps/teamhub/api/v1/team-groups/teams/${encodeURIComponent(teamId)}/expanded`),
+                { expanded },
+            )
+            commit('SET_TEAM_GROUPS', data)
+        },
+
+        /**
+         * v4.12.2 - the sub-teams of one team, for the parent's Manage team
+         * tab. Not the sidebar's source: the sidebar gets its children nested
+         * inside the teams payload, so this is only the administrative view.
+         */
+        async fetchSubTeams({ commit }, teamId) {
+            const { data } = await axios.get(
+                generateUrl(`/apps/teamhub/api/v1/teams/${encodeURIComponent(teamId)}/sub-teams`),
+            )
+            commit('SET_SUB_TEAMS', { parentId: teamId, subTeams: data?.subTeams || [] })
+            return data?.subTeams || []
+        },
+
+        /** v4.12.2 - the parent's roster, for the member picker. */
+        async fetchSubTeamCandidates(_ctx, teamId) {
+            const { data } = await axios.get(
+                generateUrl(`/apps/teamhub/api/v1/teams/${encodeURIComponent(teamId)}/sub-teams/candidates`),
+            )
+            return data?.candidates || []
+        },
+
+        /**
+         * v4.12.2 - create a sub-team, then refresh both lists: the parent's
+         * Sub-teams tab and the sidebar, which is where the new row appears.
+         */
+        async createSubTeam({ dispatch }, { teamId, ...spec }) {
+            const { data } = await axios.post(
+                generateUrl(`/apps/teamhub/api/v1/teams/${encodeURIComponent(teamId)}/sub-teams`),
+                spec,
+            )
+            await dispatch('fetchSubTeams', teamId)
+            await dispatch('fetchTeams')
+            return data
+        },
+
+        /**
+         * v4.12.5 - one sub-team's roster, for the manage dialog. Not stored:
+         * it is read by one open dialog and stale the moment it closes, where
+         * `subTeamsByParent` is read by a panel that stays on screen.
+         */
+        async fetchSubTeamMembers(_ctx, { teamId, subTeamId }) {
+            const { data } = await axios.get(
+                generateUrl(`/apps/teamhub/api/v1/teams/${encodeURIComponent(teamId)}/sub-teams/${encodeURIComponent(subTeamId)}/members`),
+            )
+            return data || { direct: [], groups: [], circles: [], inherited: [] }
+        },
+
+        /**
+         * v4.12.5 - add people to a sub-team. `fetchSubTeams` after, because
+         * the panel's row carries the member count; `fetchTeams` is not needed
+         * - a count is not on the sidebar.
+         */
+        async addSubTeamMembers({ dispatch }, { teamId, subTeamId, members = [], outsiders = [] }) {
+            const { data } = await axios.post(
+                generateUrl(`/apps/teamhub/api/v1/teams/${encodeURIComponent(teamId)}/sub-teams/${encodeURIComponent(subTeamId)}/members`),
+                { members, outsiders },
+            )
+            await dispatch('fetchSubTeams', teamId)
+            return data?.results || []
+        },
+
+        /** v4.12.5 - remove one person from a sub-team. */
+        async removeSubTeamMember({ dispatch }, { teamId, subTeamId, userId }) {
+            await axios.delete(
+                generateUrl(`/apps/teamhub/api/v1/teams/${encodeURIComponent(teamId)}/sub-teams/${encodeURIComponent(subTeamId)}/members/${encodeURIComponent(userId)}`),
+            )
+            await dispatch('fetchSubTeams', teamId)
+        },
+
+        /**
+         * v4.12.5 - rename a sub-team, change who can see it, or both. Both
+         * reach the sidebar: the name is the row's label, and `listed` is what
+         * puts the row in front of a parent member who is not in it - so
+         * `fetchTeams` as well as the panel's own list.
+         *
+         * v4.12.6 - `templateKey` and `profileKey` ride the same PUT, and the
+         * response is returned rather than dropped: a template change reports
+         * which apps it added, removed and left for somebody to do by hand,
+         * and the dialog is the only place that can say so.
+         */
+        async updateSubTeam({ dispatch }, { teamId, subTeamId, ...changes }) {
+            const { data } = await axios.put(
+                generateUrl(`/apps/teamhub/api/v1/teams/${encodeURIComponent(teamId)}/sub-teams/${encodeURIComponent(subTeamId)}`),
+                changes,
+            )
+            await dispatch('fetchSubTeams', teamId)
+            await dispatch('fetchTeams')
+            return data || {}
+        },
+
+        /** v4.12.5 - delete a sub-team and everything it holds. */
+        async deleteSubTeam({ dispatch }, { teamId, subTeamId }) {
+            await axios.delete(
+                generateUrl(`/apps/teamhub/api/v1/teams/${encodeURIComponent(teamId)}/sub-teams/${encodeURIComponent(subTeamId)}`),
+            )
+            await dispatch('fetchSubTeams', teamId)
+            await dispatch('fetchTeams')
         },
 
         /** Delete a group. Its teams become loose items again. */

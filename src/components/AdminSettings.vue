@@ -864,6 +864,37 @@
                             {{ t('teamhub', 'Needs a license') }}
                         </span>
                     </div>
+
+                    <!-- v4.12.3 — Sub-teams: licensed, with a switch, and the
+                         first licensed module that is **on** by default. The
+                         other two each need something else first — OpenProject
+                         needs an OpenProject, a service team needs somebody to
+                         run a desk — and a sub-team needs nothing but a team.
+                         Like both rows above, the switch appears only while a
+                         licence is active. The description says what switching
+                         off does to sub-teams that already exist, because that
+                         is the one thing an administrator cannot see from
+                         here. -->
+                    <div class="admin-compact-row">
+                        <div class="admin-compact-row__text">
+                            <span class="admin-compact-row__name">{{ t('teamhub', 'Sub-teams module') }}</span>
+                            <span class="admin-compact-row__desc">{{ t('teamhub', 'When enabled, team admins can give part of their team its own space from Manage team → Sub-teams: its own members, files and modules, managed from the main team and shown nested under it in the navigation. When disabled, sub-teams disappear from the navigation and the tab is hidden. Nothing is deleted: a sub-team keeps its members, files and messages, and everything comes back when it is switched on again.') }}</span>
+                            <!-- TRANSLATORS: warning shown to a Nextcloud administrator beside the sub-teams switch -->
+                            <span v-if="form.subTeamsModuleEnabled" class="admin-compact-row__desc">{{ t('teamhub', 'Before switching off: someone who was invited into a private sub-team from outside the main team, and is in no other team, then sees an empty navigation until it comes back.') }}</span>
+                        </div>
+                        <NcCheckboxRadioSwitch
+                            v-if="licenseActive"
+                            class="admin-compact-row__control"
+                            :model-value="form.subTeamsModuleEnabled"
+                            type="switch"
+                            :aria-label="t('teamhub', 'Enable sub-teams module for all teams')"
+                            @update:model-value="form.subTeamsModuleEnabled = $event; save()">
+                            {{ form.subTeamsModuleEnabled ? t('teamhub', 'Enabled') : t('teamhub', 'Disabled') }}
+                        </NcCheckboxRadioSwitch>
+                        <span v-else class="admin-compact-row__control admin-compact-row__derived">
+                            {{ t('teamhub', 'Needs a license') }}
+                        </span>
+                    </div>
                 </div>
             </NcSettingsSection>
 
@@ -3977,6 +4008,12 @@ export default {
                 openProjectModuleEnabled: false,
                 // v4.10.46 — the service teams module's switch (off by default).
                 serviceTeamsModuleEnabled: false,
+                // v4.12.3 — the sub-teams module's switch. Starts **true**,
+                // because the stored default is on: starting false would flash
+                // a switched-off module on every page load before load()
+                // reports the real value, which is the mirror of why
+                // onboardingChecklistDismissed starts true.
+                subTeamsModuleEnabled: true,
                 // RoomVox: token is write-only. roomvoxTokenConfigured
                 // reflects whether one is currently stored (returned from
                 // the load endpoint as a boolean); roomvoxApiToken is the
@@ -5345,6 +5382,11 @@ export default {
                 this.form.decisionsModuleEnabled = !!data.decisionsModuleEnabled
                 this.form.openProjectModuleEnabled = !!data.openProjectModuleEnabled
                 this.form.serviceTeamsModuleEnabled = !!data.serviceTeamsModuleEnabled
+                // v4.12.5 — see the note beside the matching params.set() in
+                // save(). `!!` and not `?? true`: the server already applies
+                // the default-on when the key is unset, so a `false` arriving
+                // here is an administrator's answer and must survive.
+                this.form.subTeamsModuleEnabled = !!data.subTeamsModuleEnabled
                 this.form.roomvoxTokenConfigured = !!data.roomvoxTokenConfigured
                 this.form.onboardingChecklistDismissed = !!data.onboardingChecklistDismissed
                 // v4.6.13 — expiration settings. `expiryDefaultDate` is the
@@ -5863,6 +5905,15 @@ export default {
             params.set('decisionsModuleEnabled', this.form.decisionsModuleEnabled ? '1' : '0')
             params.set('openProjectModuleEnabled', this.form.openProjectModuleEnabled ? '1' : '0')
             params.set('serviceTeamsModuleEnabled', this.form.serviceTeamsModuleEnabled ? '1' : '0')
+            // v4.12.5 — this line and its twin in load() were both missing, so
+            // the Sub-teams switch had never worked: the toggle wrote nothing
+            // (the server reads with array_key_exists, and the key never
+            // arrived), and load() never read the stored value back, so the
+            // field kept its data() default of `true`. The toggle therefore
+            // *looked* switched off for the rest of the visit and read Enabled
+            // again on the next mount, which is how Justin saw it. The module
+            // had in fact never been off.
+            params.set('subTeamsModuleEnabled', this.form.subTeamsModuleEnabled ? '1' : '0')
             params.set('expiryWarningDays',      String(this.form.expiryWarningDays ?? 7))
             // v4.11.32 — IdP teams. Backends go as the comma list the
             // service parses; every other value is validated server-side.

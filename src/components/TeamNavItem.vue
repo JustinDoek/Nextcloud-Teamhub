@@ -2,6 +2,9 @@
     <NcAppNavigationItem
         :name="team.name"
         :active="active"
+        :allow-collapse="hasSubTeams"
+        :open="hasSubTeams ? expanded : undefined"
+        @update:open="$emit('toggle-expanded', { teamId: team.id, expanded: $event })"
         @click="$emit('select', team.id)">
         <template #icon>
             <AccountGroup :size="iconNav" />
@@ -146,7 +149,33 @@
                 <template #icon><FolderPlusOutline :size="iconNav" /></template>
                 {{ t('teamhub', 'New group') }}
             </NcActionInput>
+
+            <!-- A "Request a sub-team" action belongs here - the opening
+                 action goes where the subject is, and a plain member has no
+                 Manage team to put it in (`/mywork-workflows` rule 2). It
+                 ships with the workflow that answers it
+                 (`SubTeamRequestDefinition`), not before: an action whose
+                 only outcome is "not available yet" is a dead end, and
+                 CLAUDE.md asks for hidden rather than failing. The
+                 `can_have_sub_teams` field it needs is already on the
+                 payload. -->
         </template>
+
+        <!-- v4.12.2 - the team's sub-teams, nested one level. `SubTeamNavItem`
+             is a leaf and there is no third level: a sub-team cannot have
+             sub-teams. The rows are in the default slot, so they appear only
+             while the parent is expanded, and they follow the parent into
+             whatever personal sidebar group it is filed under. -->
+        <SubTeamNavItem
+            v-for="sub in subTeams"
+            :key="sub.id"
+            :team="sub"
+            :active="sub.id === activeTeamId"
+            @select="$emit('select', $event)"
+            @copy-link="$emit('copy-link', $event)"
+            @invite="$emit('invite', $event)"
+            @email-members="$emit('email-members', $event)"
+            @leave="$emit('leave', $event)" />
     </NcAppNavigationItem>
 </template>
 
@@ -161,6 +190,7 @@ import FolderMoveOutline from 'vue-material-design-icons/FolderMoveOutline.vue'
 import FolderPlusOutline from 'vue-material-design-icons/FolderPlusOutline.vue'
 import LinkVariant from 'vue-material-design-icons/LinkVariant.vue'
 import LocationExit from 'vue-material-design-icons/LocationExit.vue'
+import SubTeamNavItem from './SubTeamNavItem.vue'
 import { ICON_NAV } from '../constants/uiTokens.js'
 
 /**
@@ -183,6 +213,7 @@ export default {
         NcActionInput, NcActionSeparator,
         AccountGroup, AccountPlus, CogOutline, EmailOutline, FolderMoveOutline,
         FolderPlusOutline, LinkVariant, LocationExit,
+        SubTeamNavItem,
     },
 
     props: {
@@ -199,9 +230,23 @@ export default {
             type: String,
             default: '',
         },
+        /**
+         * v4.12.2 - the selected team, so a nested sub-team row can mark
+         * itself active. Separate from `active` above, which is about *this*
+         * row: a parent is not active because its child is.
+         */
+        activeTeamId: {
+            type: String,
+            default: null,
+        },
+        /** v4.12.2 - is this team's sub-team list showing? */
+        expanded: {
+            type: Boolean,
+            default: false,
+        },
     },
 
-    emits: ['select', 'manage', 'copy-link', 'invite', 'email-members', 'leave', 'pick-group', 'create-group'],
+    emits: ['select', 'manage', 'copy-link', 'invite', 'email-members', 'leave', 'pick-group', 'create-group', 'toggle-expanded'],
 
     data() {
         return {
@@ -222,6 +267,26 @@ export default {
 
         iconNav() {
             return ICON_NAV
+        },
+
+        /**
+         * v4.12.2 - the sub-teams the server nested into this row.
+         *
+         * Includes the `listed_only` ones a reader can see but is not in, so
+         * the chevron appears for them too: being told a sub-team exists is
+         * the whole point of that visibility.
+         */
+        subTeams() {
+            return this.team.sub_teams || []
+        },
+
+        /**
+         * Only a team with sub-teams gets a chevron. Without this guard every
+         * team in the sidebar would grow a collapse control that opens an
+         * empty list.
+         */
+        hasSubTeams() {
+            return this.subTeams.length > 0
         },
     },
 

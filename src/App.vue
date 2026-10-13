@@ -17,13 +17,13 @@
                  team here: asking for one is their version of the same action,
                  so it belongs where the action is, not on a page they may
                  never open. It moved off the My Work header for that reason.
-                 Shown only when there is a team to ask *from*: the request
-                 goes to the owner or a moderator of an existing team, so a
-                 member of none has nobody to ask and would get a dialog with
-                 an empty picker. -->
+                 v4.12.4 — no longer conditional on being in a team: the
+                 dialog stopped asking which team the request comes from, so
+                 a member of none has nothing missing. It is still conditional
+                 on a service team answering. -->
             <NcAppNavigationNew
                 v-else-if="canRequestTeam"
-                :text="t('teamhub', 'Request a new team')"
+                :text="t('teamhub', 'Request team')"
                 @click="workflowStartOpen = true">
                 <template #icon>
                     <AccountMultiplePlusOutline :size="ICON_BODY" />
@@ -112,6 +112,7 @@
                     :key="group.id"
                     :group="group"
                     :active-team-id="activeView === 'team' ? currentTeamId : null"
+                    :expanded-teams="expandedTeams"
                     @toggle="onGroupToggle"
                     @rename="onGroupRename"
                     @delete="onGroupDelete"
@@ -122,7 +123,8 @@
                     @email-members="onSidebarEmailMembers"
                     @leave="onSidebarLeave"
                     @pick-group="onGroupPickerOpen"
-                    @create-group="onGroupCreate" />
+                    @create-group="onGroupCreate"
+                    @toggle-expanded="onTeamExpandToggle" />
 
                 <!-- v4.7.3 — the line between "filed" and "not filed yet".
                      Only drawn when there is something on both sides of it:
@@ -143,6 +145,8 @@
                     :key="team.id"
                     :team="team"
                     :active="team.id === currentTeamId && activeView === 'team'"
+                    :active-team-id="activeView === 'team' ? currentTeamId : null"
+                    :expanded="expandedTeams[team.id] === true"
                     current-group-id=""
                     @select="selectTeamFromSidebar"
                     @manage="onSidebarManageTeam"
@@ -151,7 +155,8 @@
                     @email-members="onSidebarEmailMembers"
                     @leave="onSidebarLeave"
                     @pick-group="onGroupPickerOpen"
-                    @create-group="onGroupCreate" />
+                    @create-group="onGroupCreate"
+                    @toggle-expanded="onTeamExpandToggle" />
 
                 <!-- v4.4.3 — role-shaped copy. "Create your first team above"
                      is wrong for a user who cannot create teams: there is no
@@ -548,12 +553,12 @@
             @assign="onTeamAssignGroup"
             @close="groupPicker = null" />
 
-        <!-- v4.10.22 — moved here with its button. Unchanged otherwise: the
-             `team_request` workflow still asks which team is asking, what the
-             new team should be called and why. -->
+        <!-- v4.10.22 — moved here with its button. v4.12.4 — it no longer
+             asks which team is asking (a new team is asked for by a person);
+             it asks for the name, the template, the profile and the reason,
+             and the request is recorded against the desk that answers it. -->
         <WorkflowStartDialog
             v-if="workflowStartOpen"
-            :teams="requestableTeams"
             :busy="$store.state.workflows.busyId === 0"
             :error="workflowStartError"
             @close="workflowStartOpen = false; workflowStartError = ''"
@@ -656,6 +661,11 @@ export default {
             // Nextcloud services? Starts FALSE and stays false if the read
             // fails: this one fails CLOSED, unlike canCreateTeam above.
             teamRequestAnswerable: false,
+            // v4.12.4 — and which team that is. A request for a new team
+            // names no asking team any more, so it is opened against the
+            // desk itself — the same team id the Services page sends for a
+            // personal request (ServiceRequestDialog, v4.10.44).
+            teamRequestDeskId: '',
             // v4.6.2 — is the current user an NC admin? Rides the existing
             // can-create-team fetch. Starts FALSE and stays false if that call
             // fails: canCreateTeam fails OPEN because hiding a button a user is
@@ -713,6 +723,15 @@ export default {
     computed: {
         ...mapState(['teams', 'currentTeamId', 'loading', 'presenceModuleEnabled']),
         ...mapGetters(['currentTeam', 'sidebarTeamGroups']),
+
+        /**
+         * v4.12.2 - which teams have their sub-team list open. Read straight
+         * off the store rather than through a getter: it is a plain map and
+         * the sidebar hands it to every row at once.
+         */
+        expandedTeams() {
+            return this.$store.state.expandedTeams || {}
+        },
         // v4.10.25 — `hasCatalogue` is the Services entry: something can be
         // started.
         // v4.10.26 — the global *Service desk* entry beside it is gone: the
@@ -723,30 +742,26 @@ export default {
         }),
 
         /**
-         * v4.10.22 — the teams this member could ask a new team from. The
-         * `team_request` workflow's second step is the owner or a moderator
-         * of the *asking* team, so a member of no team has nobody to ask and
-         * the button is absent rather than opening a dialog with an empty
-         * picker (CLAUDE.md § Permissions: hidden, not left to fail).
-         */
-        requestableTeams() {
-            return (this.teams || []).map(team => ({ id: team.id, name: team.name }))
-        },
-
-        /**
-         * Show "Request a new team" only to somebody who cannot create one
-         * here. The two are the same intent at different permission levels,
-         * which is why they share the one place in the navigation and are
-         * never both present.
+         * Show "Request team" only to somebody who cannot create one here.
+         * The two are the same intent at different permission levels, which
+         * is why they share the one place in the navigation and are never
+         * both present.
+         *
+         * v4.12.4 — the "member of at least one team" condition is gone with
+         * the *Ask from team* field it existed for. The request is recorded
+         * against the service team that answers it, so somebody in no team
+         * can ask, which is the person most likely to need to.
          */
         canRequestTeam() {
             return !this.canCreateTeam
-                && this.requestableTeams.length > 0
                 // v4.10.23 — and somebody answers. Without a licence, or
                 // with no team holding the Nextcloud services, the server
                 // refuses the workflow at `canStart()` and the button would
                 // open a dialog whose only outcome is an error.
+                // v4.12.4 — the desk's id is what the request is opened
+                // against, so without it there is nothing to open.
                 && this.teamRequestAnswerable
+                && this.teamRequestDeskId !== ''
         },
         // Icon-size tokens for the template. MDI's :size prop needs a number
         // at compile time and cannot read a CSS variable, so the scale is
@@ -884,7 +899,8 @@ export default {
         await Promise.all([
             this.fetchTeams(),
             this.fetchCanCreateTeam(),
-            // v4.10.23 — whether "Request a new team" has anybody to go to.
+            // v4.10.23 — whether "Request team" has anybody to go to, and
+            // (v4.12.4) which desk that is, since the request is opened on it.
             this.fetchServiceClaim(),
             // v4.7.3 — in parallel, not after: the sidebar needs the teams
             // and their grouping together, and the getter falls back to a
@@ -1014,6 +1030,20 @@ export default {
          * The chevron and the "Expanded by default" checkbox both land here;
          * they write one stored value, so a group stays how it was left.
          */
+        /**
+         * v4.12.2 - the sub-team chevron on a team row. Mirrors
+         * onGroupToggle: the store commits optimistically, so a failed write
+         * self-corrects on the next load rather than leaving the chevron and
+         * the stored state permanently out of step.
+         */
+        async onTeamExpandToggle({ teamId, expanded }) {
+            try {
+                await this.$store.dispatch('setTeamExpanded', { teamId, expanded })
+            } catch (e) {
+                showError(t('teamhub', 'Could not save the team state'))
+            }
+        },
+
         async onGroupToggle({ groupId, expanded }) {
             try {
                 await this.$store.dispatch('setTeamGroupExpanded', { groupId, expanded })
@@ -1539,16 +1569,21 @@ export default {
 
         /**
          * v4.10.22 — open the `team_request` workflow. Moved here from
-         * MyWorkView with the button; the payload and the store action are
-         * unchanged.
+         * MyWorkView with the button; the store action is unchanged.
+         *
+         * v4.12.4 — the payload is the name, the reason and the shape of the
+         * team asked for; the team it is opened against is the desk.
          */
-        async submitWorkflowStart({ teamId, teamName, reason }) {
+        async submitWorkflowStart({ teamName, reason, templateKey, profileKey }) {
             this.workflowStartError = ''
             try {
                 const created = await this.$store.dispatch('workflows/start', {
-                    teamId,
+                    // v4.12.4 — the desk, not a team the requester picked:
+                    // the dialog no longer asks, and `canStart()` admits any
+                    // signed-in user on the desk's own id.
+                    teamId: this.teamRequestDeskId,
                     definitionKey: 'team_request',
-                    data: { teamName, reason },
+                    data: { teamName, reason, templateKey, profileKey },
                 })
                 this.workflowStartOpen = false
                 showSuccess(t('teamhub', 'Request sent: {title}', { title: created?.title || teamName }))
@@ -1575,8 +1610,10 @@ export default {
             try {
                 const status = await loadClaimStatus()
                 this.teamRequestAnswerable = !!status.available && !!status.claimed
+                this.teamRequestDeskId = status.holderTeamId || ''
             } catch (e) {
                 this.teamRequestAnswerable = false
+                this.teamRequestDeskId = ''
             }
         },
 

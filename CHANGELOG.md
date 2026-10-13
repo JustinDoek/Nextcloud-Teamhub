@@ -2,27 +2,21 @@
 
 All notable changes to TeamHub are documented in this file.
 
-## [4.12.1] — 2026-10-11
+## [4.13.0] — 2026-10-13
 
-### Introduced many changes to the decisions module
-- Show the approver of a category on the category overview.
-- Fixed supersede decisions.
-- Merged all actions on a decision page in an action menu.
-- Added an action to archive a decision.
-- Added an action to move a decision to another category.
-- Added an option to review a decision.
-- Added an option to create a proposal from the file actions menu.
-- Added an option to make decisions public so you can link them to users outside the team.
+### Sub-teams
+- A team administrator can now create sub-teams inside their team — a smaller room for a workstream, a client or a project phase, without starting a whole new team.
+- Each sub-team has its own name, description, members and files, and appears in the sidebar underneath its parent.
+- You choose who can see it: only its own members, or everyone in the main team (who see the name and a padlock, and cannot open it).
+- Members come from the main team in one click, and you can invite somebody from outside as a guest.
+- A sub-team can have its own template, its own policy and its own expiration date, all set from the Sub-teams tab.
+- Every administrator of the main team administers its sub-teams — not only the person who created them.
+- Deleting a team deletes its sub-teams with it, and tells you if one cannot go rather than leaving an orphan behind.
+- A sub-team stays a sub-team: it cannot be handed to another owner, added to another team, or turned into a service desk.
+- Your Nextcloud administrator can switch sub-teams off for the whole instance. When they do, the tab explains why instead of disappearing.
 
-### Fixed creating a task from the upcoming tasks widget and added the option to assign it to others.
-- Fixed tasks not reaching My Work on PostgreSQL.
+### Team folders on Nextcloud 35
+- On Nextcloud 35, a team's folder is no longer converted into a Nextcloud team space. The conversion changed who manages a folder's advanced permissions, so it is paused while that is worked out.
+- Teams that already have a team space keep it, with their quota, their files and a working disconnect.
+- A new team on Nextcloud 35 now gets an ordinary team folder.
 
-### Revised the team creation tab in the admin settings.
-- Fixed the Create team dialog text not showing.
-- You can now select if you want to (automatic/manual or don't) accept teams created outside of TeamHub and apply a template/policy.
-- You can now select if you want to (automatic/manual or don't) create a team for new groups and apply a template/policy.
-- Every decision about what joins TeamHub is recorded in the Compliance audit log, and a group waiting for one appears in the administrators' My Work.
-
-### Security
-- The app ships with the latest patched versions of the libraries it bundles, closing every high-severity advisory reported against 4.12.0.
-- Updated Vue, DOMPurify and Axios, and the build toolchain behind them. Nothing changes in how the app works.

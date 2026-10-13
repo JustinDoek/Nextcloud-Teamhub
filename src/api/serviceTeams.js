@@ -221,7 +221,10 @@ export async function addInternalNote(id, note, step = '', fileIds = []) {
  * already holds them — what the creation wizard reads before the team it
  * would belong to exists. Readable by anybody who may create a team.
  *
- * @return {Promise<{available: boolean, claimed: boolean, holderName: string, availableServices: object[]}>}
+ * v4.12.4 — `holderTeamId` rides along: the sidebar's *Request team* opens a
+ * personal request against the desk, and the workflow API takes a team id.
+ *
+ * @return {Promise<{available: boolean, claimed: boolean, holderName: string, holderTeamId: string, availableServices: object[]}>}
  */
 export async function loadClaimStatus() {
 	const { data } = await axios.get(base('/claim-status'))
@@ -229,6 +232,7 @@ export async function loadClaimStatus() {
 		available: !!data?.available,
 		claimed: !!data?.claimed,
 		holderName: data?.holderName || '',
+		holderTeamId: data?.holderTeamId || '',
 		availableServices: Array.isArray(data?.availableServices) ? data.availableServices : [],
 	}
 }

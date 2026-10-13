@@ -5,6 +5,222 @@
 
 ---
 
+## Sub-teams (added 4.12.2)
+
+A sub-team is an ordinary TeamHub team with a parent: its own circle, registry row, members, storage, modules, policy profile and archive, plus one row in `teamhub_sub_team`. **There is no `circles_member` row between a parent and a child** — Circles propagates membership from the contained circle up to the container, so such a row would make a sub-team's invited outsiders effective members of the main team. DESIGN §2.175.
+
+**The parent id is the authority.** A sub-team has no administration of its own, so every route below is nested under `{teamId}` (the *main* team) and every one of them requires **admin of that team**. All are `#[NoAdminRequired]`, CSRF-protected, and no GET mutates.
+
+**Every route below is gated on the module first (4.12.3).** Sub-teams are a licensed module with a Nextcloud
+administrator's switch (Settings → TeamHub → Modules → *Sub-teams module*, appconfig
+`teamhub/sub_teams_module_enabled`, **default on**). `SubTeamModuleService::requireAvailable()` runs before the
+membership check — whether the module exists is an instance-wide fact that discloses nothing about the team, and it
+is the cheaper read. Two refusals, both **403**:
+
+| Missing | Body |
+|---|---|
+| a licence (no key, or `soft-lock` / `unlicensed`) | `{ "error": "Sub-teams require an active TeamHub license.", "licenseGate": true, "enforcementLevel": "…" }` |
+| the administrator's switch | `{ "error": "Sub-teams are switched off on this instance." }` |
+
+`licenseGate` is the same envelope the workflow and service-team routes answer with, so a client handles one error
+shape for every licensed surface. The switched-off half carries no `licenseGate`, because there is nothing to renew.
+DESIGN §2.177.
+
+| Route | Verb | Auth |
+|---|---|---|
+| `/api/v1/teams/{teamId}/sub-teams` | GET | admin of `{teamId}` |
+| `/api/v1/teams/{teamId}/sub-teams/candidates` | GET | admin of `{teamId}` |
+| `/api/v1/teams/{teamId}/sub-teams` | POST | **direct** admin of `{teamId}` |
+| `/api/v1/teams/{teamId}/sub-teams/{subTeamId}` | PUT | admin of `{teamId}` (4.12.5; template and policy 4.12.6) |
+| `/api/v1/teams/{teamId}/sub-teams/{subTeamId}` | DELETE | admin of `{teamId}` (4.12.5) |
+| `/api/v1/teams/{teamId}/sub-teams/{subTeamId}/members` | GET | admin of `{teamId}` (4.12.5) |
+| `/api/v1/teams/{teamId}/sub-teams/{subTeamId}/members` | POST | admin of `{teamId}` (4.12.5) |
+| `/api/v1/teams/{teamId}/sub-teams/{subTeamId}/members/{userId}` | DELETE | admin of `{teamId}` (4.12.5) |
+
+**Every `{subTeamId}` route proves two things, not one.** Admin of `{teamId}` says only *you administer some main
+team*, and the sub-team id arrives from the caller — so each of these also checks that `{subTeamId}` is a child of
+`{teamId}`, and answers **400** *That sub-team does not belong to this team.* when it is not. Without it the
+authority on these routes would reach every sub-team on the instance. Pinned by
+`tests/Unit/SubTeams/SubTeamAuthorityTest.php`.
+
+`candidates` is declared before the `{subTeamId}` routes in `routes.php`, because the router matches in order and
+the reverse would read the literal word "candidates" as a sub-team id.
+
+### `GET /api/v1/teams/{teamId}/sub-teams`
+
+The parent's administrative view — **every** sub-team, including the private ones, which is why it is admin-gated rather than member-gated.
+
+```json
+{ "subTeams": [ { "id": "…", "name": "Tender NL-2027", "visibility": "private",
+                  "members": 8, "description": "Bid team for the 2027 tender",
+                  "expiresOn": "2027-03-01", "expiryEligible": true,
+                  "templateKey": "project", "templateLabel": "Project", "templateSeeded": true,
+                  "profileKey": "confidential", "profileLabel": "Confidential", "profileSeeded": true,
+                  "createdBy": "inge", "createdAt": 1760000000 } ] }
+```
+
+**4.12.6 adds `templateLabel` / `profileLabel` and their `*Seeded` flags.** The labels are resolved server-side in one pass for the whole list (`PolicyService::labelledClassificationFor()`, three queries whatever the number of children); the seeded flags travel because the *label rule* is the client's — `profileDisplayName()` in `src/constants/policy.js` translates a seeded row by key and takes an administrator's own wording verbatim. `profileKey` is `null` for an unclassified sub-team, and the row renders *No policy* rather than a blank: which policy got applied is the question, and "none" is an answer. **No conformance is computed or returned** — see `PUT` below.
+
+`visibility` is `private` (the default — invisible to members of the parent who are not in it) or `listed` (name visible under the parent, still not openable). `createdBy` is the admin who created it and therefore its owner; they are filtered out of the roster the sub-team's own members see, and shown here.
+
+### `GET /api/v1/teams/{teamId}/sub-teams/candidates`
+
+The parent's roster, for the member picker. **Effective** membership, so somebody who reaches the main team through a group is offered. Same row shape as `GET /api/v1/teams/{teamId}/members/all`, under `{ "candidates": […] }`.
+
+### `POST /api/v1/teams/{teamId}/sub-teams`
+
+```json
+{ "name": "Tender NL-2027", "description": "", "templateKey": "project",
+  "profileKey": "standard", "visibility": "private",
+  "members": ["jaap", "sanne"],
+  "outsiders": [ { "id": "consultant@firm.example", "type": "email" } ] }
+```
+
+`name` is the only required field. Answers **201** with the team payload plus `is_sub_team`, `parent_team_id`, `sub_team_visibility` and `can_have_sub_teams`.
+
+Four refusals worth knowing, all **400** except the first:
+
+- **403** when the caller is not a *direct* admin of `{teamId}`. Deliberately stricter than the other two routes: `requireAdminLevel()` accepts an admin of the parent, which would let a sub-team's administrator create a grandchild.
+- **400** *A sub-team cannot have sub-teams of its own.* Depth is 1.
+- **400** *Members of a sub-team are picked from the main team. Invite anyone else as a guest instead.* — a uid in `members` that is not on the parent's roster.
+- **400** *This person is already in the main team — add them as a member rather than a guest.* — a **local user** in `outsiders` who *is* on the roster. An `email` or `federated` invitee is never tested against a roster of uids.
+- **400** *This team already has a sub-team with that name.* Sub-team names are unique **per parent**, not instance-wide — two teams may each have a "Design". The storage folder is named `{parent} – {child}`, which is what keeps the two folders apart.
+
+The sub-team's modules and apps come from its template and from nothing else; there is no per-sub-team module endpoint, by design. **4.12.6:** `templateKey: "service"` is refused — see the `PUT` below.
+
+### `PUT /api/v1/teams/{teamId}/sub-teams/{subTeamId}` (4.12.5, extended 4.12.6)
+
+```json
+{ "name": "Tender NL-2027", "description": "Bid team for the 2027 tender",
+  "visibility": "listed", "expiresOn": "2027-03-01",
+  "templateKey": "project", "profileKey": "confidential" }
+```
+
+All six fields optional and independent — a dialog that changes one does not resend the other, and a body with neither is a no-op rather than an error. `PUT` and not `PATCH` although the body is partial: every other update in this app is a `PUT`, and one `PATCH` would be the only one.
+
+Refusals: **400** for a name that fails the shape rules, **400** *This team already has a sub-team with that name.* (uniqueness is among **siblings**, and the sub-team itself is excluded so re-saving its own name is not a duplicate), **400** *That is not a visibility a sub-team can have.*, **400** *That is not a template on this instance.*, **400** *That is not a policy profile on this instance.* and **400** *A sub-team cannot be a service team. Create a service team of its own instead.* — the Service template is what makes a team a service desk, which §2.175 refuses for a sub-team; the same refusal now also guards `POST` (it did not before 4.12.6).
+
+**The Files folder keeps the name it was created with.** It is `{parent} – {child}` from creation, and TeamHub cannot rename a team folder, a Talk room, a Deck board or a collective — `TeamService::renameTeam()` exists for this route alone and carries a standing note not to give it a route for an ordinary team until the resources are solved. The dialog says so beside the field.
+
+#### `description` (4.12.8)
+
+Set in the create dialog and then unreachable until now: there was no field in the manage dialog, and `TeamService::updateTeamDescription()` gated on a **raw** `level >= 4` row on the sub-team itself, which an admin of the main team who did not create it does not have. That gate is `requireModeratorLevel()` now, which is identical for an ordinary team and accepts an admin of the **governing** team for a sub-team (DESIGN §2.182). `''` clears it, and is a change rather than an omission — the controller tests with `isset()`.
+
+#### `expiresOn` (4.12.9)
+
+`"YYYY-MM-DD"`, or **`null` to clear** — read with `array_key_exists()` rather than `isset()`, since `null` is the value that clears a date and `isset(null)` is false. The one field on this route where the two differ.
+
+A sub-team's date is the parent administrator's to set (DESIGN §2.183): a sub-team has no Manage team of its own, so Maintenance — Nextcloud-admin only — was the only screen that could put one on it, while its own administrators could already *request* more time. `TeamExpiryService::setExpiry()` stays NC-admin gated; this path uses `setExpiryForSubTeam()`, which trusts its caller as `extendByServiceTeam()` already does. **The cost, as for the policy profile:** a date a Nextcloud administrator set on a sub-team can be changed or cleared by the parent's admin.
+
+Eligibility is the **template's** and is unchanged — Collaboration and Project only. A date on any other template is **400** *Only Collaboration and Project teams can have an expiration date.*; `GET /api/v1/teams/{teamId}/sub-teams` carries `expiryEligible` so a client can show the reason instead of a field the server would refuse.
+
+#### `templateKey` and `profileKey` (4.12.6)
+
+**A team administrator changing a policy profile is this app's one exception**, and it is deliberate (Justin, 2026-10-12; DESIGN §2.180). Everywhere else reclassification is a Nextcloud administrator's act — `POST /api/v1/admin/policy/teams/{teamId}` — because a team admin reclassifying their own team is the bypass DESIGN §2.103 records. A sub-team is different in two ways that make the exception hold: its parent's administrator **already picks both at creation**, from the full set, so the only thing refusing this would buy is forcing them to delete the sub-team and make it again; and a sub-team has **no module switch anywhere**, so its template is the only lever it has. What it costs is stated rather than hidden: a Nextcloud administrator who reclassifies a sub-team can be overruled by its parent's admin, and the assignment row therefore records `sub_team` as its `source`, distinct from both `creation` and `assignment`.
+
+Both keys are validated **before either is written**, so a body naming a real template and a profile that does not exist changes nothing at all. A key equal to what the sub-team already carries is not re-applied: `apply` writes an assignment row and an audit event, so re-applying on every submit would fill the trail with changes nobody made.
+
+The response carries what the template change actually did, and is absent when neither key was sent:
+
+```json
+{ "success": true, "id": "…",
+  "classification": { "templateKey": "project", "profileKey": "confidential",
+                      "added": ["deck", "decisions"], "removed": ["talk"],
+                      "manual": ["files"], "errors": [] } }
+```
+
+- `added` / `removed` — apps and feature modules brought in line with the new template, through `PolicyPropagationService::applyTemplateToTeam()`, the same writer an administrator's rollout uses. **A removal destroys the resource**: the Talk room, calendar, Deck board, Intravox space or Collective TeamHub created for the old template is gone, which is why the dialog states it before the button is pressed.
+- `manual` — what was **not** removed although the new template no longer asks for it: the team folder above all, which is reported for somebody to remove by hand and never deleted (`PolicyPropagationService::DESTRUCTIVE_ON_REMOVE` omits `files`, and that omission is the safety property). Also anything TeamHub did not create.
+- `errors` — including the template key itself when the apps work threw: the label and the assignment are already written and correct, and losing them because a Deck board would not create is the worse outcome, so this reports rather than throws. Same stance `createSubTeam()` takes past its step 6.
+
+**No compliance surface, by decision.** Nothing here reports conformance and the admin Compliance tab gains no sub-team row: a sub-team has no settings page of its own, so there is nothing for its administrator to bring back into line and nothing to report at them (Justin, 2026-10-12). `PolicyService::labelledClassificationFor()` is the ungated, drift-free twin of `classificationForTeams()` for exactly that reason.
+
+Pinned by `tests/Unit/SubTeams/SubTeamClassificationTest.php` and `tests/js/subTeamClassification.test.mjs`.
+
+### `DELETE /api/v1/teams/{teamId}/sub-teams/{subTeamId}` (4.12.5)
+
+Deletes the sub-team and everything keyed on it, through `TeamService::deleteTeam()` — the one team-destroy path, so a sub-team is never destroyed differently from a team. Answers `{ "success": true }`.
+
+### `GET /api/v1/teams/{teamId}/sub-teams/{subTeamId}/members` (4.12.5)
+
+The shape `GET /api/v1/teams/{teamId}/members/manage` returns — `direct`, `groups`, `circles`, `inherited`, `effective_count` — with one field added to each person in `direct` and `inherited`:
+
+```json
+{ "direct": [ { "userId": "jaap", "displayName": "Jaap Tel", "role": "Member",
+                "level": 1, "status": "Member", "fromParent": true } ], "…": "…" }
+```
+
+`fromParent` is whether this person is on the main team's effective roster: `true` means they were picked out of it, `false` means they are a guest invited from outside. It is computed from the parent's roster read **once**, not per person.
+
+Each person also carries `subline` — the administrator's *Telling people apart* fields (`PersonSublineService`), resolved in one call for the whole roster. `GET …/sub-teams/candidates` carries it too. Neither did before 4.12.5: `getAllEffectiveMembers()` returns the members-widget shape (email, phone, live status) and adds no subline, so the two sub-team pickers were the only person pickers in the app showing a bare display name. Resolved with `adminContext: false`, so a profile field its owner marked private stays private — a team admin is not a Nextcloud administrator.
+
+Admin-gated through `getMembersForManage()` deliberately, rather than `getAllEffectiveMembers()`: the latter gates on `requireMemberLevel()`, which has no parent-admin fall-back and would refuse the very administrator this panel is built for.
+
+### `POST /api/v1/teams/{teamId}/sub-teams/{subTeamId}/members` (4.12.5)
+
+```json
+{ "members": ["jaap"], "outsiders": [ { "id": "consultant", "type": "user" } ] }
+```
+
+The same two lists `POST …/sub-teams` takes, validated by the same rule and answering the same two **400**s. Returns `{ "success": true, "results": […] }` — the per-entry results `inviteMembers()` produces, passed through rather than swallowed: Circles authorises its own `addMember()` against the initiator's rights on the circle, so a parent admin with no row on the sub-team may see entries fail and the panel has to be able to say so.
+
+### `DELETE /api/v1/teams/{teamId}/sub-teams/{subTeamId}/members/{userId}` (4.12.5)
+
+The uid in the path, as `team#removeMember` already does for a team's own members. Straight through `MemberService::removeMember()`, which is the point: leaving a team has a tick list — the resource-membership reconcile, the message subscriptions, the outstanding file reviews — and a second removal path would be a second place for it to fall out of date. That method also refuses to remove an **owner**, which is what protects the admin who created the sub-team; the UI hides the button rather than offering one that fails.
+
+## Changed by sub-teams (4.12.2)
+
+- **`GET /api/v1/teams`** now returns the **nested** shape: each team may carry `sub_teams: […]`. Every row also gains `is_sub_team`, `parent_team_id`, `sub_team_visibility` and `can_have_sub_teams`.
+
+  `parent_team_id` is sent **only when the caller also has the parent in the same response**. A person invited into a sub-team from outside the main team gets the sub-team as an ordinary **top-level** row with `parent_team_id: null` — they are told nothing about the parent, not even that it exists.
+
+  A `listed` sub-team the caller is *not* a member of appears inside its parent as `{ id, name, listed_only: true, level: 0, … }`. Those rows exist in this response and nowhere else: they carry no My Work scope, no Files-action scope and no file-review scope, and every team-scoped route still refuses them with the usual *You are not a member of this team*.
+
+  `GET /api/v1/teams/{teamId}` gains the same four fields (flat — no `sub_teams`), under the same disclosure rule for `parent_team_id`.
+
+  **With the module unavailable (4.12.3):** `GET /api/v1/teams` carries **no sub-team rows at all** — neither
+  nested nor top-level, so an invited outsider who is in no other team gets an empty list — and
+  `can_have_sub_teams` is `false` on every row of both responses. The three *structural* fields stay truthful on
+  the rows that remain: a sub-team whose module is off is still a sub-team, and its parent's admins are still its
+  only administrators.
+
+  **`sub_teams_unavailable_reason` (4.12.5)** — `null`, `"unlicensed"` or `"disabled"`, on every row of both
+  responses. It is what the Manage team → Sub-teams tab is **greyed** on rather than hidden (DESIGN §2.179):
+  `can_have_sub_teams` is one boolean over two different situations, and a client deriving which would be a second
+  copy of a precedence rule `SubTeamModuleService::unavailableReason()` owns. **`null` on a sub-team's own row**
+  as well as on a healthy instance — the depth rule is not advertised, and `is_sub_team` beside it is how a client
+  tells those two apart: `is_sub_team` true means hide the tab, a non-null reason means grey it and say which.
+
+  **Deliberately unchanged by the switch:** My Work, the Files-app actions and the file-review scopes all read the
+  flat, unfiltered list behind these payloads, so a member of a sub-team keeps every open work item and review while
+  the module is off. Nothing is deleted, and switching back on restores every surface.
+
+- **`GET /api/v1/teams/browse`** never lists a sub-team. Its membership is hand-picked by the parent's admin, so it must not appear anywhere anyone can join from.
+
+- **`PUT /api/v1/teams/{teamId}/group`** answers **400** *A sub-team follows its main team in the sidebar and cannot be moved on its own.* A sub-team renders inside its parent's row and already follows it into whatever personal group the parent is filed under.
+
+- **`PUT /api/v1/team-groups/teams/{teamId}/expanded`** (new) — body `{ "expanded": true|false }`. Remembers whether a team's sub-teams are showing, per reader, in the same `oc_preferences` blob as the sidebar groups. Member-gated, for the same reason `…/group` is. Returns the whole grouping state, which now also carries `expandedTeams` (teamId → `true`; a team with no entry is collapsed).
+
+- **Admin reach over a sub-team.** `MemberService::requireAdminLevel()` and `requireModeratorLevel()` now pass for an **admin of the parent**, so every team-scoped route a sub-team has reaches its parent's admins.
+
+  **`DELETE /api/v1/teams/{teamId}` was widened in 4.12.5, not 4.12.2.** The 4.12.2 entry here claimed it and the archive routes had been, and neither had: `SubTeamService::isParentAdmin()` ended up with no caller outside its own class, so until 4.12.5 only the admin who created a sub-team could delete it. The delete now accepts an admin of the governing team. **This is a widened permission boundary: a parent admin can delete a sub-team they do not own.**
+
+  **Still not widened: the archive routes.** `ArchiveService`'s two level-9 reads are unchanged, so archiving a sub-team is the creating admin's alone. That is Ship 3's business, which is where the archive cascade lives.
+
+- **What a sub-team is refused, now enforced (4.12.5).** §2.175 recorded four refusals and only one of them — being filed into a personal sidebar group — had code behind it. The other three are now written:
+
+  | Route | Answer |
+  |---|---|
+  | `POST /api/v1/teams/{teamId}/transfer-owner` | **403** *A sub-team is governed by its main team, so its ownership cannot be transferred.* Inside `requireOwnerLevel()`, whose only caller this is; the sub-team's creator **is** its owner and would otherwise pass. |
+  | `POST /api/v1/teams/{teamId}/invite-members` with a `circle` entry | the per-entry result reads `failed: a sub-team cannot be added as a member of another team`. Circles propagates membership **upward**, so such a row hands `{teamId}`'s files, Talk room and calendar to the sub-team's invited outsiders. |
+  | `GET /api/v1/users/search` | never returns a sub-team. That query has no membership or visibility filter, so it had been disclosing every private sub-team's name to an admin of any team. |
+  | the CSV importer's `team:<name>` token | dropped in the preview with *"…" is a sub-team and cannot be added to another team* — the same refusal, named in a row rather than failing silently after the run. |
+  | publishing a service / claiming the Nextcloud services | **400** *A sub-team cannot answer service requests. Use its main team instead.* Both entry points, because either makes the team a desk. |
+
+  `inviteMembers()` is the **boundary** for the member-circle rule; the search exclusion and the importer's warning are affordances, since search results go stale and the invite route is reachable directly. Pinned by `tests/Unit/SubTeams/SubTeamExclusionsTest.php`, which asserts the call sites exist — written against the source on purpose, because a decision with no caller is what went wrong twice.
+
+---
+
 ## Creating a team (changed 4.10.26)
 
 `POST /api/v1/teams` now answers **403** `{ "error": "You are not allowed to create teams" }` when the caller is outside the *who may create teams* groups (`createTeamGroup`; empty = everyone), checked before anything is read or written. Before 4.10.26 only the sidebar button, the OpenProject search and the provisioning routes asked, so a member the policy excluded could create a team with one POST instead of using *Request a new team*. The same rule `GET /api/v1/user/can-create-team` reports, so the UI and the route cannot disagree.
@@ -339,9 +555,13 @@ Actor types: `user` (uid), `group` (Nextcloud group id; `admin` = the administra
 
 ### The reference workflow — request a new team (`team_request`)
 
-`POST /api/v1/teams/{teamId}/workflows/team_request` with `{ "data": { "teamName": "Marketing", "reason": "…" } }` by any member of `{teamId}`. Steps: `submit` (done at creation, in the requester's name) → `approve` (owner or moderator of the requesting team; `complete` or `reject`) → `process` (**the group configured in Admin → TeamHub → Team requests**, default `admin`; read when the request is created and frozen on the instance) → `confirm` (the requester) → completed. Several may be open per team. The team itself is created by the processing group with the tools they have; the workflow carries the request and the answers, no side effects.
+`POST /api/v1/teams/{teamId}/workflows/team_request` with `{ "data": { "teamName": "Marketing", "reason": "…", "templateKey": "project", "profileKey": "internal" } }`. Steps: `submit` (done at creation, in the requester's name) → `approve` (owner or moderator of `{teamId}`; `complete` or `reject`) → `process` (**the service team that holds the Nextcloud services**, resolved when the request is created and frozen onto the step row — v4.10.23, no longer a configured group) → `confirm` (the requester) → completed. Several may be open per team. The team itself is created by the service team with the tools they have; the workflow carries the request and the answers, no side effects.
 
-Admin setting: `GET /api/v1/admin/settings` carries `workflowTeamRequestGroup: { id, displayName }`; `POST /api/v1/admin/settings` accepts `workflowTeamRequestGroup` (a group id; `""` restores `admin`; a group that does not exist is refused).
+**v4.12.4 — `templateKey` and `profileKey`.** Both optional, both validated against `teamhub_template` / `teamhub_policy_profile` (`400` for a key that does not exist), and both stored with the label they carried when the request was made (`templateLabel`, `profileLabel`) so the record keeps the words the requester read; the two labels are appended to the workflow's `description`. Omitted, the request is a request without a shape asked for — which is every request made before this version, and what either form sends when its defaults fetch failed. Both start points ask for them: the sidebar's *Request team* dialog and the `new_team` card on the Services page.
+
+**v4.12.4 — `{teamId}` for a new team is normally the desk.** The request forms no longer ask which team the request comes from (a new team is asked for by a person), so they send the service team's own id, the personal-request form of `teamOptional` below; `canStart()` admits any signed-in account on that id, and a member of `{teamId}` on any other.
+
+No admin setting. `workflowTeamRequestGroup` was removed in v4.10.23 with the configured processing group it named (`TeamService` line ~2250 records it); who answers a team request is decided by which service team holds the Nextcloud services, in Admin → TeamHub → Service desk.
 
 ### The licence (added 4.10.16)
 
@@ -394,7 +614,7 @@ A **service team** is a team created from the **Service** template that answers 
 |---|---|
 | `GET /api/v1/service-teams` | The desks the caller may work, each with `teamId`, `teamName`, `isServiceOwner` and its `catalogue`. Empty for everybody who is not an agent — not an error |
 | `GET /api/v1/service-teams/catalogue` | Every service any **active** desk offers: `serviceKey`, `definitionKey`, `label`, `description`, `category`, `categoryLabel`, `leadTime`, `serviceTeamId`, `serviceTeamName`. One payload for the whole Services page — A–Z, the grouping by team and the category tiles are all derived from it client-side (v4.10.25, DESIGN §2.147) |
-| `GET /api/v1/service-teams/claim-status` | `{ available, claimed, holderName, availableServices }` — whether this instance has the Nextcloud services and whether a team already holds them. Any signed-in account: it is what the creation wizard's checkbox reads before the team it would belong to exists, and it discloses the holding team's **name** and nothing else |
+| `GET /api/v1/service-teams/claim-status` | `{ available, claimed, holderName, holderTeamId, availableServices }` — whether this instance has the Nextcloud services and whether a team already holds them. Any signed-in account: it is what the creation wizard's checkbox reads before the team it would belong to exists, and what the sidebar's *Request team* opens its request against. It discloses the holding team's **name and id** (v4.12.4) and nothing else |
 | `GET /api/v1/service-teams/{teamId}/queue` | `{ unclaimed, mine, others, withOthers, closed }` — `unclaimed` / `mine` / `others`: the open workflows whose active step is this desk's; **`withOthers`** (v4.10.31): this desk's open workflows whose active step is somebody else's — back with the requester for a planned action or the confirmation, or before the desk's step; `closed`: the desk's part ended in the last 30 days. Eligible agents only (`403` otherwise) |
 | `GET /api/v1/service-teams/{teamId}/requests` *(4.11.7)* | The desk's whole history, filtered: `{ requests, total, truncated, agents, requesters }`. Query: `state` (`open` \| `closed` \| `all`, default `all` — **the desk's** reading, as the queue's Closed tab is: a request whose desk step is done is closed here while the workflow still waits for the requester to confirm), `assignee` (a uid, or `unassigned`), `requester` (a uid), `q` (≤ 200 chars, over the title and the requester's own words), `offset`, `limit` (≤ 100, default 25). Each row is a workflow view plus `desk: { open, assignee, status, closedAt, closedBy }`. No time window — this is what a member reads to find a request they never worked. `agents` and `requesters` are the two pickers' values, computed over everything the grid can see so narrowing one never empties the other. Bounded by `WorkflowEngine::DESK_GRID_MAX` (500, newest first); `truncated` says the oldest were dropped. Eligible agents only (`403` otherwise) |
 

@@ -338,3 +338,64 @@ export function conflictLabel(conflict) {
 	}
 	return ''
 }
+
+// ── Switching a team from one template to another ───────────────────────
+
+/**
+ * May a **sub-team** be created from, or switched to, this template?
+ * (v4.12.6, DESIGN §2.180.)
+ *
+ * Everything except `service`, and that one exclusion is a permission boundary
+ * rather than a preference. `teamhub_team_type.type === 'service'` is what
+ * *makes* a team a service desk — `LayoutController` reveals the Services tab
+ * on it and `ServiceBuilderController` and `TeamServiceController` both gate on
+ * it — and §2.175 refuses a sub-team becoming a desk outright: a desk answers
+ * requests from the whole organisation, and a team that is invisible to most of
+ * it cannot. `ServiceTeamService::refuseSubTeam()` guards its own entry points,
+ * but the type row is a second door into the same room, so it needs the same
+ * refusal. The server refuses it too; this is what keeps it out of the picker,
+ * because CLAUDE.md asks for hidden rather than disabled.
+ *
+ * @param {string} templateKey
+ * @return {boolean}
+ */
+export function templateAllowedForSubTeam(templateKey) {
+	return templateKey !== 'service'
+}
+
+/**
+ * What moving from `before` to `after` drops: everything the old template asked
+ * for that the new one does not (v4.12.6, DESIGN §2.180).
+ *
+ * Used to **word a warning**, not to decide anything. The server removes only
+ * what TeamHub itself created, so this list can name something that was never
+ * there — which is why the sentence it feeds is about the templates rather than
+ * about one team's inventory, and why the report after the apply is what states
+ * what actually happened.
+ *
+ * `files` is excluded, and that omission is the safety property, the same as in
+ * `PolicyPropagationService::DESTRUCTIVE_ON_REMOVE`: a team folder the template
+ * no longer wants is reported for somebody to remove by hand, never deleted. A
+ * warning that said the files folder was about to go would be wrong, and it is
+ * the one thing a reader would stop to check.
+ *
+ * Apps and modules are read as one list because `pages`/`wiki` live in both,
+ * and the result is de-duplicated for the same reason.
+ *
+ * @param {?object} before the template the team carries now
+ * @param {?object} after  the template it would carry
+ * @return {string[]} app and module ids, in the order the old template lists them
+ */
+export function templateDrops(before, after) {
+	if (!before || !after) {
+		return []
+	}
+	const wanted = new Set([...(after.apps || []), ...(after.modules || [])])
+	const dropped = new Set()
+	for (const id of [...(before.apps || []), ...(before.modules || [])]) {
+		if (id !== 'files' && !wanted.has(id)) {
+			dropped.add(id)
+		}
+	}
+	return [...dropped]
+}

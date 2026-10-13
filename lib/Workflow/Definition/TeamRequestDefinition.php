@@ -4,6 +4,8 @@ declare(strict_types=1);
 namespace OCA\TeamHub\Workflow\Definition;
 
 use OCA\TeamHub\MyWork\SourceGroup;
+use OCA\TeamHub\Db\PolicyProfileMapper;
+use OCA\TeamHub\Db\TeamTemplateMapper;
 use OCA\TeamHub\Exception\ValidationException;
 use OCA\TeamHub\Service\ServiceTeam\ServiceTeamService;
 use OCA\TeamHub\Service\Workflow\WorkflowActorResolver;
@@ -58,6 +60,16 @@ use OCP\IL10N;
  * are untouched: an actor is copied onto the step row at creation, so a
  * request already with the administrators stays with them, and no
  * transition verb reads the licence — a workflow in flight always finishes.
+ *
+ * ## v4.12.4 — the request says what shape of team it wants
+ *
+ * `data` carries an optional `templateKey` + `profileKey` (with the label
+ * each had when it was asked for), because the two questions the service
+ * team has to answer before it can open the create-team wizard were
+ * previously not in the request at all. Both start points ask for them;
+ * both stay optional in `validateStart()`, so a request made before this
+ * version — or by any other client — is still a valid request. No step,
+ * actor or transition changed, so `VERSION` is still 2.
  */
 class TeamRequestDefinition implements IWorkflowDefinition, IWorkflowDefinitionSource {
 
@@ -74,6 +86,13 @@ class TeamRequestDefinition implements IWorkflowDefinition, IWorkflowDefinitionS
 
     public function __construct(
         private ServiceTeamService $serviceTeams,
+        // v4.12.4 — the two pickers the request form carries. Mappers, not
+        // PolicyService: the registry builds every definition eagerly at
+        // boot (`Application.php`), so a definition that injects a service
+        // pulls that service's whole graph into the request that first
+        // touches a workflow. Both of these are leaves in the DI graph.
+        private TeamTemplateMapper $templates,
+        private PolicyProfileMapper $profiles,
     ) {
     }
 
@@ -94,8 +113,37 @@ class TeamRequestDefinition implements IWorkflowDefinition, IWorkflowDefinitionS
         return $l->t('Team request: %s', [(string)($data['teamName'] ?? '')]);
     }
 
+    /**
+     * The reason, and under it what shape of team was asked for (v4.12.4).
+     *
+     * The template and the policy are the two answers the service team needs
+     * before it can open the create-team wizard, so they belong in the one
+     * place both parties read. The labels are the snapshot `validateStart()`
+     * stored, not a lookup: this is a record of what was asked for, and
+     * renaming a template afterwards does not change the request. The
+     * detail view renders this with `white-space: pre-wrap`, so the lines
+     * survive.
+     */
     public function getDescription(IL10N $l, array $data): string {
-        return (string)($data['reason'] ?? '');
+        $lines  = [];
+        $reason = trim((string)($data['reason'] ?? ''));
+        if ($reason !== '') {
+            $lines[] = $reason;
+            $lines[] = '';
+        }
+
+        $template = trim((string)($data['templateLabel'] ?? $data['templateKey'] ?? ''));
+        if ($template !== '') {
+            // TRANSLATORS: %s is the name of the team template the requester asked for
+            $lines[] = $l->t('Template: %s', [$template]);
+        }
+        $profile = trim((string)($data['profileLabel'] ?? $data['profileKey'] ?? ''));
+        if ($profile !== '') {
+            // TRANSLATORS: %s is the name of the policy profile the requester asked for
+            $lines[] = $l->t('Profile: %s', [$profile]);
+        }
+
+        return trim(implode("\n", $lines));
     }
 
     public function getSteps(): array {
@@ -195,10 +243,42 @@ class TeamRequestDefinition implements IWorkflowDefinition, IWorkflowDefinitionS
         if ($reason === '') {
             throw new ValidationException('Say why the team is needed.');
         }
-        return [
+        $out = [
             'teamName' => $name,
             'reason'   => mb_substr($reason, 0, self::MAX_REASON),
         ];
+
+        // v4.12.4 — the template and the policy profile the requester asks
+        // for. **Optional here, required by the forms**: a request made
+        // before this version, or by a client that does not send them, is
+        // still a valid request — the service team then picks in the wizard
+        // as it always did.
+        //
+        // The label is stored beside the key because this is a record of
+        // what was asked for. Resolving it at render time would mean a
+        // lookup per row in My Work, and a template renamed between the
+        // asking and the answering would rewrite the request after the fact.
+        $templateKey = trim((string)($data['templateKey'] ?? ''));
+        if ($templateKey !== '') {
+            $template = $this->templates->find($templateKey);
+            if ($template === null) {
+                throw new ValidationException('That team template does not exist.');
+            }
+            $out['templateKey']   = $templateKey;
+            $out['templateLabel'] = (string)($template['label'] ?? $templateKey);
+        }
+
+        $profileKey = trim((string)($data['profileKey'] ?? ''));
+        if ($profileKey !== '') {
+            $profile = $this->profiles->find($profileKey);
+            if ($profile === null) {
+                throw new ValidationException('That policy profile does not exist.');
+            }
+            $out['profileKey']   = $profileKey;
+            $out['profileLabel'] = (string)($profile['label'] ?? $profileKey);
+        }
+
+        return $out;
     }
 
     public function subjectOf(string $teamId, array $data): array {

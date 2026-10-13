@@ -653,7 +653,11 @@ class PolicyService {
      * That reverses what DESIGN §2.107 recorded — see §2.110 for the reasoning
      * and for what it costs. The boundary that remains is **reclassification**:
      * choosing at creation is the creator's, changing it afterwards is a
-     * Nextcloud administrator's.
+     * Nextcloud administrator's — **except on a sub-team** (v4.12.6, §2.180),
+     * where it is the parent team's administrator's, because they picked it at
+     * creation and the sub-team has no administration of its own. That path is
+     * `PolicyApplyService::applyProfileToTeam()`; the gate on `apply()` is
+     * unchanged, and this endpoint serves both.
      *
      * The values ride along because the wizard shows what each policy will do
      * before it is chosen.
@@ -1548,6 +1552,87 @@ class PolicyService {
                 // stored type naming a template an admin has since removed
                 // resolves to its key rather than to nothing — the key is still
                 // what the team was made from and is more use than a blank.
+                'templateKey'    => $templateKey,
+                'templateLabel'  => $template['label'] ?? $templateKey,
+                'templateSeeded' => (bool)($template['isSeeded'] ?? false),
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * Which profile and which template a set of teams carries, with labels
+     * and **nothing else** (v4.12.6, DESIGN §2.180).
+     *
+     * The ungated twin of {@see classificationForTeams()}, for the parent's
+     * Sub-teams tab — which has to answer "what got applied to this
+     * sub-team" to a *team* administrator, not a Nextcloud one.
+     *
+     * Two differences from the admin grid's reader, both deliberate:
+     *
+     *  - **No gate.** Reading the profile a team of your own carries is at
+     *    team-member level by §4.1, and this is read by a caller that has
+     *    already required admin of the governing team. HANDOFF's 4.8.13 rule:
+     *    a method that has established who is asking calls the ungated reader.
+     *  - **No drift.** `compareTeams()` is not called, so no conformance is
+     *    claimed or computed. Justin's call, 2026-10-12: a sub-team has no
+     *    settings surface of its own, so there is nothing for its
+     *    administrator to bring back into line and nothing to report at them.
+     *    Conformance of the estate stays the Compliance tab's subject, where
+     *    the reader can act on it.
+     *
+     * A team with neither is **present** in the result, where the grid's
+     * reader drops it: the panel's row has to say *No policy* rather than go
+     * blank, since the question it answers is which one got applied.
+     *
+     * `profileSeeded` and `templateSeeded` travel because the label rule is the
+     * client's: `profileDisplayName()` in `src/constants/policy.js` translates a
+     * seeded row's label by key and takes an administrator's own wording
+     * verbatim, which it cannot decide without knowing which kind it has.
+     *
+     * @param list<string> $teamIds one parent's children, not the instance
+     * @return array<string, array{
+     *     profileKey: ?string, profileLabel: ?string, profileSeeded: bool,
+     *     templateKey: ?string, templateLabel: ?string, templateSeeded: bool
+     * }>
+     */
+    public function labelledClassificationFor(array $teamIds): array {
+        if ($teamIds === []) {
+            return [];
+        }
+
+        $assignments = $this->teamPolicyMapper->findByTeams($teamIds);
+        $types       = $this->teamTypeMapper->findTypesByTeams($teamIds);
+
+        // Both tables are a handful of rows, so read them whole rather than
+        // adding a keyed batch method to each mapper — the same trade
+        // `classificationForTeams()` makes, and the reason this is three
+        // queries for a parent with twenty children rather than forty.
+        $profiles = [];
+        foreach ($this->profileMapper->findAll() as $row) {
+            $profiles[$row['profileKey']] = $row;
+        }
+        $templates = [];
+        foreach ($this->templateMapper->findAll() as $row) {
+            $templates[$row['templateKey']] = $row;
+        }
+
+        $out = [];
+        foreach ($teamIds as $teamId) {
+            $profileKey  = $assignments[$teamId] ?? null;
+            $templateKey = $types[$teamId] ?? null;
+
+            // A key with no row behind it: a deleted profile an assignment
+            // still points at, or a template an administrator has removed.
+            // Resolved on read, as every other reader here resolves it.
+            $profile  = $profileKey !== null ? ($profiles[$profileKey] ?? null) : null;
+            $template = $templateKey !== null ? ($templates[$templateKey] ?? null) : null;
+
+            $out[$teamId] = [
+                'profileKey'     => $profile !== null ? $profileKey : null,
+                'profileLabel'   => $profile['label'] ?? null,
+                'profileSeeded'  => (bool)($profile['isSeeded'] ?? false),
                 'templateKey'    => $templateKey,
                 'templateLabel'  => $template['label'] ?? $templateKey,
                 'templateSeeded' => (bool)($template['isSeeded'] ?? false),

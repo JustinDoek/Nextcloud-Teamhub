@@ -57,6 +57,16 @@ class PolicyApplyService {
     /** Assignment source recorded on the row, distinct from `creation`. */
     private const SOURCE_ASSIGNMENT = 'assignment';
 
+    /**
+     * A team administrator classifying a **sub-team** from the parent's
+     * Sub-teams tab (v4.12.6). Distinct from both the others on purpose:
+     * `creation` is the choice made in the dialog that made it, `assignment`
+     * is a Nextcloud administrator's act, and this is neither. Nothing gates
+     * on the value — it is provenance, for the audit trail and for anyone
+     * reading the row later.
+     */
+    private const SOURCE_SUB_TEAM = 'sub_team';
+
     public function __construct(
         private PolicyService           $policyService,
         private TeamService             $teamService,
@@ -94,6 +104,12 @@ class PolicyApplyService {
      * Applying a profile is an instance governance control: a team admin must
      * never be able to reclassify their own team, which is the bypass DESIGN
      * §2.103 records as the reason tags were removed.
+     *
+     * **One exception, and it does not go through here** (v4.12.6, §2.180): the
+     * administrator of a main team may reclassify its **sub-teams**, which they
+     * already classify at creation and which have no administration of their
+     * own. That caller uses {@see applyProfileToTeam()} and establishes its own
+     * authority first. This gate is for every other caller and is unchanged.
      *
      * @throws AccessDeniedException
      */
@@ -372,11 +388,60 @@ class PolicyApplyService {
      * @throws AccessDeniedException|NotFoundException
      */
     public function apply(string $teamId, string $profileKey, bool $reapply = false): array {
-        $actor   = $this->requireNcAdmin();
+        return $this->applyResolved(
+            $teamId, $profileKey, $this->requireNcAdmin(), self::SOURCE_ASSIGNMENT, $reapply,
+        );
+    }
+
+    /**
+     * Assign a profile to one team **with no administrator gate** (v4.12.6).
+     *
+     * The profile twin of
+     * {@see PolicyPropagationService::applyTemplateToTeam()}, on exactly the
+     * same terms and for the same shape of caller: one that has already
+     * established who is asking and is not a Nextcloud administrator.
+     *
+     * Its only caller is {@see SubTeamService::setClassification()}, where the
+     * authority is admin of the **governing** team. Justin's call,
+     * 2026-10-12: a sub-team's template and policy are the parent
+     * administrator's to change, because they are already the parent
+     * administrator's to choose at creation and the sub-team has no
+     * administration of its own — see DESIGN §2.180, which records what that
+     * costs §2.110's boundary.
+     *
+     * `source` is `sub_team` rather than `assignment`, so the row says a team
+     * administrator classified it from the Sub-teams tab and not that a
+     * Nextcloud administrator did.
+     *
+     * **Do not call this from a controller.** The gate is the caller's whole
+     * contribution; a second caller that forgets it is a team admin
+     * reclassifying a main team, which is the bypass DESIGN §2.103 exists to
+     * prevent.
+     *
+     * @return array{applied: list<string>, notApplied: list<string>, preview: array<string,mixed>}
+     * @throws NotFoundException
+     */
+    public function applyProfileToTeam(string $teamId, string $profileKey, string $actorUid): array {
+        return $this->applyResolved($teamId, $profileKey, $actorUid, self::SOURCE_SUB_TEAM, false);
+    }
+
+    /**
+     * The body of {@see apply()} with the actor and the source decided.
+     *
+     * @return array{applied: list<string>, notApplied: list<string>, preview: array<string,mixed>}
+     * @throws NotFoundException
+     */
+    private function applyResolved(
+        string $teamId,
+        string $profileKey,
+        string $actor,
+        string $source,
+        bool $reapply,
+    ): array {
         $preview = $this->buildPreview($teamId, $profileKey);
 
         // 1. The assignment row, before any setting write.
-        $this->teamPolicyMapper->assign($teamId, $profileKey, $actor, time(), self::SOURCE_ASSIGNMENT);
+        $this->teamPolicyMapper->assign($teamId, $profileKey, $actor, time(), $source);
 
         $applied    = [];
         $notApplied = [];

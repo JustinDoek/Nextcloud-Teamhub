@@ -164,6 +164,47 @@ class TeamGroupController extends Controller {
 	}
 
 	/**
+	 * PUT /api/v1/team-groups/teams/{teamId}/expanded
+	 * Body: { expanded: bool }
+	 *
+	 * v4.12.2 — remembers whether this team's sub-teams are showing in the
+	 * reader's own sidebar.
+	 *
+	 * Member-gated for the same reason `assignTeam` is: it is the one shape of
+	 * request here that names a team. Storing an unknown id in your own
+	 * preference blob would remember a chevron for a row that never renders,
+	 * so the check protects nothing by itself — it is here so the route
+	 * answers the gate question without a reader reconstructing that argument,
+	 * and because refusing junk is cheaper than storing it.
+	 */
+	#[NoAdminRequired]
+	public function setTeamExpanded(string $teamId): JSONResponse {
+		$uid = $this->userSession->getUser()?->getUID();
+		if ($uid === null) {
+			return new JSONResponse(['error' => 'Not authenticated'], Http::STATUS_UNAUTHORIZED);
+		}
+
+		$body = $this->request->getParams();
+		if (!isset($body['expanded'])) {
+			return new JSONResponse(['error' => 'expanded is required'], Http::STATUS_BAD_REQUEST);
+		}
+		// A form post turns a boolean into the string "true"/"false"/"1"/"0",
+		// and filter_var is the one reading that gets all four right — a plain
+		// (bool) cast would read "false" as true.
+		$expanded = filter_var($body['expanded'], FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+		if ($expanded === null) {
+			return new JSONResponse(['error' => 'expanded must be a boolean'], Http::STATUS_BAD_REQUEST);
+		}
+
+		try {
+			$this->memberService->requireMemberLevel($teamId);
+			return new JSONResponse($this->teamGroupService->setTeamExpanded($uid, $teamId, $expanded));
+		} catch (\Throwable $e) {
+			return $this->exceptionResponse($e, 'Failed to save the team state', ['teamId' => $teamId]);
+		}
+	}
+
+	/**
 	 * PUT /api/v1/teams/{teamId}/group
 	 * Body: { groupId: string|null }
 	 *

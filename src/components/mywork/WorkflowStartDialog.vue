@@ -1,7 +1,7 @@
 <template>
 	<!-- v4.10.15 — start the one built-in workflow a member can open from
-	     My Work: request a new team. Which team is asking, what the new
-	     team should be called, and why. The definition validates again
+	     My Work: request a new team. What the new team should be called, what
+	     shape it should have, and why. The definition validates again
 	     server-side; this only refuses the obviously empty. -->
 	<!-- v4.10.17 — `label-id`, not `name`: see WorkflowActionDialog. -->
 	<NcModal label-id="wf-start-title" size="small" @close="$emit('close')">
@@ -11,29 +11,34 @@
 				<!-- v4.10.23 — "the administrators" became "the service
 				     team": step 3 is the desk that holds the Nextcloud
 				     services. The sentence is what the requester is told
-				     will happen, so it cannot keep naming the old actor. -->
-				{{ t('teamhub', 'The owner or a moderator of the team you ask from approves the request; the service team then creates the team and you confirm it.') }}
+				     will happen, so it cannot keep naming the old actor.
+				     v4.12.4 — and it no longer names a team the requester
+				     asks from, because there is none to name. -->
+				{{ t('teamhub', 'The service team approves the request and creates the team; you confirm it afterwards.') }}
 			</p>
 
-			<label class="wf-start__field">
-				<span>{{ t('teamhub', 'Ask from team') }}</span>
-				<NcSelect
-					v-model="teamId"
-					input-id="wf-start-team"
-					label-outside
-					:options="teamOptions"
-					:reduce="o => o.id"
-					:clearable="false"
-					:disabled="busy"
-					:placeholder="t('teamhub', 'Choose a team')"
-					:aria-label-combobox="t('teamhub', 'Ask from team')" />
-			</label>
-
+			<!-- v4.12.4 — *Ask from team* was here, and was required. A new
+			     team is asked for by a person, not by a team: there is nothing
+			     for the asking team to own, a member of no team could not ask
+			     at all, and the service catalogue had already made the field
+			     optional for this service (ServiceCatalogue::TEAM_OPTIONAL,
+			     Justin 2026-09-25). The request is recorded against the
+			     service team that answers it, which is what the Services page
+			     has done for a personal request since v4.10.44. -->
 			<NcTextField
 				v-model="teamName"
 				:label="t('teamhub', 'Name of the new team')"
 				maxlength="255"
 				:disabled="busy" />
+
+			<!-- The two answers the service team needs before it can open the
+			     create-team wizard. Shared with the new-team card on the
+			     Services page, so both start points ask the same thing. -->
+			<TeamShapeFields
+				id-prefix="wf-start"
+				:disabled="busy"
+				@update:template-key="templateKey = $event"
+				@update:profile-key="profileKey = $event" />
 
 			<label class="wf-start__field">
 				<span>{{ t('teamhub', 'Why is it needed?') }}</span>
@@ -61,15 +66,14 @@
 
 <script>
 import { translate as t, translatePlural as n } from '@nextcloud/l10n'
-import { NcModal, NcSelect, NcTextField, NcTextArea, NcButton, NcLoadingIcon, NcNoteCard } from '@nextcloud/vue'
+import { NcModal, NcTextField, NcTextArea, NcButton, NcLoadingIcon, NcNoteCard } from '@nextcloud/vue'
+import TeamShapeFields from '../services/TeamShapeFields.vue'
 import { ICON_BODY } from '../../constants/uiTokens.js'
 
 export default {
 	name: 'WorkflowStartDialog',
-	components: { NcModal, NcSelect, NcTextField, NcTextArea, NcButton, NcLoadingIcon, NcNoteCard },
+	components: { NcModal, NcTextField, NcTextArea, NcButton, NcLoadingIcon, NcNoteCard, TeamShapeFields },
 	props: {
-		/** `[{ id, name }]` — the teams the viewer may ask from. */
-		teams: { type: Array, default: () => [] },
 		busy: { type: Boolean, default: false },
 		/** A server-side refusal to show under the form. */
 		error: { type: String, default: '' },
@@ -77,18 +81,19 @@ export default {
 	emits: ['close', 'submit'],
 	data() {
 		return {
-			teamId: this.teams.length === 1 ? String(this.teams[0].id) : null,
 			teamName: '',
 			reason: '',
+			// v4.12.4 — TeamShapeFields owns the two values and reports them
+			// here. Empty when its fetch failed, which the definition allows:
+			// the request is then sent without them.
+			templateKey: '',
+			profileKey: '',
 		}
 	},
 	computed: {
 		iconBody() { return ICON_BODY },
-		teamOptions() {
-			return this.teams.map(team => ({ id: String(team.id), label: team.name || String(team.id) }))
-		},
 		canSubmit() {
-			return !!this.teamId && this.teamName.trim() !== '' && this.reason.trim() !== ''
+			return this.teamName.trim() !== '' && this.reason.trim() !== ''
 		},
 	},
 	methods: {
@@ -98,7 +103,12 @@ export default {
 			if (this.busy || !this.canSubmit) {
 				return
 			}
-			this.$emit('submit', { teamId: this.teamId, teamName: this.teamName.trim(), reason: this.reason.trim() })
+			this.$emit('submit', {
+				teamName: this.teamName.trim(),
+				reason: this.reason.trim(),
+				templateKey: this.templateKey,
+				profileKey: this.profileKey,
+			})
 		},
 	},
 }

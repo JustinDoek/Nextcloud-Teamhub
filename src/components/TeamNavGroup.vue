@@ -73,7 +73,9 @@
             v-for="team in group.teams"
             :key="team.id"
             :team="team"
-            :active="team.id === activeTeamId"
+            :active="team.id === activeTeamId && !isSubTeamActive(team)"
+            :active-team-id="activeTeamId"
+            :expanded="expandedTeams[team.id] === true"
             :current-group-id="group.id"
             @select="$emit('select', $event)"
             @manage="$emit('manage', $event)"
@@ -82,7 +84,8 @@
             @email-members="$emit('email-members', $event)"
             @leave="$emit('leave', $event)"
             @pick-group="$emit('pick-group', $event)"
-            @create-group="$emit('create-group', $event)" />
+            @create-group="$emit('create-group', $event)"
+            @toggle-expanded="$emit('toggle-expanded', $event)" />
 
         <!-- An empty group is still worth a row: it is the only place its
              own Delete action lives, so hiding it would make a group
@@ -136,9 +139,14 @@ export default {
             type: String,
             default: null,
         },
+        /** v4.12.2 - teamId -> true for a team whose sub-teams are showing. */
+        expandedTeams: {
+            type: Object,
+            default: () => ({}),
+        },
     },
 
-    emits: ['toggle', 'delete', 'rename', 'select', 'manage', 'copy-link', 'invite', 'email-members', 'leave', 'pick-group', 'create-group'],
+    emits: ['toggle', 'delete', 'rename', 'select', 'manage', 'copy-link', 'invite', 'email-members', 'leave', 'pick-group', 'create-group', 'toggle-expanded'],
 
     data() {
         return {
@@ -181,6 +189,16 @@ export default {
     methods: {
         t,
         n,
+
+        /**
+         * v4.12.2 - is the active team one of this team's sub-teams rather
+         * than the team itself? Without this a parent would highlight while
+         * one of its children is the one open, and two rows would read as
+         * selected at once.
+         */
+        isSubTeamActive(team) {
+            return (team.sub_teams || []).some(sub => sub.id === this.activeTeamId)
+        },
 
         onRename() {
             const name = (this.renameTo || '').trim()

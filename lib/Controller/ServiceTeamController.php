@@ -338,13 +338,20 @@ class ServiceTeamController extends Controller {
         }
         try {
             if (!$this->serviceTeams->isAvailable()) {
-                return new JSONResponse(['available' => false, 'claimed' => false, 'holderName' => '']);
+                return new JSONResponse(['available' => false, 'claimed' => false, 'holderName' => '', 'holderTeamId' => '']);
             }
             $holder = $this->serviceTeams->holderOfNextcloudServices();
             return new JSONResponse([
                 'available'         => true,
                 'claimed'           => $holder !== null,
                 'holderName'        => $holder !== null ? $this->serviceTeams->teamName($holder) : '',
+                // v4.12.4 — the id as well as the name, so a start point
+                // outside the Services page can open a personal request
+                // against the desk (the sidebar's *Request team*). The
+                // claim is all-or-nothing, so the bundle's holder is the
+                // team that answers each of its services; the name was
+                // already public to every signed-in user.
+                'holderTeamId'      => $holder ?? '',
                 'availableServices' => $this->serviceTeams->describeAvailableServices(),
             ]);
         } catch (\Throwable $e) {

@@ -7,11 +7,24 @@
 
         <!-- Tab bar -->
         <div class="manage-tabs">
+            <!-- v4.12.5 — a greyed tab is `aria-disabled`, never `disabled`,
+                 and stays clickable. The same choice `SubTeamNavItem` records
+                 for a listed sub-team, for the same reason: a `disabled`
+                 button is not focusable, so a keyboard or screen-reader user
+                 would get the grey and none of the explanation — and the
+                 whole point of greying rather than hiding is that the reader
+                 learns the module exists. Clicking opens the tab, which
+                 renders the teaser instead of the panel. -->
             <button
                 v-for="tab in tabs"
                 :key="tab.key"
                 class="manage-tab"
-                :class="{ 'manage-tab--active': activeTab === tab.key, 'manage-tab--danger': tab.key === 'danger' }"
+                :class="{
+                    'manage-tab--active': activeTab === tab.key,
+                    'manage-tab--danger': tab.key === 'danger',
+                    'manage-tab--muted': !!tab.unavailable,
+                }"
+                :aria-disabled="tab.unavailable ? 'true' : null"
                 @click="activeTab = tab.key">
                 <component :is="tab.icon" :size="ICON_BODY" />
                 {{ tab.label }}
@@ -448,7 +461,17 @@
                     </div>
                 </div>
 
-                <!-- Teams / Circles -->
+                <!-- Teams / Circles.
+
+                     v4.12.2 - **sub-teams do not appear here, and that is
+                     correct.** This section lists circles held as members of
+                     this team (`circles_member.user_type = 16`), and a
+                     sub-team is deliberately not one: Circles propagates
+                     membership from the contained circle up to the container,
+                     so such a row would make a sub-team's invited outsiders
+                     effective members of this team. The parent link is
+                     TeamHub's own table and sub-teams are managed on the
+                     Sub-teams tab. See DESIGN section 2.175. -->
                 <div v-if="manageMembers.circles.length > 0" class="group-circle-list" :class="{ 'group-circle-list--spaced': manageMembers.groups.length > 0 }">
                     <div class="group-circle-section-label">{{ t('teamhub', 'Teams') }}</div>
                     <div
@@ -2304,6 +2327,30 @@
              services — plus who works the queue. Rendered only for a
              Service-template team whose viewer is a team admin; the server
              re-checks both on every route. -->
+        <!-- v4.12.2 - the body lives in its own component. This file is
+             ~8,600 lines; the precedent is src/components/members/ and
+             src/components/services/. -->
+        <div v-else-if="activeTab === 'sub-teams'" class="manage-tab-content">
+            <!-- v4.12.5 — the greyed tab opens *this*, never SubTeamsPanel:
+                 that panel's first act is a fetch, and the route answers 403
+                 while the module is unavailable. Greying a tab only pays off
+                 if there is something to read behind it, which is the whole
+                 reason for greying rather than hiding. -->
+            <NcEmptyContent
+                v-if="subTeamsUnavailable"
+                :name="t('teamhub', 'Give part of this team its own space')"
+                :description="t('teamhub', 'A sub-team has its own members, files and modules — picked from this team and managed from here. You can invite people from outside it too.')">
+                <template #icon><AccountMultiplePlusIcon :size="ICON_XL" /></template>
+                <template #action>
+                    <!-- Not a button: there is nothing a team admin can do
+                         here but talk to somebody, and an action that only
+                         explains itself is a sentence. -->
+                    <p class="manage-subteams-teaser__why">{{ subTeamsUnavailableReason }}</p>
+                </template>
+            </NcEmptyContent>
+            <SubTeamsPanel v-else :team="team" />
+        </div>
+
         <div v-else-if="activeTab === 'services'" class="manage-tab-content">
 
             <div class="manage-section" data-section="nextcloud-services">
@@ -2916,7 +2963,7 @@ import axios from '@nextcloud/axios'
 import { teamImageUrl, uploadTeamsAvatar, removeTeamsAvatar } from '../lib/teamAvatar.js'
 import { shiftToday, shiftIsoDate, epochDateToIso, formatIsoDate } from '../lib/localDate.js'
 import { mapState, mapMutations } from 'vuex'
-import { NcActionButton, NcActions, NcButton, NcLoadingIcon, NcAvatar, NcTextArea, NcCheckboxRadioSwitch, NcDialog, NcSelect, NcTextField } from '@nextcloud/vue'
+import { NcActionButton, NcActions, NcButton, NcEmptyContent, NcLoadingIcon, NcAvatar, NcTextArea, NcCheckboxRadioSwitch, NcDialog, NcSelect, NcTextField } from '@nextcloud/vue'
 import ContentSave from 'vue-material-design-icons/ContentSave.vue'
 import AccountRemove from 'vue-material-design-icons/AccountRemove.vue'
 import Check from 'vue-material-design-icons/Check.vue'
@@ -2943,6 +2990,7 @@ import ChevronDown from 'vue-material-design-icons/ChevronDown.vue'
 import TextIcon from 'vue-material-design-icons/Text.vue'
 import TuneIcon from 'vue-material-design-icons/Tune.vue'
 import AccountMultipleIcon from 'vue-material-design-icons/AccountMultiple.vue'
+import AccountMultiplePlusIcon from 'vue-material-design-icons/AccountMultiplePlus.vue'
 import PuzzleIcon from 'vue-material-design-icons/Puzzle.vue'
 import AlertIcon from 'vue-material-design-icons/Alert.vue'
 // v4.6.13 — the team's expiration date on the Maintenance tab.
@@ -2996,18 +3044,20 @@ import {
     CFG_ROOT,
     CFG_FEDERATED,
 } from '../constants/circlesConfig.js'
+import SubTeamsPanel from './subteams/SubTeamsPanel.vue'
 
 export default {
     name: 'ManageTeamView',
     components: {
-         NcTextField, NcButton, NcLoadingIcon, NcAvatar, NcTextArea, NcCheckboxRadioSwitch, NcDialog, NcSelect,
+        SubTeamsPanel,
+         NcTextField, NcButton, NcEmptyContent, NcLoadingIcon, NcAvatar, NcTextArea, NcCheckboxRadioSwitch, NcDialog, NcSelect,
         // v4.10.29 — the Files section's action menu and the shared quota form.
         NcActions, NcActionButton, DatabaseArrowUpOutline, QuotaRequestDialog,
         ContentSave, AccountRemove, Check, Close, CheckCircle, Delete, DragVertical,
         MessageIcon, FolderIcon, CalendarIcon, CardTextIcon, FileDocumentOutlineIcon, BookOpenOutline, AlertOctagon,
         ChevronRight, ChevronDown,
         ImageIcon, TrashCanOutline, TrashCan, UploadIcon, AccountArrowRight,
-        TextIcon, TuneIcon, AccountMultipleIcon, PuzzleIcon, AlertIcon, CalendarClock,
+        TextIcon, TuneIcon, AccountMultipleIcon, AccountMultiplePlusIcon, PuzzleIcon, AlertIcon, CalendarClock,
         ClockOutline, CloseCircle,
         ArchiveTeamModal,
         DecisionCategoryDialog,
@@ -3676,12 +3726,63 @@ export default {
                 : shiftToday({ days: 1 })
         },
 
+        /**
+         * Why the Sub-teams tab cannot be used, or '' when it can
+         * (v4.12.5): 'unlicensed' or 'disabled'.
+         *
+         * Read from the payload rather than derived here. `can_have_sub_teams`
+         * is one boolean over two different situations, and the frontend
+         * guessing which would be a second copy of a precedence rule
+         * `SubTeamModuleService` already owns.
+         */
+        subTeamsUnavailable() {
+            return this.team.sub_teams_unavailable_reason || ''
+        },
+
+        /** The teaser's sentence about why, by reason. */
+        subTeamsUnavailableReason() {
+            if (this.subTeamsUnavailable === 'disabled') {
+                return t('teamhub', 'Your Nextcloud administrator has switched sub-teams off for this instance.')
+            }
+            // 'unlicensed', and the fallback: a reason this version does not
+            // know is still a reason the tab is greyed, and the licence is the
+            // likelier of the two.
+            return t('teamhub', 'Sub-teams are part of a paid plan. Ask your Nextcloud administrator about adding them.')
+        },
+
         tabs() {
             const list = [
                 { key: 'description',  label: t('teamhub', 'General'),  icon: 'TextIcon' },
                 { key: 'settings',     label: t('teamhub', 'Settings'),     icon: 'TuneIcon' },
                 { key: 'members',      label: t('teamhub', 'Members'),      icon: 'AccountMultipleIcon' },
             ]
+            // v4.12.2 - sub-teams, right after Members because that is what
+            // one is: a hand-picked selection of this team's people.
+            //
+            // Three states, and the middle one is new in v4.12.5:
+            //
+            //  - **Absent** when this team is itself a sub-team. Depth is 1,
+            //    so there is nothing to offer and nothing to be curious
+            //    about; CLAUDE.md asks for hidden rather than a tab that
+            //    refuses. `is_sub_team` is how that case is told apart from
+            //    the one below, which is why the server sends null for the
+            //    reason on a sub-team's own row.
+            //  - **Greyed, with the reason named** when the module is
+            //    unavailable instance-wide (Justin's call, 2026-10-12). An
+            //    absent tab teaches a team admin nothing about a module their
+            //    organisation could have; the two reasons need different
+            //    sentences, which is why the server sends which it is rather
+            //    than a bare boolean.
+            //  - **Normal** otherwise.
+            if (!this.team.is_sub_team) {
+                list.push({
+                    key: 'sub-teams',
+                    label: t('teamhub', 'Sub-teams'),
+                    icon: 'AccountMultiplePlusIcon',
+                    // null when it works; 'unlicensed' or 'disabled' otherwise.
+                    unavailable: this.subTeamsUnavailable,
+                })
+            }
             // Project tab — only for teams created from the Project template.
             // A project isn't an integration that can be enabled/disabled, so
             // it gets its own tab rather than living under Module settings.
@@ -6694,6 +6795,36 @@ export default {
 .manage-tab--danger.manage-tab--active {
     color: var(--color-text-error);
     border-bottom-color: var(--color-text-error);
+}
+
+/* v4.12.5 — a greyed tab: the module exists but is not available on this
+   instance. Muted rather than removed, so a team admin learns it is there
+   (Justin, 2026-10-12).
+
+   `opacity` and not a colour: the base colour is already
+   --color-text-maxcontrast, which is the most muted token there is, so
+   there is nothing greyer to reach for — and NC has no "disabled text"
+   token. It keeps the hover and focus affordances, because the tab really
+   is clickable: it opens the teaser that explains why it is greyed. */
+.manage-tab--muted {
+    opacity: 0.6;
+}
+
+.manage-tab--muted.manage-tab--active {
+    /* Active but still muted — the underline says which tab is open without
+       claiming the feature is working. */
+    color: var(--color-text-maxcontrast);
+    border-bottom-color: var(--color-text-maxcontrast);
+}
+
+/* The one sentence saying why, under the teaser's description. Centred with
+   the rest of the NcEmptyContent block it sits in. */
+.manage-subteams-teaser__why {
+    margin: 0;
+    color: var(--color-text-maxcontrast);
+    font-size: var(--th-font-meta);
+    line-height: var(--th-line-height-body);
+    text-align: center;
 }
 
 /* ── Sections ─────────────────────────────────────────────────── */

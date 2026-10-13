@@ -9,9 +9,9 @@
     },
     "announcements": [
         {
-            "filename": "The_journey_v2.md",
-            "role": "admin",
-            "version": "4.11.2"
+            "filename": "feedback.md",
+            "role": "everyone",
+            "version": "4.13.0"
         }
     ]
 }

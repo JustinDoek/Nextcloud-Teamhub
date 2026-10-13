@@ -125,6 +125,21 @@ class TeamSpaceReconcileService {
 
         if (!$this->teamSpaceService->isAvailable()) {
             $summary['skipped'] = true;
+            $summary['reason']  = 'unavailable';
+            return $summary;
+        }
+
+        // v4.12.12 — the conversion is halted (DESIGN §2.184). Return before
+        // anything is read, so the pass neither converts nor reports: the
+        // notices, the My Work rows and the hand-over task an earlier pass
+        // raised are withdrawn by `haltNotices()` instead, once, and stay
+        // gone while the halt is on. Withdrawing rather than leaving them is
+        // deliberate — every one of those rows asks an administrator to
+        // finish a conversion this release has stopped.
+        if (!$this->teamSpaceService->isConversionEnabled()) {
+            $summary['skipped']           = true;
+            $summary['reason']            = 'halted';
+            $summary['notices_withdrawn'] = $this->haltNotices();
             return $summary;
         }
 
@@ -508,6 +523,39 @@ class TeamSpaceReconcileService {
         return $withdrawn;
     }
 
+    /**
+     * v4.12.12 — the halt's one write: drop every team-space notice and the
+     * notifications that go with them, so nothing is left asking an
+     * administrator to finish a conversion that has stopped (DESIGN §2.184).
+     *
+     * **It discards any open hand-over task**, which lives on the team's
+     * notice. Accepted: the task's whole subject is moving files into a space
+     * that is no longer being made. If the conversion is re-enabled the next
+     * pass raises the notice, the notification and the task again from the
+     * state it finds — none of this is the source of truth for anything.
+     *
+     * Idempotent: with no notices stored it writes nothing and returns 0, so
+     * the daily job is not bumping every administrator's My Work cache once a
+     * day for the life of the halt.
+     *
+     * @return int notices withdrawn
+     */
+    private function haltNotices(): int {
+        $notices = $this->notices();
+        if ($notices === []) {
+            return 0;
+        }
+        foreach (array_keys($notices) as $teamId) {
+            $this->withdrawNotifications((string)$teamId);
+        }
+        $this->saveNotices([]);
+        $this->bumpAdminCaches();
+        $this->logger->info('[TeamHub][TeamSpaceReconcile] conversion halted — team-space notices withdrawn', [
+            'count' => count($notices), 'app' => Application::APP_ID,
+        ]);
+        return count($notices);
+    }
+
     // ──────────────────────────────────────────────────────────────────────
     // Facts for the My Work provider
     // ──────────────────────────────────────────────────────────────────────
@@ -519,7 +567,11 @@ class TeamSpaceReconcileService {
      * @return array<int, array{teamId: string, teamName: string, sharedFolderId: int, sharedFolderName: string, spaceName: string|null, spaceConnected: bool, since: int}>
      */
     public function listSharedFolderTeams(): array {
-        if (!$this->teamSpaceService->isAvailable()) {
+        // v4.12.12 — and empty while the conversion is halted (DESIGN §2.184),
+        // so every surface fed from here — the administrators' rows, and the
+        // team admin's hand-over through listAssignedTasks() — goes quiet at
+        // the deploy rather than at the next cron tick.
+        if (!$this->teamSpaceService->isConversionEnabled()) {
             return [];
         }
         $rows      = $this->resourceMapper->findAllByApp('files', ['active', 'pending']);
@@ -771,7 +823,11 @@ class TeamSpaceReconcileService {
      * @return array<int, array{teamId: string, teamName: string, space: string, folder: string, since: int}>
      */
     public function listConflicts(): array {
-        if (!$this->teamSpaceService->isAvailable()) {
+        // v4.12.12 — and empty while the conversion is halted (DESIGN §2.184),
+        // so every surface fed from here — the administrators' rows, and the
+        // team admin's hand-over through listAssignedTasks() — goes quiet at
+        // the deploy rather than at the next cron tick.
+        if (!$this->teamSpaceService->isConversionEnabled()) {
             return [];
         }
         $out = [];

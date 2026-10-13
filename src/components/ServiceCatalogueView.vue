@@ -516,18 +516,32 @@ export default {
 		 * entry behind the card, so the routing decision is the server's
 		 * catalogue and never a string this component built.
 		 */
-		async submitRequest({ teamId, summary, details, fileIds = [] }) {
+		async submitRequest({ teamId, summary, details, fileIds = [], templateKey = '', profileKey = '' }) {
 			if (!this.chosen) {
 				return
 			}
 			this.requestError = ''
 			try {
+				const data = { summary, details }
+				// v4.10.38 — the files ride along; the server shares them
+				// with the service team and keeps them out of the data.
+				if (fileIds.length) {
+					data.fileIds = fileIds
+				}
+				// v4.12.4 — the new-team card's two extra answers. The dialog
+				// sends them for that card only, and the definition keeps them
+				// optional, so an empty one is a request without a shape asked
+				// for rather than a refusal.
+				if (templateKey) {
+					data.templateKey = templateKey
+				}
+				if (profileKey) {
+					data.profileKey = profileKey
+				}
 				const created = await this.$store.dispatch('workflows/start', {
 					teamId,
 					definitionKey: this.chosen.definitionKey,
-					// v4.10.38 — the files ride along; the server shares them
-					// with the service team and keeps them out of the data.
-					data: fileIds.length ? { summary, details, fileIds } : { summary, details },
+					data,
 				})
 				// v4.10.39 — a service that starts with the requester: keep the
 				// dialog open on their first task (a form to fill in).

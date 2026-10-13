@@ -38,6 +38,25 @@ use Psr\Log\LoggerInterface;
  */
 class TeamSpaceService {
 
+    /**
+     * App-config key: may TeamHub turn a team's folder into a team space?
+     *
+     * v4.12.12 — **off, and deliberately so** (Justin, 2026-10-12): making an
+     * existing group folder a team space hands its ACL management to the team,
+     * and the advanced permissions an administrator set on it do not survive
+     * the move intact. The conversion is halted until that is worked out.
+     *
+     * Not an admin setting and not in the admin UI: it is a temporary halt, not
+     * a product feature. Set it on an instance to try the converted path
+     * (`occ config:app:set teamhub team_space_conversion --value yes`), and
+     * **flip `DEFAULT_CONVERSION` to `'yes'` in the version that re-enables
+     * it** — that one line is the whole re-enabling.
+     */
+    public const CFG_CONVERSION = 'team_space_conversion';
+
+    /** `'yes'` re-enables conversion everywhere; see `CFG_CONVERSION`. */
+    public const DEFAULT_CONVERSION = 'no';
+
     /** Resolved provider (`?ITeamFolderProvider`), memoised per request. */
     private ?object $provider = null;
     private bool $providerResolved = false;
@@ -74,6 +93,33 @@ class TeamSpaceService {
     }
 
     /**
+     * v4.12.12 — True when TeamHub may *make* a team space: spaces are
+     * available **and** the conversion is not halted (`CFG_CONVERSION`).
+     *
+     * The split matters. `isAvailable()` stays the version fact and keeps
+     * answering for every *read*, *unlink* and *delete*, because a team space
+     * that already exists on an instance has to stay manageable — Team folders
+     * refuses `FolderManager::removeFolder()` and `addApplicableGroup()` on a
+     * space, so a halt that pretended spaces were unavailable would strand
+     * every folder the 2026-09-19 pass already converted.
+     *
+     * This method gates the three writes that create or convert one, and
+     * nothing else: `GroupFolderService::createTeamFolder()`,
+     * the link step of `GroupFolderService::assignCircleToFolder()`, and
+     * `TeamSpaceReconcileService::reconcile()`.
+     */
+    public function isConversionEnabled(): bool {
+        if (!$this->isAvailable()) {
+            return false;
+        }
+        return $this->appConfig->getValueString(
+            Application::APP_ID,
+            self::CFG_CONVERSION,
+            self::DEFAULT_CONVERSION,
+        ) === 'yes';
+    }
+
+    /**
      * The provider, or null. `getTeamFolderProvider()` is `@since 35.0.0`,
      * so on 33/34 the method itself is absent — `method_exists` is the
      * version check, not a version number.
@@ -102,6 +148,25 @@ class TeamSpaceService {
             throw new \RuntimeException('Team spaces are not available on this Nextcloud (needs Nextcloud 35 with the Team folders app).');
         }
         return $provider;
+    }
+
+    /**
+     * v4.12.12 — the halt's boundary, for the two writes that make a space.
+     *
+     * Every caller asks `isConversionEnabled()` first and takes the plain
+     * group-folder path instead, so this should not be reachable — which is
+     * exactly why it is here. A refusal in the one place that makes a space is
+     * provable; four callers that each remember to ask are not, and this app
+     * has shipped three documented decisions with no call site behind them.
+     *
+     * Deliberately **not** on `unlinkTeamSpace()`, `removeTeamSpace()` or
+     * `updateQuota()`: those manage spaces that already exist, which the halt
+     * does not undo.
+     */
+    private function requireConversion(): void {
+        if (!$this->isConversionEnabled()) {
+            throw new \RuntimeException('Converting team folders to team spaces is paused in this version of TeamHub.');
+        }
     }
 
     // ──────────────────────────────────────────────────────────────────────
@@ -235,6 +300,7 @@ class TeamSpaceService {
      */
     public function createTeamSpace(string $teamId, string $displayName, ?int $quota = null): array {
         $provider = $this->requireProvider();
+        $this->requireConversion();
         $this->forget($teamId);
         $name     = trim($displayName) !== '' ? trim($displayName) : $teamId;
         $team     = new Team($teamId, $name, $this->teamLink($teamId));
@@ -253,6 +319,7 @@ class TeamSpaceService {
      */
     public function linkTeamSpace(string $teamId, int $folderId): array {
         $provider = $this->requireProvider();
+        $this->requireConversion();
         $this->forget($teamId);
         $folder   = $provider->linkTeamFolder($teamId, $folderId);
         $this->logger->info('[TeamHub][TeamSpaceService] group folder linked as team space', [

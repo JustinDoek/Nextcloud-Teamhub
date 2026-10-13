@@ -10,6 +10,7 @@ use OCA\TeamHub\Service\AuditService;
 use OCA\TeamHub\Service\TeamImageService;
 use OCA\TeamHub\Db\PendingDeletionMapper;
 use OCA\TeamHub\Db\ResourceLinkMapper;
+use OCA\TeamHub\Db\SubTeamMapper;
 use OCA\TeamHub\Db\TeamAppMapper;
 use OCA\TeamHub\Db\TeamAppPresenceMapper;
 use OCA\TeamHub\Db\TeamTypeMapper;
@@ -80,6 +81,20 @@ class TeamService {
         // v4.10.6 — which circles are TeamHub's, and the CFG_APP lock that keeps
         // the Teams page from deleting them. A DI leaf (mapper + IDBConnection).
         private TeamRegistryService  $teamRegistry,
+        // v4.12.2 — the parent link behind sub-teams. A DI leaf
+        // (IDBConnection only). The *mapper* and never SubTeamService, which
+        // depends on this class: what is needed here is the link, not the
+        // behaviour that owns it.
+        private SubTeamMapper        $subTeams,
+        // v4.12.3 - whether sub-teams exist on this instance at all: the
+        // licence and the administrator's switch. A DI leaf (IConfig +
+        // LicenseService) for exactly this reason - the predicate is needed
+        // both here and in SubTeamService, which depends on this class.
+        private SubTeamModuleService $subTeamModule,
+        // v4.12.5 - which name columns this Circles schema actually has, for
+        // renameTeam(). A DI leaf (container + logger) with a per-request
+        // cache, which is why probing it per rename costs nothing.
+        private DbIntrospectionService $dbIntrospection,
     ) {
     }
 
@@ -347,6 +362,21 @@ class TeamService {
                 'app'    => Application::APP_ID,
             ]);
 
+            // v4.12.2 — which of these teams are sub-teams, and of whom. One
+            // indexed query for the whole list rather than one per row; the
+            // parent id is only disclosed below, where it is known that the
+            // viewer can see the parent too.
+            $subTeamLinks = $this->subTeams->linksFor($ids);
+
+            // v4.12.3 - one read, outside the loop. Two appconfig reads at
+            // most (the licence memoises its status per request), on a call
+            // that runs on every page load.
+            $subTeamsAvailable = $this->subTeamModule->isAvailable();
+            // v4.12.5 - and *why* not, when it is not. Same read, no extra
+            // query: unavailableReason() asks the two halves isAvailable()
+            // already asked, and the licence memoises per request.
+            $subTeamsReason = $subTeamsAvailable ? null : $this->subTeamModule->unavailableReason();
+
             // ── Assemble result ───────────────────────────────────────────────
             $teams = [];
             foreach ($rows as $row) {
@@ -390,9 +420,64 @@ class TeamService {
                     // the sidebar 3-dot action menu to gate Manage team (>=8),
                     // Invite (>=4), Copy link (>=1) and Leave team (1..8).
                     'level'       => $level,
+                    // ── v4.12.2, sub-teams (DESIGN §2.175) ────────────────
+                    // This list stays flat. Callers other than the sidebar are
+                    // authorisation boundaries — MyWorkService::resolveTeams(),
+                    // FileActionController, FileReviewController — and nesting
+                    // children into their parents here would quietly drop every
+                    // sub-team out of their scope. getSidebarTeams() does the
+                    // nesting, on a copy, for the one caller that wants it.
+                    'is_sub_team' => isset($subTeamLinks[$id]),
+                    // The parent's id, **only when the viewer also has the
+                    // parent in this same list**. A sub-team may hold people
+                    // from outside the main team, and an outsider must learn
+                    // nothing about the parent — not its id, not that it
+                    // exists. Resolved after the loop, where the full set of
+                    // visible ids is known.
+                    'parent_team_id' => null,
+                    'sub_team_visibility' => isset($subTeamLinks[$id])
+                        ? $subTeamLinks[$id]['visibility']
+                        : null,
+                    // Depth is 1: a sub-team cannot have sub-teams. The
+                    // frontend reads this to *hide* the Sub-teams tab and the
+                    // "Request a sub-team" action rather than show them
+                    // failing (CLAUDE.md § Permissions).
+                    //
+                    // v4.12.3 - and false for every team when the module is
+                    // unavailable, which is what hides the tab instance-wide
+                    // without the frontend learning a second fact. The three
+                    // *structural* fields beside it stay truthful: this list
+                    // is My Work's authorisation boundary, not a surface, and
+                    // getSidebarTeams() needs `is_sub_team` to know which rows
+                    // to drop.
+                    'can_have_sub_teams' => $subTeamsAvailable && !isset($subTeamLinks[$id]),
+                    // v4.12.5 - and why the tab is not usable, so Manage team
+                    // can grey it and say which of the two it is rather than
+                    // leaving a team admin with an absence (Justin's call,
+                    // 2026-10-12). Null on a sub-team's own row as well as on
+                    // an available instance: the depth rule is not something
+                    // to advertise, and `is_sub_team` beside it is how the
+                    // frontend tells those two apart.
+                    'sub_teams_unavailable_reason' => isset($subTeamLinks[$id]) ? null : $subTeamsReason,
                 ];
             }
 
+            // v4.12.2 — disclose a parent id only to a viewer who can see the
+            // parent anyway. Deliberately a second pass: whether the parent is
+            // visible is a property of the finished list, not of a single row,
+            // and computing it per row would mean asking the membership
+            // question again for a team already answered above.
+            $visibleIds = [];
+            foreach ($teams as $team) {
+                $visibleIds[$team['id']] = true;
+            }
+            foreach ($teams as &$team) {
+                $link = $subTeamLinks[$team['id']] ?? null;
+                if ($link !== null && isset($visibleIds[$link['parent_team_id']])) {
+                    $team['parent_team_id'] = $link['parent_team_id'];
+                }
+            }
+            unset($team);
 
             return $teams;
 
@@ -400,6 +485,243 @@ class TeamService {
             $this->logger->error('[TeamHub][TeamService] Error in getUserTeams', ['exception' => $e, 'app' => Application::APP_ID]);
             return [];
         }
+    }
+
+    /**
+     * The sidebar's view of {@see getUserTeams()} — the same teams, with each
+     * sub-team nested inside its parent (v4.12.2, DESIGN §2.175).
+     *
+     * Only `TeamController::listTeams()` calls this. Everything else keeps the
+     * flat list, and that is not a convenience: `MyWorkService::resolveTeams()`
+     * documents itself as the single authorisation boundary for My Work, and
+     * `FileActionController` / `FileReviewController` scope the Files-app
+     * actions off the same call. Nesting there would silently remove every
+     * sub-team from all three.
+     *
+     * Three cases, and only one of them needed any code:
+     *
+     *  - **A sub-team whose parent the viewer can also see** is moved into that
+     *    parent's `sub_teams[]` and drops off the top level.
+     *  - **A sub-team whose parent the viewer cannot see** — an outsider
+     *    invited into it and nothing else — stays exactly where the flat query
+     *    put it, at the top level, with `parent_team_id` already null. The same
+     *    branch, taken the other way; correct by construction rather than by a
+     *    filter somebody has to remember.
+     *  - **A private sub-team the viewer is not in** never arrives at all,
+     *    because {@see getUserTeams()}'s own query is membership-gated. That is
+     *    why `private` is the default: it is the zero-work state.
+     *
+     * `listed` is the only visibility that *adds* rows, and they are added
+     * here and nowhere else — so they carry no My Work scope, no Files-action
+     * scope and no file-review scope, and every team-scoped endpoint still
+     * refuses them through `requireMemberLevel()`. "Name visible, not
+     * openable" therefore needs no new gate.
+     *
+     * ## When the module is unavailable (v4.12.3)
+     *
+     * Every sub-team row leaves the sidebar — the nested ones and the `listed`
+     * siblings alike. Justin's call, 2026-10-12: the Service-teams shape, with
+     * the surfaces hidden rather than only creation refused
+     * ({@see SubTeamModuleService} for what that does and does not cover, and
+     * DESIGN §2.177 for the accepted consequence — an outsider invited into a
+     * private sub-team and into nothing else sees an empty sidebar until the
+     * switch comes back).
+     *
+     * **The filter is here and not in `getUserTeams()`, deliberately.** That
+     * call is this app's authorisation boundary for My Work and for the
+     * Files-app actions; dropping a sub-team there would not hide a surface,
+     * it would strand a member's open work items and file reviews. A switch an
+     * administrator can flip back must not lose anything.
+     */
+    public function getSidebarTeams(): array {
+        $teams = $this->getUserTeams();
+
+        // v4.12.3 — no module, no sub-teams in the sidebar. Before the nesting
+        // rather than after it: nesting and then unpicking would leave the
+        // rows' order depending on a switch.
+        if (!$this->subTeamModule->isAvailable()) {
+            return self::dropSubTeams($teams);
+        }
+
+        // Which teams could carry a `listed` child the viewer is not in? Only
+        // ones that can be a parent at all, and only the rows that are still
+        // going to be at the top level.
+        $parentIds = [];
+        foreach ($teams as $team) {
+            if (($team['can_have_sub_teams'] ?? false) && ($team['parent_team_id'] ?? null) === null) {
+                $parentIds[] = $team['id'];
+            }
+        }
+
+        $listed = [];
+        if ($parentIds !== []) {
+            $children = $this->subTeams->childrenOfMany($parentIds);
+
+            // Resolve every candidate's name in one query before the nesting,
+            // rather than one per row inside it.
+            $candidateIds = [];
+            foreach ($children as $rows) {
+                foreach ($rows as $row) {
+                    if ($row['visibility'] === SubTeamMapper::VIS_LISTED) {
+                        $candidateIds[] = $row['team_id'];
+                    }
+                }
+            }
+            $names = $this->resolveTeamNames($candidateIds);
+
+            foreach ($children as $parentId => $rows) {
+                foreach ($rows as $row) {
+                    if ($row['visibility'] !== SubTeamMapper::VIS_LISTED) {
+                        continue;
+                    }
+                    // A circle that has gone leaves nothing to render.
+                    if (!isset($names[$row['team_id']])) {
+                        continue;
+                    }
+                    $listed[] = [
+                        'id'        => $row['team_id'],
+                        'name'      => $names[$row['team_id']],
+                        'parent_id' => $parentId,
+                    ];
+                }
+            }
+        }
+
+        return self::nestSubTeams($teams, $listed);
+    }
+
+    /**
+     * The sidebar with every sub-team row removed (v4.12.3) — what
+     * {@see getSidebarTeams()} returns when the module is unavailable.
+     *
+     * Static and pure for the same reason {@see nestSubTeams()} is: it is the
+     * rule, the queries stay outside it, and a rule that decides what a person
+     * sees is worth a test that does not need a database.
+     *
+     * Keyed on `is_sub_team` and not on `parent_team_id`, which is null for an
+     * invited outsider who cannot see the parent — the one row that most needs
+     * to go, since for them the sub-team is the whole sidebar.
+     *
+     * @param list<array<string, mixed>> $teams the flat payload from getUserTeams()
+     * @return list<array<string, mixed>>
+     */
+    public static function dropSubTeams(array $teams): array {
+        $top = [];
+        foreach ($teams as $team) {
+            if (!($team['is_sub_team'] ?? false)) {
+                $top[] = $team;
+            }
+        }
+        return $top;
+    }
+
+    /**
+     * The nesting rules, with the queries left outside so they can be tested
+     * (v4.12.2). Pure: same inputs, same output, no I/O.
+     *
+     * @param list<array<string, mixed>> $teams  the flat payload from getUserTeams()
+     * @param list<array{id: string, name: string, parent_id: string}> $listed
+     *        `listed` sub-teams the viewer is NOT a member of
+     * @return list<array<string, mixed>>
+     */
+    public static function nestSubTeams(array $teams, array $listed = []): array {
+        $byId = [];
+        foreach ($teams as $i => $team) {
+            $byId[$team['id']] = $i;
+        }
+
+        // Pass 1 — the sub-teams the viewer is a member of. A row whose
+        // parent is in this same list moves inside it; a row whose parent is
+        // *not* — an outsider invited into the sub-team and nothing else —
+        // falls through and stays at the top level. The same branch, taken the
+        // other way: correct by construction rather than by a filter somebody
+        // has to remember.
+        $nested = [];
+        foreach ($teams as $team) {
+            $parentId = $team['parent_team_id'] ?? null;
+            if ($parentId !== null && isset($byId[$parentId])) {
+                $teams[$byId[$parentId]]['sub_teams'][] = $team;
+                $nested[$team['id']] = true;
+            }
+        }
+
+        // Pass 2 — the `listed` siblings. A name and nothing else: no level,
+        // no counters, and `listed_only` so the frontend renders a row with no
+        // click handler and no actions menu.
+        foreach ($listed as $row) {
+            if (!isset($byId[$row['parent_id']])) {
+                continue;
+            }
+            // Already a member of it — pass 1 nested the real row, and a
+            // second one would render the sub-team twice.
+            if (isset($byId[$row['id']])) {
+                continue;
+            }
+            $teams[$byId[$row['parent_id']]]['sub_teams'][] = [
+                'id'          => $row['id'],
+                'name'        => $row['name'],
+                'listed_only' => true,
+                'level'       => 0,
+                'unread'      => 0,
+                'members'     => 0,
+                'is_sub_team' => true,
+                'parent_team_id'      => $row['parent_id'],
+                'sub_team_visibility' => SubTeamMapper::VIS_LISTED,
+                'can_have_sub_teams'  => false,
+                // v4.12.5 — null, as on every sub-team row: the depth rule is
+                // not advertised. These rows only ever reach the sidebar, but
+                // the shape stays the same as the others on purpose.
+                'sub_teams_unavailable_reason' => null,
+            ];
+        }
+
+        // Drop the nested rows from the top level, preserving order.
+        $top = [];
+        foreach ($teams as $team) {
+            if (!isset($nested[$team['id']])) {
+                $top[] = $team;
+            }
+        }
+        return $top;
+    }
+
+    /**
+     * Team names for a set of ids, keyed by id. Ids with no circle are absent
+     * from the result rather than mapped to '' — a caller needs to tell
+     * "deleted" from "unnamed".
+     *
+     * @param string[] $teamIds
+     * @return array<string, string>
+     */
+    private function resolveTeamNames(array $teamIds): array {
+        $ids = array_values(array_unique(array_filter($teamIds, static fn ($id) => $id !== '')));
+        if ($ids === []) {
+            return [];
+        }
+        $db  = $this->container->get(\OCP\IDBConnection::class);
+        $out = [];
+        foreach (array_chunk($ids, 500) as $chunk) {
+            $qb  = $db->getQueryBuilder();
+            $res = $qb->select('unique_id', 'name', 'display_name')
+                ->from('circles_circle')
+                ->where($qb->expr()->in(
+                    'unique_id',
+                    $qb->createNamedParameter($chunk, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_STR_ARRAY),
+                ))
+                ->executeQuery();
+            while ($row = $res->fetch()) {
+                // `display_name` is nullable with a '' default while `name` is
+                // NOT NULL, so neither alone is safe to trust as *the* name —
+                // the same reasoning assertTeamNameAvailable() records.
+                $name = trim((string)($row['display_name'] ?? ''));
+                if ($name === '') {
+                    $name = (string)$row['name'];
+                }
+                $out[(string)$row['unique_id']] = $name;
+            }
+            $res->closeCursor();
+        }
+        return $out;
     }
 
     /**
@@ -490,6 +812,29 @@ class TeamService {
         $memberCount = $countRow ? (int)$countRow['cnt'] : 0;
         $countRes->closeCursor();
 
+        // v4.12.2 — the parent link, and whether this viewer may be told about
+        // it. "May be told" is membership of the parent, direct or inherited:
+        // an outsider invited into a sub-team is a member of the sub-team and
+        // of nothing else, and must not learn the parent's id from here.
+        $subTeamLink   = $this->subTeams->find($teamId);
+        $parentVisible = false;
+        if ($subTeamLink !== null) {
+            try {
+                $parentVisible = $this->memberService->isEffectiveMember(
+                    $subTeamLink['parent_team_id'],
+                    $user->getUID(),
+                    $db,
+                ) || $this->memberService->getMemberLevelFromDb(
+                    $db,
+                    $subTeamLink['parent_team_id'],
+                    $user->getUID(),
+                ) > 0;
+            } catch (\Throwable $e) {
+                // Failing closed: an unreadable parent is a parent the caller
+                // is not told about.
+                $parentVisible = false;
+            }
+        }
 
         return [
             'id'          => $teamId,
@@ -501,6 +846,25 @@ class TeamService {
             // Circles config bitmask — exposed so the frontend can render
             // human-readable "team type" labels (open/invite/public/etc).
             'config'      => $config,
+            // v4.12.2 — the same three facts the list payload carries, so a
+            // view that fetched one team does not have to go back to the list
+            // to find out whether it is a sub-team. `parent_team_id` obeys the
+            // same disclosure rule: a viewer who cannot see the parent is not
+            // told it exists.
+            'is_sub_team'         => $subTeamLink !== null,
+            'parent_team_id'      => $parentVisible ? $subTeamLink['parent_team_id'] : null,
+            'sub_team_visibility' => $subTeamLink['visibility'] ?? null,
+            // v4.12.3 — and false on every team while the module is
+            // unavailable, which is the single field the Sub-teams tab is
+            // hidden on. The structural three above stay truthful: a sub-team
+            // whose module is off is still a sub-team, and its parent's admins
+            // are still its only administrators.
+            'can_have_sub_teams'  => $subTeamLink === null && $this->subTeamModule->isAvailable(),
+            // v4.12.5 — the same field the list payload carries, same rule:
+            // null on a sub-team's own row, and null when the module is fine.
+            'sub_teams_unavailable_reason' => $subTeamLink === null
+                ? $this->subTeamModule->unavailableReason()
+                : null,
         ];
     }
 
@@ -877,10 +1241,52 @@ class TeamService {
     }
 
     /**
+     * v4.12.2 — a sub-team's name must be free among its *siblings*, not
+     * across the instance (DESIGN §2.175).
+     *
+     * Two teams under different parents may both be called "Design", which is
+     * what a customer expects and what instance-wide uniqueness would refuse.
+     * The folder collision that {@see assertTeamNameAvailable()} exists to
+     * prevent is handled the other way for a sub-team: its storage is named
+     * "{parent} – {child}", so two "Design" sub-teams get two distinct
+     * folders rather than "Design" and "Design (1)".
+     *
+     * @throws \InvalidArgumentException with a message safe to surface to the user.
+     */
+    public function assertSubTeamNameAvailable(string $parentTeamId, string $name, string $exceptTeamId = ''): void {
+        $trimmed = trim($name);
+        if ($trimmed === '') {
+            // Emptiness belongs to assertValidTeamName(), as above.
+            return;
+        }
+        $siblingIds = $this->subTeams->siblingIds($parentTeamId, $exceptTeamId);
+        if ($siblingIds === []) {
+            return;
+        }
+        $lower = mb_strtolower($trimmed);
+        foreach ($this->resolveTeamNames($siblingIds) as $siblingName) {
+            if (mb_strtolower($siblingName) === $lower) {
+                throw new \InvalidArgumentException('This team already has a sub-team with that name.');
+            }
+        }
+    }
+
+    /**
      * Create a new team.
      * Description is always set via updateTeamDescription() separately.
+     *
+     * `$parentTeamId` makes it a sub-team of that team (v4.12.2, DESIGN
+     * §2.175) and changes exactly one thing here: the name has to be free
+     * among its siblings instead of across the instance. Everything else a
+     * sub-team needs — the parent link row itself, the policy, the type, the
+     * cleared join bits, the members, the storage — belongs to
+     * {@see \OCA\TeamHub\Service\SubTeamService::createSubTeam()}, which is
+     * the only caller that passes it. It goes through this method rather than
+     * beside it because this is where the registry row and the CFG_APP lock
+     * are written, and a second creation path is precisely what the registry
+     * was built to prevent.
      */
-    public function createTeam(string $name): array {
+    public function createTeam(string $name, ?string $parentTeamId = null): array {
 
         $user = $this->userSession->getUser();
         if (!$user) {
@@ -908,7 +1314,15 @@ class TeamService {
         //
         // Checked here rather than inside assertValidTeamName() — see that
         // method's note on TeamExportService.
-        $this->assertTeamNameAvailable($name);
+        //
+        // v4.12.2 — a sub-team is scoped to its siblings instead; see
+        // assertSubTeamNameAvailable() for why the folder-collision argument
+        // above does not carry over.
+        if ($parentTeamId !== null) {
+            $this->assertSubTeamNameAvailable($parentTeamId, $name);
+        } else {
+            $this->assertTeamNameAvailable($name);
+        }
 
         $circlesManager = $this->getCirclesManager();
         $federatedUser  = $circlesManager->getFederatedUser($user->getUID(), 1);
@@ -955,8 +1369,17 @@ class TeamService {
     }
 
     /**
-     * Delete a team (circle). Only the owner can do this.
+     * Delete a team (circle), and every sub-team it governs.
      * Also cleans up TeamHub app data for this circle.
+     *
+     * The owner may do this. **So may an admin of the team that governs this
+     * one** (v4.12.5) — DESIGN §2.175 recorded that widening for 4.12.2 and it
+     * was never written: `SubTeamService::isParentAdmin()` ended up with no
+     * caller outside its own class, so until now only the admin who happened
+     * to *create* a sub-team could delete it, and a second admin of the same
+     * parent could not. `MemberService::requireOwnerLevel()` is still
+     * deliberately not touched — it also guards transferring ownership, which
+     * a sub-team refuses outright.
      */
     public function deleteTeam(string $teamId): void {
 
@@ -973,9 +1396,143 @@ class TeamService {
         // Owner check via DB — avoids getCircle() failing on non-zero config circles.
         $db    = $this->container->get(\OCP\IDBConnection::class);
         $level = $this->memberService->getMemberLevelFromDb($db, $teamId, $user->getUID());
-        if ($level < 9) {
+        if ($level < 9 && !$this->isAdminOfGoverningTeam($db, $teamId, $user->getUID())) {
             throw new \Exception('Only the team owner can delete a team.');
         }
+
+        // ── Step 0: the sub-teams this team governs (v4.12.5) ────────────────
+        //
+        // Children first, and **abort the whole delete when one of them
+        // fails**. Carrying on and destroying the parent anyway is the worse
+        // outcome by a distance: every gate on a sub-team resolves authority
+        // through its parent, so a child that outlives its parent has no
+        // administrator at all, nothing in the UI can reach it, and its link
+        // row points at a circle that is gone. A parent still standing is a
+        // state an administrator can look at and retry.
+        //
+        // {@see destroyTeamInternal()} rather than a recursive `deleteTeam()`:
+        // the authority for a child is the parent's, proven immediately above,
+        // and re-checking it per child would refuse exactly the case this
+        // exists for — an admin of the parent who is not the child's owner.
+        // Depth is one, so there is no recursion to guard against.
+        foreach ($this->subTeams->childrenOf($teamId) as $child) {
+            $childId = $child['team_id'];
+            try {
+                $this->destroyTeamInternal($childId, $user, $this->destroyActorFor($db, $childId, $user), $db);
+                $this->subTeams->delete($childId);
+            } catch (\Throwable $e) {
+                $this->logger->error('[TeamHub][TeamService] deleteTeam: a sub-team could not be destroyed; the team was left in place', [
+                    'teamId'    => $teamId,
+                    'subTeamId' => $childId,
+                    'exception' => $e,
+                    'app'       => Application::APP_ID,
+                ]);
+                throw new \Exception(
+                    'A sub-team of this team could not be deleted, so the team itself was left in place. '
+                    . 'Delete the sub-team from Manage team → Sub-teams first.',
+                );
+            }
+        }
+
+        // The caller when they are the owner — which is every delete that is
+        // not a parent admin reaching into a sub-team, and keeps that path
+        // exactly as it was. Otherwise the team's own owner, for the reason
+        // destroyActorFor() gives: a parent admin may hold no row on the
+        // sub-team they are entitled to delete, and Circles authorises the
+        // destroy against the initiator's rights on that circle.
+        $this->destroyTeamInternal(
+            $teamId,
+            $user,
+            $level >= 9 ? $user : $this->destroyActorFor($db, $teamId, $user),
+            $db,
+        );
+
+        // The link rows, after the circle is gone: this team's own (it may be
+        // a sub-team itself) and any child row a failed unlink left behind.
+        // Non-fatal — the team is already destroyed, and a stray row is read
+        // only through a circle that no longer exists.
+        try {
+            $this->subTeams->delete($teamId);
+            $this->subTeams->deleteByParent($teamId);
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][TeamService] deleteTeam: sub-team link rows not cleaned up', [
+                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+        }
+    }
+
+    /**
+     * Is `$userId` an admin of the team that governs `$teamId`?
+     *
+     * The same fact {@see \OCA\TeamHub\Service\SubTeamService::isParentAdmin()}
+     * answers, read here through the mapper instead: this class is a
+     * dependency *of* `SubTeamService`, so it cannot call it. One hop only —
+     * a sub-team cannot have sub-teams, so there is no chain to walk.
+     */
+    private function isAdminOfGoverningTeam(\OCP\IDBConnection $db, string $teamId, string $userId): bool {
+        $parentId = $this->subTeams->parentOf($teamId);
+        if ($parentId === null || $userId === '') {
+            return false;
+        }
+        return $this->memberService->getMemberLevelFromDb($db, $parentId, $userId) >= 8;
+    }
+
+    /**
+     * Who to act as when destroying `$teamId`'s circle.
+     *
+     * Circles' `CircleService::destroy()` authorises against the initiator's
+     * rights **on that circle**, which is why `MaintenanceService`'s
+     * force-delete manufactures an owner row for the acting administrator
+     * before it calls the same method. A parent admin cascading a delete may
+     * have no row on the child at all, so the cascade acts as the child's own
+     * owner — the technique `MemberService::relinkGroup()` already uses.
+     *
+     * Falls back to the caller when the circle has no owner: an ownerless team
+     * is Maintenance's business, and the destroy failing there is the correct
+     * outcome rather than something to paper over.
+     */
+    private function destroyActorFor(\OCP\IDBConnection $db, string $teamId, \OCP\IUser $fallback): \OCP\IUser {
+        $qb  = $db->getQueryBuilder();
+        $res = $qb->select('user_id')
+            ->from('circles_member')
+            ->where($qb->expr()->eq('circle_id', $qb->createNamedParameter($teamId)))
+            ->andWhere($qb->expr()->eq('user_type', $qb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+            ->andWhere($qb->expr()->eq('level', $qb->createNamedParameter(9, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+            ->andWhere($qb->expr()->eq('status', $qb->createNamedParameter('Member')))
+            ->setMaxResults(1)
+            ->executeQuery();
+        $uid = $res->fetchOne();
+        $res->closeCursor();
+        if ($uid === false || $uid === null || (string)$uid === '') {
+            return $fallback;
+        }
+        return $this->userManager->get((string)$uid) ?? $fallback;
+    }
+
+    /**
+     * Destroy one team's circle and everything TeamHub holds for it.
+     *
+     * **No authorisation of its own.** Extracted from `deleteTeam()` in
+     * v4.12.5 so the sub-team cascade can reach it: a child is destroyed on
+     * the authority already proven for its parent, and running the owner check
+     * again per child would refuse the one case the cascade exists for.
+     * `deleteTeam()` is the only caller and it is where the gate lives — keep
+     * it that way, and in particular do not give this method a route.
+     *
+     * @param \OCP\IUser $actor     who is accountable: the audit line, the
+     *                              Collectives cascade and the service-team
+     *                              removal are all recorded as them.
+     * @param \OCP\IUser $destroyAs who Circles acts as for the destroy itself;
+     *                              {@see destroyActorFor()} for why the two
+     *                              can differ.
+     */
+    private function destroyTeamInternal(
+        string $teamId,
+        \OCP\IUser $actor,
+        \OCP\IUser $destroyAs,
+        \OCP\IDBConnection $db,
+    ): void {
+        $user = $actor;
 
         // ── Step 1: Capture metadata BEFORE any destructive operation ─────────
         // Both team name (for audit) and enabled app list (for resource cleanup)
@@ -1111,7 +1668,10 @@ class TeamService {
         // the Teams page could delete the team is this one call.
         $this->teamRegistry->unlock($teamId);
 
-        $federatedUserService->setLocalCurrentUser($user);
+        // $destroyAs, not $actor: a cascading parent admin may hold no row on
+        // this circle at all, and Circles authorises the destroy against the
+        // initiator's rights on it. See destroyActorFor().
+        $federatedUserService->setLocalCurrentUser($destroyAs);
         $circleService->destroy($teamId);
 
         // ── Step 4: Remove TeamHub metadata rows ──────────────────────────────
@@ -1179,6 +1739,99 @@ class TeamService {
     // =========================================================================
 
     /**
+     * Rename a team (v4.12.5).
+     *
+     * **There is no route for this, and that is deliberate.** TeamHub has
+     * never let a team be renamed, and the absence was not an oversight: a
+     * team's name is carried by its Files folder, its Talk room, its Deck
+     * board and its collective, and TeamHub can rename none of them today —
+     * a general rename would quietly split a team's name from everything
+     * named after it. {@see \OCA\TeamHub\Controller\SubTeamController::update()}
+     * is the only caller, because a sub-team's storage is named
+     * `{parent} – {child}` from the start (DESIGN §2.175): for a sub-team the
+     * difference between the team's name and its folder's was accepted at
+     * creation rather than introduced here. The dialog says so beside the
+     * field. **Do not add a route for an ordinary team without solving the
+     * resources first.**
+     *
+     * Writes the three name columns together. `name` is what the sidebar and
+     * Browse teams read, `display_name` what `SubTeamService::teamName()`
+     * prefers, and `sanitized_name` what Maintenance compares `display_name`
+     * against when it hunts for circles Circles has misnamed — leaving any one
+     * of them behind would report every renamed team as needing repair.
+     * `sanitized_name` is absent on older Circles schemas, hence the probe.
+     *
+     * The caller is responsible for the uniqueness rule that applies to this
+     * team: {@see assertTeamNameAvailable()} instance-wide, or
+     * {@see assertSubTeamNameAvailable()} among siblings. Shape is checked
+     * here, because no name may ever be written without it.
+     */
+    public function renameTeam(string $teamId, string $name): void {
+
+        $user = $this->userSession->getUser();
+        if (!$user) {
+            throw new \Exception('User not authenticated');
+        }
+        $this->memberService->requireAdminLevel($teamId);
+        $this->assertValidTeamName($name);
+
+        $trimmed = trim($name);
+        $db      = $this->container->get(\OCP\IDBConnection::class);
+
+        $readQb = $db->getQueryBuilder();
+        $r = $readQb->select('name')
+            ->from('circles_circle')
+            ->where($readQb->expr()->eq('unique_id', $readQb->createNamedParameter($teamId)))
+            ->setMaxResults(1)
+            ->executeQuery();
+        $row = $r->fetch();
+        $r->closeCursor();
+        if ($row === false) {
+            throw new \Exception('Team not found');
+        }
+        $oldName = (string)$row['name'];
+
+        if ($oldName === $trimmed) {
+            return;
+        }
+
+        $columns = $this->dbIntrospection->getTableColumns('circles_circle');
+
+        $qb = $db->getQueryBuilder();
+        $qb->update('circles_circle')
+            ->set('name', $qb->createNamedParameter($trimmed))
+            ->where($qb->expr()->eq('unique_id', $qb->createNamedParameter($teamId)));
+        if (in_array('display_name', $columns, true)) {
+            $qb->set('display_name', $qb->createNamedParameter($trimmed));
+        }
+        if (in_array('sanitized_name', $columns, true)) {
+            $qb->set('sanitized_name', $qb->createNamedParameter($trimmed));
+        }
+        $qb->executeStatement();
+
+        // Same cache bust updateTeamConfig() does, and for the same reason:
+        // Circles memoises circle objects in APCu, and a reader in the next
+        // request would otherwise be told the old name. Deliberately not
+        // `getCircle()` — that re-applies config bits (see updateTeamConfig).
+        if (function_exists('apcu_delete') && class_exists('APCUIterator')) {
+            try {
+                foreach (new \APCUIterator('/^(circles|NC__circles)/') as $item) {
+                    apcu_delete($item['key']);
+                }
+            } catch (\Throwable $e) { /* non-fatal */ }
+        }
+
+        $this->auditService->log(
+            $teamId,
+            'team.renamed',
+            $user->getUID(),
+            'team',
+            $teamId,
+            ['changed' => ['name' => ['old' => $oldName, 'new' => $trimmed]]],
+        );
+    }
+
+    /**
      * Update the description of a team.
      * Verifies the caller has access via getCircle(), then writes directly to DB
      * since some Circles versions do not expose updateCircle().
@@ -1190,12 +1843,18 @@ class TeamService {
             throw new \Exception('User not authenticated');
         }
 
-        // Access check via DB — avoids getCircle() failing on non-zero config circles.
-        $db = $this->container->get(\OCP\IDBConnection::class);
-        $accessLevel = $this->memberService->getMemberLevelFromDb($db, $teamId, $user->getUID());
-        if ($accessLevel < 4) { // moderator or above may update description
-            throw new \Exception('Access denied');
-        }
+        // v4.12.8 — through the shared gate rather than a raw level read.
+        // Identical for an ordinary team (moderator, level >= 4) and it adds
+        // the one thing the raw read could not have: `requireModeratorLevel()`
+        // accepts an admin of the **governing** team (v4.12.2), so every admin
+        // of a main team can edit its sub-teams' descriptions, not only the one
+        // who happens to hold a row in the sub-team.
+        //
+        // That was the last setting on a sub-team still answering to a direct
+        // row — DESIGN §2.182. It mattered because a sub-team's description is
+        // set at creation and a parent admin who did not create it has no row
+        // at all, so the description was frozen for everyone but its author.
+        $this->memberService->requireModeratorLevel($teamId);
 
         // Capture old description for the audit diff. Best-effort — falls back to ''.
         $oldDescription = '';
@@ -1371,6 +2030,30 @@ class TeamService {
             $newConfig &= ~CirclesConfig::CFG_FEDERATED;
         }
 
+        // v4.12.7 — a sub-team is never browsable and never joinable, and that
+        // rule outranks a policy profile that says otherwise (Justin,
+        // 2026-10-12; DESIGN §2.181). Applied here, after the overlay, because
+        // this is the single writer of the managed bits: `SubTeamService`
+        // clears the same two bits at creation and after a classification
+        // change, but the overlay above would put back whatever a governing
+        // profile asserts, so the clear could not hold on its own.
+        //
+        // Precedence for these two bits is therefore: instance → **sub-team**
+        // → profile → team. One level above the profile, which outranks
+        // everything else, because "a sub-team is not a front door" is
+        // structural: a sub-team is hand-picked, excluded from
+        // `browseAllTeams()`, and may hold people from outside the main team.
+        // A profile that opened one would be opening a room whose whole point
+        // is that you are put in it.
+        //
+        // The bit test runs before the lookup deliberately: this method is on
+        // the path of every team settings save on the instance, and all but a
+        // handful of those teams are not sub-teams and do not set either bit.
+        if (($newConfig & (CirclesConfig::CFG_VISIBLE | CirclesConfig::CFG_OPEN)) !== 0
+            && $this->subTeams->isSubTeam($teamId)) {
+            $newConfig &= ~(CirclesConfig::CFG_VISIBLE | CirclesConfig::CFG_OPEN);
+        }
+
         $updQb = $db->getQueryBuilder();
         $updQb->update('circles_circle')
             ->set('config', $updQb->createNamedParameter($newConfig, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
@@ -1433,8 +2116,8 @@ class TeamService {
 
     /**
      * Discover visible/joinable teams using direct DB queries.
-     * Only returns circles with CFG_VISIBLE (bit 512) set, or where the
-     * current user is already a member.
+     * Only returns circles with CFG_VISIBLE (bit 8) or CFG_OPEN (bit 16) set,
+     * or where the current user is already a member.
      */
     public function browseAllTeams(): array {
 
@@ -1451,25 +2134,28 @@ class TeamService {
             // check circles_membership for indirect (group/team) membership below.
             $userSingleId = $this->memberService->resolveUserSingleId($uid, $db);
 
-            // CFG_VISIBLE (bit 9 = 512): circles marked discoverable by
-            // non-members. CFG_OPEN (bit 4 = 16): circles that auto-accept
-            // any join request. We push the filter into SQL so we never
-            // load all circles into PHP — critical for scalability to
-            // 1,000+ groups.
+            // CFG_VISIBLE (8): circles marked discoverable by non-members.
+            // CFG_OPEN (16): circles that auto-accept any join request. We
+            // push the filter into SQL so we never load all circles into
+            // PHP — critical for scalability to 1,000+ groups.
+            //
+            // Both come from CirclesConfig. They are deliberately *not*
+            // re-declared as locals here: this method used to carry its own
+            // `$CFG_VISIBLE = 512`, which is CFG_NO_OWNER, and the toggle it
+            // was meant to honour did nothing for four months. See the
+            // v4.12.3 note in DESIGN.md §2.176.
             //
             // Strategy: LEFT JOIN on direct membership (user_type=1) AND on the
             // circles_membership cache (indirect via group/team).
             // Include the circle if:
             //   (a) the user has a direct member row (m.user_id IS NOT NULL), OR
             //   (b) the user appears in circles_membership (ms.single_id IS NOT NULL), OR
-            //   (c) the circle has CFG_VISIBLE set (config & 512 != 0), OR
+            //   (c) the circle has CFG_VISIBLE set (config & 8 != 0), OR
             //   (d) v3.100.8 — the circle has CFG_OPEN set (config & 16 != 0).
             //       Rationale: an open circle allows anyone to join, so
             //       hiding it from browse serves no security purpose;
             //       showing it lets users actually reach the auto-approve
             //       flow this app supports (apps.md W-2 test path).
-            $CFG_VISIBLE = 512;
-            $CFG_OPEN    = 16;
 
             $qb = $db->getQueryBuilder();
             $qb->select('c.unique_id', 'c.name', 'c.description', 'c.config',
@@ -1509,14 +2195,17 @@ class TeamService {
                        $qb->expr()->isNotNull('m.user_id'),
                        // User appears in circles_membership (indirect via group/team)
                        $qb->expr()->isNotNull('ms.single_id'),
-                       // Circle is publicly visible (CFG_VISIBLE bit set)
+                       // Circle is publicly visible (CFG_VISIBLE bit set).
+                       // createFunction with a class constant interpolated,
+                       // per the established pattern in this file — the value
+                       // is a compile-time int, never user input.
                        $qb->expr()->neq(
-                           $qb->createFunction('(c.config & ' . $CFG_VISIBLE . ')'),
+                           $qb->createFunction('(c.config & ' . (int)CirclesConfig::CFG_VISIBLE . ')'),
                            $qb->createNamedParameter(0, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)
                        ),
                        // Circle is open (CFG_OPEN bit set) — v3.100.8
                        $qb->expr()->neq(
-                           $qb->createFunction('(c.config & ' . $CFG_OPEN . ')'),
+                           $qb->createFunction('(c.config & ' . (int)CirclesConfig::CFG_OPEN . ')'),
                            $qb->createNamedParameter(0, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)
                        )
                    )
@@ -1529,6 +2218,14 @@ class TeamService {
             // v4.10.6 — TeamHub teams only, as getUserTeams(). A visible or
             // open circle made in another app is still not browsable here.
             $this->teamRegistry->restrictToTeamHubTeams($qb, 'c');
+
+            // v4.12.2 — and never a sub-team. Its membership is hand-picked by
+            // the parent's admin (DESIGN §2.175), so appearing in a list
+            // anyone can join from would defeat the whole arrangement — which
+            // a template whose `preselect_config` carries CFG_VISIBLE or
+            // CFG_OPEN would otherwise cause. Creation clears both bits; this
+            // is the backstop that does not depend on it having worked.
+            $this->subTeams->excludeSubTeams($qb, 'c');
 
             $result = $qb->executeQuery();
             $teams  = [];
@@ -1800,6 +2497,19 @@ class TeamService {
                 Application::APP_ID,
                 \OCA\TeamHub\Service\ServiceTeam\ServiceTeamService::CONFIG_ENABLED,
                 '0',
+            ) === '1',
+            // Sub-teams module — licensed, and **default ON** (v4.12.3,
+            // Justin 2026-10-12). The other two licensed modules default off
+            // because each needs something else first: OpenProject needs an
+            // OpenProject, service teams need somebody to run a desk. A
+            // sub-team needs nothing but a team, so a licensed instance has
+            // them from the moment it upgrades. Key and default live in
+            // SubTeamModuleService; only the switch is stored here, the
+            // licence half comes from the License tab the panel already has.
+            'subTeamsModuleEnabled' => $config->getAppValue(
+                Application::APP_ID,
+                SubTeamModuleService::CONFIG_ENABLED,
+                '1',
             ) === '1',
             // File reviews are no longer an administrator switch (v4.8.31).
             // Whether they exist follows the licence, because a review's whole
@@ -2165,6 +2875,21 @@ class TeamService {
                 Application::APP_ID,
                 \OCA\TeamHub\Service\ServiceTeam\ServiceTeamService::CONFIG_ENABLED,
                 $settings['serviceTeamsModuleEnabled'] ? '1' : '0'
+            );
+        }
+        // v4.12.3 — the sub-teams module's switch. `array_key_exists` and not
+        // `isset`, unlike the three above: this one defaults to **on**, so the
+        // value an administrator sends to switch it off is `false`, and
+        // `isset()` would accept it but the panel's own `false` is exactly
+        // what has to get through. Written whatever the licence says — the
+        // panel hides the control while unlicensed, and a stored value is
+        // inert until a licence arrives (SubTeamModuleService checks the
+        // licence first).
+        if (array_key_exists('subTeamsModuleEnabled', $settings)) {
+            $config->setAppValue(
+                Application::APP_ID,
+                SubTeamModuleService::CONFIG_ENABLED,
+                $settings['subTeamsModuleEnabled'] ? '1' : '0'
             );
         }
         // `fileReviewsModuleEnabled` was written here until v4.8.31. It is

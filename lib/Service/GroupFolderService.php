@@ -127,10 +127,16 @@ class GroupFolderService {
      * team creation, bulk import and provisioning, so none of them carries
      * the version split.
      *
+     * v4.12.12 — asks `isConversionEnabled()` rather than `isAvailable()`:
+     * while the conversion is halted a new team on 35 gets the plain group
+     * folder of 33/34, which is also why `createCircle()` must keep opting out
+     * of Circles' own auto-creation (`TeamService`) — without that opt-out
+     * Circles would hand the team a space this branch just declined to make.
+     *
      * @return array{folder_id: int, team_space: bool}
      */
     public function createTeamFolder(string $teamId, string $mountPoint): array {
-        if ($this->teamSpaceService->isAvailable()) {
+        if ($this->teamSpaceService->isConversionEnabled()) {
             $space = $this->teamSpaceService->createTeamSpace($teamId, $mountPoint);
             return ['folder_id' => $space['id'], 'team_space' => true];
         }
@@ -150,6 +156,11 @@ class GroupFolderService {
      * nothing to add. A folder that is *another* team's space is refused
      * outright: connecting it would fail halfway and leave a row pointing at
      * a folder the team cannot open.
+     *
+     * v4.12.12 — while the conversion is halted the folder is still connected,
+     * it just does not become the team's space. Both refusals above stay on
+     * `isAvailable()`, not on the halt: they are about spaces that already
+     * exist, which the halt does not undo.
      *
      * @param int    $folderId        GroupFolders folder ID
      * @param string $circleUniqueId  Team circle's unique_id / single_id
@@ -179,7 +190,7 @@ class GroupFolderService {
             'folderId' => $folderId, 'circleUniqueId' => $circleUniqueId, 'app' => Application::APP_ID,
         ]);
 
-        if (!$this->teamSpaceService->isAvailable()) {
+        if (!$this->teamSpaceService->isConversionEnabled()) {
             return false;
         }
         if ($this->teamSpaceService->getTeamSpace($circleUniqueId) !== null) {

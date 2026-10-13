@@ -171,6 +171,9 @@ class TeamImportService {
         private IConfig             $config,
         private IDBConnection       $db,
         private LoggerInterface     $logger,
+        // v4.12.5 — whether a `team:` token resolved to a sub-team, which may
+        // not be a member of another team. A DI leaf (IDBConnection only).
+        private \OCA\TeamHub\Db\SubTeamMapper $subTeams,
     ) {}
 
     // -------------------------------------------------------------------------
@@ -990,6 +993,20 @@ class TeamImportService {
             }
             if ($team['id'] === '') {
                 return $drop('Team "' . $teamTyped . '" matches more than one team — use the team ID instead.');
+            }
+            // v4.12.5 — a sub-team is never a member of another team: Circles
+            // propagates membership upward, so the row would hand the
+            // sub-team's invited outsiders this team's files, Talk room and
+            // calendar (DESIGN §2.175). `inviteMembers()` refuses it too and
+            // that is the boundary; dropping it here instead gets the admin a
+            // named row in the preview rather than a silent per-entry failure
+            // after the import has run.
+            //
+            // The `team:` docblock above calls its target "a sub-team", which
+            // is the loose pre-4.12.2 sense of the word — a nested circle.
+            // These are the §2.175 kind, and the two are not the same thing.
+            if ($this->subTeams->isSubTeam($team['id'])) {
+                return $drop('"' . $teamTyped . '" is a sub-team and cannot be added to another team — it was not added.');
             }
 
             // Built here rather than through $take(): that helper compares the

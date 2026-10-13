@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace OCA\TeamHub\Service;
 
 use OCA\TeamHub\AppInfo\Application;
+use OCA\TeamHub\Db\SubTeamMapper;
 use OCA\TeamHub\Exception\NotFoundException;
 use OCA\TeamHub\Exception\ValidationException;
 use OCP\IConfig;
@@ -68,9 +69,20 @@ class TeamGroupService {
 	private const MAX_ASSIGNMENTS    = 2000;
 	private const MAX_NAME_LENGTH    = 64;
 	private const MAX_TEAM_ID_LENGTH = 64;
+	/**
+	 * v4.12.2 — how many teams may have a remembered sub-team chevron. Same
+	 * reasoning as MAX_ASSIGNMENTS: not a limit a real user meets, but a
+	 * ceiling on a preference row a scripted caller could otherwise grow
+	 * without end.
+	 */
+	private const MAX_EXPANDED_TEAMS = 2000;
 
 	public function __construct(
 		private IConfig $config,
+		// v4.12.2 — which teams are sub-teams. A DI leaf (IDBConnection only).
+		// Needed for one refusal: a sub-team may not be filed into a personal
+		// group of its own. See assignTeam().
+		private SubTeamMapper $subTeams,
 	) {
 	}
 
@@ -209,6 +221,17 @@ class TeamGroupService {
 			throw new ValidationException('Invalid team id');
 		}
 
+		// v4.12.2 — a sub-team is not filed separately. It renders inside its
+		// parent's row, so it already follows the parent into whatever group
+		// the parent is in; an assignment of its own would either render it
+		// twice or render it nowhere. The sidebar hides the action, and this is
+		// the boundary behind it.
+		if ($groupId !== null && $this->subTeams->isSubTeam($teamId)) {
+			throw new ValidationException(
+				'A sub-team follows its main team in the sidebar and cannot be moved on its own.',
+			);
+		}
+
 		if ($groupId === null) {
 			unset($state['assignments'][$teamId]);
 		} else {
@@ -220,6 +243,42 @@ class TeamGroupService {
 				throw new ValidationException('You have reached the maximum number of grouped teams');
 			}
 			$state['assignments'][$teamId] = $groupId;
+		}
+
+		$this->write($uid, $state);
+
+		return $state;
+	}
+
+	/**
+	 * v4.12.2 — remember whether a team's sub-teams are showing.
+	 *
+	 * Lives in this service and in the same preference blob as the groups,
+	 * rather than in a table of its own, for the reason set out in this
+	 * class's docblock: it is one user's view of their own sidebar, read once
+	 * per page load and written on a click. A table would buy a migration for
+	 * a blob.
+	 *
+	 * Collapsing *removes* the entry instead of storing `false`, so the map
+	 * only ever holds the teams a user has actually opened.
+	 *
+	 * @return array{groups: list<array{id: string, name: ?string, expanded: bool, builtin: bool}>, assignments: array<string, string>, expandedTeams: array<string, bool>}
+	 */
+	public function setTeamExpanded(string $uid, string $teamId, bool $expanded): array {
+		$state = $this->read($uid);
+
+		if ($teamId === '' || mb_strlen($teamId) > self::MAX_TEAM_ID_LENGTH) {
+			throw new ValidationException('Invalid team id');
+		}
+
+		if (!$expanded) {
+			unset($state['expandedTeams'][$teamId]);
+		} else {
+			if (!isset($state['expandedTeams'][$teamId])
+				&& count($state['expandedTeams']) >= self::MAX_EXPANDED_TEAMS) {
+				throw new ValidationException('You have reached the maximum number of expanded teams');
+			}
+			$state['expandedTeams'][$teamId] = true;
 		}
 
 		$this->write($uid, $state);
@@ -332,7 +391,28 @@ class TeamGroupService {
 			}
 		}
 
-		return ['groups' => $groups, 'assignments' => $assignments];
+		// v4.12.2 — the sub-team chevrons. Only `true` is stored: a false
+		// entry and a missing entry mean the same thing, and keeping both
+		// would let the map grow for every team a user ever collapsed.
+		$expandedTeams = [];
+		foreach (($decoded['expandedTeams'] ?? []) as $teamId => $isOpen) {
+			if (!is_string($teamId) || $teamId === '' || mb_strlen($teamId) > self::MAX_TEAM_ID_LENGTH) {
+				continue;
+			}
+			if (!$isOpen) {
+				continue;
+			}
+			$expandedTeams[$teamId] = true;
+			if (count($expandedTeams) >= self::MAX_EXPANDED_TEAMS) {
+				break;
+			}
+		}
+
+		return [
+			'groups'        => $groups,
+			'assignments'   => $assignments,
+			'expandedTeams' => $expandedTeams,
+		];
 	}
 
 	/**
@@ -351,6 +431,11 @@ class TeamGroupService {
 				['id' => self::GROUP_FAVORITES, 'name' => null, 'expanded' => true, 'builtin' => true],
 			],
 			'assignments' => [],
+			// v4.12.2 — team id => true for a team whose sub-teams are showing.
+			// Absent means collapsed, so a user who has never touched a chevron
+			// stores nothing at all — the same implicit-default rule the
+			// assignments map follows.
+			'expandedTeams' => [],
 		];
 	}
 
