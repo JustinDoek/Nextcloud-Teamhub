@@ -437,6 +437,12 @@ export default {
 		/** v4.5.30 — the row's type glyph stepped up one notch on the scale. */
 		iconToolbar() { return ICON_TOOLBAR },
 		iconNav() { return ICON_NAV },
+		/**
+		 * v4.20.2 — the template has bound `:size="AVATAR_SM"` while only the
+		 * import existed, so the size was undefined and NcAvatar fell back to
+		 * its own default. Found by `check:vue-names`.
+		 */
+		AVATAR_SM() { return AVATAR_SM },
 
 		rowClasses() {
 			return {

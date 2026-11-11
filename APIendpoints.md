@@ -5,6 +5,20 @@
 
 ---
 
+## A team can switch off Email all members (added 4.20.0)
+
+### `PUT /api/v1/teams/{teamId}/members/mail/config` (`team#saveMemberMailConfig`)
+
+Body `{ member_mail_enabled: bool }`. Team admin (level 8) or above, otherwise **403**. A missing or non-boolean value answers **400**. Returns `{ member_mail_enabled }`. Stored as app config `member_mail_enabled_<teamId>` = `"1"`/`"0"`; a team that never set it is **on**.
+
+There is no GET: each team row of **`GET /api/v1/teams`** now carries **`member_mail_enabled`** (bool), which is what the sidebar reads to hide the action and what Manage team → Settings reads for the switch.
+
+### `GET /api/v1/teams/{teamId}/members/mail` — now refuses when off
+
+Answers **403** when the team switched the action off. Membership is checked first, so a non-member still gets the 403 they always got and learns nothing about the setting. The frontend shows *Emailing all members is switched off for this team.* and reloads the team list.
+
+---
+
 ## Refusals answer 403 and 404, not 400 (changed 4.20.0)
 
 Fifteen `TeamController` routes answered **every** exception with 400 and its message, so a refused membership or admin check came back as 400 and a missing team as 400. They now answer through `clientErrorResponse()`:
@@ -913,7 +927,9 @@ On a Nextcloud that offers a team-folder provider (35 with Team folders), every 
 | `isTeamSpace` | `true` when the folder is this team's own Nextcloud team space (`group_folders.team_circle_id` = the team), `false` for a plain team folder |
 | `quota` | The space's quota in bytes, `0` for unlimited, `null` when the folder is not the team's space |
 
-`GET /api/v1/apps/check` carries **`teamSpaces`** (`bool`): whether the running Nextcloud offers team spaces. Manage team labels the create button and the folder badge by it.
+`GET /api/v1/apps/check` carries **`teamSpaces`** (`bool`): whether the running Nextcloud offers team spaces. Manage team shows an existing space's badge, quota and disconnect by it.
+
+**4.20.1:** it also carries **`teamSpaceConversion`** (`bool`): whether a folder made now becomes the team's space (`TeamSpaceService::isConversionEnabled()`, false while the conversion is halted). Manage team labels the create button and a plain folder's badge tooltip by it.
 
 `POST /api/v1/teams/{teamId}/resources/files/connect` answers **400** with `error` when the folder is another team's space — Team folders refuses to share a space, and a row the team cannot open is never written. The `success` payload carries `team_space` (`bool`): whether the folder became the team's space on connect (it does when it is applicable to this circle alone and the team has no space yet).
 

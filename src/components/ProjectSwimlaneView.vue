@@ -33,11 +33,11 @@
             <!-- v3.99.7 — view-mode dropdown replaces the button group.
                  Adding "1 week" made the button row too wide for narrow
                  sidebars, and Justin asked specifically for a dropdown. -->
-            <label class="th-sl__vm-label" :for="'th-sl-vm-' + _uid">
+            <label class="th-sl__vm-label" :for="viewModeInputId">
                 {{ t('teamhub', 'View range') }}
             </label>
             <NcSelect
-                :input-id="'th-sl-vm-' + _uid"
+                :input-id="viewModeInputId"
                 label-outside
                 class="th-sl__vm-select"
                 :model-value="viewMode"
@@ -393,6 +393,12 @@ const LIST_LANE_PAD_BOTTOM = 8
 const MIN_BAR_W   = 24          // floor so a very-zoomed-out or same-day bar stays visible/clickable
 const POPOVER_W   = 280         // matches .th-sl__popover-panel CSS width; used to keep the panel on-canvas
 
+// v4.20.2 — per-instance suffix for the view-range label's `for` / input id,
+// the IframeWidgetCard pattern. The template used Vue 2's `_uid`, which Vue 3
+// does not have, so every instance rendered `th-sl-vm-undefined`: duplicate
+// ids, and a label pointing at whichever one came first.
+let instanceSeq = 0
+
 // Deterministic per-lane bar palette. Ordered so adjacent lanes contrast
 // well (blue → teal → violet → amber → …). Assignment is by stack `order`
 // when TimelineService returns it, falling back to stackId so the same
@@ -590,6 +596,7 @@ export default {
             ICON_INLINE,
             ICON_LARGE,
             ICON_XL,
+            viewModeInputId: 'th-sl-vm-' + (++instanceSeq),
             loading: true,
             error: null,
             viewMode: '1M',

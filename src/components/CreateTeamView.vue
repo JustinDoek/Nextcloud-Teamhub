@@ -569,6 +569,7 @@ import { AVATAR_SM, ICON_BODY, ICON_INLINE, ICON_LARGE, ICON_XL } from '../const
 // that used to stand in `teamTypes()` could not offer a template an
 // administrator created.
 import { buildTemplateCards } from '../lib/teamTemplateCards.js'
+import { availableWizardApps } from '../lib/wizardApps.js'
 // v4.8.10 — to tell whether the creator named themselves as a member, which
 // decides whether they stay on the team after handing it over.
 import { getCurrentUser } from '@nextcloud/auth'
@@ -1217,6 +1218,141 @@ export default {
             const list = this.activeProfile?.values?.integrations_allowed
             return Array.isArray(list) && list.length ? list : null
         },
+
+        /**
+         * v4.20.1 — the apps this team may get: installed and permitted by
+         * the classification. Renders nothing; `applyTemplateDefaults()` and
+         * `applyPolicyToForm()` read it. Its predecessor `appOptions` was
+         * deleted as unused and took every new team's apps with it — see
+         * `src/lib/wizardApps.js`.
+         */
+        availableAppIds() {
+            return availableWizardApps({
+                talk: this.talkAvailable,
+                calendar: this.calendarAvailable,
+                deck: this.deckAvailable,
+            }, this.allowedIntegrations)
+        },
+
+        /*
+         * v4.20.1 — the computeds below were restored from 4.13.0. They
+         * went in the same "unused" cleanup as `appOptions`, but they are
+         * read: `expiryAvailable`, `expiryMinDate` and `projectModes` by the
+         * template, `moduleAvailability` by `applyTemplateDefaults()`, the
+         * two option lists by `provisioned()`. Trimmed to the fields still
+         * read; the
+         * icons and descriptions belonged to the Applications step that
+         * §2.110 removed.
+         */
+
+        /**
+         * v4.9.16 — the capability check said TeamHub's OpenProject module is
+         * unlicensed or switched off. Null capabilities (still loading) are
+         * not "off": the card is locked meanwhile, not absent, so the row of
+         * cards does not reflow when the answer arrives on an instance that
+         * has the module.
+         *
+         * v4.20.2 — restored. It and `openProjectLockedReason` went missing
+         * after 4.12 while `teamTypes` and the template kept reading them, so
+         * the OpenProject card was offered unlocked even with the module off
+         * and its hint never showed. Found by `check:vue-names`.
+         */
+        openProjectModuleOff() {
+            if (this.openProjectCaps === null) return false
+            if (this.openProjectCaps.moduleAvailable === false) return true
+            return isOpModuleCode(this.openProjectCaps.errorCode)
+        },
+
+        /**
+         * v4.9.3 — why the OpenProject template cannot be chosen right now,
+         * or '' when it can.
+         */
+        openProjectLockedReason() {
+            if (this.openProjectCaps === null) return ''
+            if (!this.openProjectCaps.errorCode) return ''
+            return this.openProjectCaps.userMessage || opErrorMessage(this.openProjectCaps.errorCode)
+        },
+
+        /**
+         * Whether the active template offers an expiry date. The server reads
+         * the same row (`TeamExpiryService::isEligibleTemplate()`); before the
+         * templates load, the two seeded templates that offer it.
+         */
+        expiryAvailable() {
+            if (this.templates.length) {
+                return !!this.activeTemplate?.expiryEnabled
+            }
+            return this.form.teamType === 'collaboration' || this.form.teamType === 'project'
+        },
+
+        /**
+         * The earliest date the expiry picker accepts: tomorrow. The server
+         * rejects anything at or before now.
+         */
+        expiryMinDate() {
+            return shiftToday({ days: 1 })
+        },
+
+        /**
+         * The project template's two tiles. Advanced needs a business
+         * licence; without one its tile is locked and says why.
+         */
+        projectModes() {
+            const advancedLocked = !this.licenseCanCreateAdvanced
+            return [
+                {
+                    id: 'advanced',
+                    // TRANSLATORS: project setup mode, the full guided project experience
+                    label: t('teamhub', 'Advanced'),
+                    description: advancedLocked
+                        // TRANSLATORS: shown on the Advanced project mode tile when the instance has no valid business license
+                        ? t('teamhub', 'This feature requires a license: ask your admin.')
+                        : t('teamhub', 'Guided project lifecycle: phases (Initiation, Planning, Execution, Closing) and project tools.'),
+                    locked: advancedLocked,
+                },
+                {
+                    id: 'basic',
+                    // TRANSLATORS: project setup mode, the simple project experience without lifecycle tools
+                    label: t('teamhub', 'Basic'),
+                    description: t('teamhub', 'A project-flavoured team with the familiar setup: no lifecycle tools.'),
+                    locked: false,
+                },
+            ]
+        },
+
+        /** Feature modules, for the hand-off's list of what was set up. */
+        moduleOptions() {
+            return [
+                { id: 'decisions', label: t('teamhub', 'Decisions'), available: this.decisionsModuleEnabled },
+                { id: 'presence', label: t('teamhub', 'Presence'), available: this.presenceModuleEnabled },
+                { id: 'timeline', label: t('teamhub', 'Timeline'), available: true },
+                { id: 'messages', label: t('teamhub', 'Messages'), available: true },
+            ]
+        },
+
+        /**
+         * IntraVox and Collectives: apps provisioned through a `form.modules`
+         * key rather than `form.apps`. Labels are app names, deliberately not
+         * wrapped in t().
+         */
+        toggleOnlyAppOptions() {
+            return [
+                { id: 'intravox', moduleKey: 'pages', label: 'Intravox', available: this.intravoxAvailable },
+                { id: 'collective', moduleKey: 'wiki', label: 'Collectives', available: this.collectivesAvailable },
+            ]
+        },
+
+        /** Which `form.modules` keys can be switched on here; read by applyTemplateDefaults(). */
+        moduleAvailability() {
+            return {
+                decisions: this.decisionsModuleEnabled,
+                presence: this.presenceModuleEnabled,
+                timeline: true,
+                messages: true,
+                pages: this.intravoxAvailable,
+                wiki: this.collectivesAvailable,
+            }
+        },
         configValue() {
             let v = 0
             if (this.form.config.open)         v |= CFG_OPEN
@@ -1457,7 +1593,7 @@ export default {
                     this.form.config[wizardKey] = values[fieldKey] === true
                 }
             }
-            // An app the classification does not permit drops off appOptions,
+            // An app the classification does not permit drops off availableAppIds,
             // so clear anything already selected that just disappeared.
             const allowed = this.allowedIntegrations
             if (allowed !== null) {
@@ -1473,7 +1609,7 @@ export default {
 
         applyTemplateDefaults() {
             const profile = this.templateProfile
-            const availableIds = new Set(this.appOptions.map(a => a.id))
+            const availableIds = new Set(this.availableAppIds)
             for (const [appId, mode] of Object.entries(profile.apps)) {
                 if (this.form.apps[appId]) {
                     this.form.apps[appId].mode = availableIds.has(appId) ? mode : null

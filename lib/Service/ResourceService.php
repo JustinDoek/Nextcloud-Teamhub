@@ -918,6 +918,12 @@ class ResourceService {
             // v4.10.1 — Nextcloud 35 with Team folders: a new team folder is
             // a team space, and Manage team labels it as one.
             'teamSpaces'             => $this->groupFolderService->teamSpaces()->isAvailable(),
+            // v4.20.1 — may a new team folder *become* a team space? False on
+            // 35 while the conversion is halted (TeamSpaceService::CFG_CONVERSION).
+            // `teamSpaces` stays the version fact, because a space that already
+            // exists keeps its badge, quota and disconnect; this one decides
+            // the wording for folders made from now on (issue #113).
+            'teamSpaceConversion'    => $this->groupFolderService->teamSpaces()->isConversionEnabled(),
             'intravoxParentPath'     => $config->getAppValue('teamhub', 'intravoxParentPath', 'en/teamhub'),
             'presenceModuleEnabled'  => $config->getAppValue(Application::APP_ID, 'presence_module_enabled', '1') === '1',
             'decisionsModuleEnabled' => $config->getAppValue(Application::APP_ID, 'decisions_module_enabled', '1') === '1',

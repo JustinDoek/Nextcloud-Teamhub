@@ -22,10 +22,13 @@ This is a long-term support release.
 
 ### Smaller things
 
+- A team admin can switch off **Email all members** for their team under Manage team, Settings. It stays on unless they do.
+- TeamHub no longer breaks for people whose language it is not translated into, such as Polish, where polls disappeared. They see English instead.
 - An empty half-day in My workplace now reads *Not working* instead of telling you something is missing.
 - Polls on the team dashboard are sized like the widgets around them, and avatars have one size everywhere.
 - Some People and workplace labels showed in English for every language. They are translated now.
 - Refused actions now say they were refused, instead of looking like a mistake in what you typed.
+- On Nextcloud 35, Manage team no longer offers a team space while making them is paused, and a new team folder no longer says it is shared with other teams.
 
 ## [4.14.0] — 2026-11-02
 

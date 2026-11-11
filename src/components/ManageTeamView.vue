@@ -357,8 +357,29 @@
                         :clearable="false" />
                 </div>
 
+                <!-- v4.20.0 — Email all members on or off. Off hides the
+                     sidebar action for everyone in the team, admins
+                     included, and the compose endpoint refuses. The value
+                     rides each sidebar team row, so there is nothing to
+                     load here. -->
+                <div class="manage-section__row">
+                    <div class="manage-section__row-info">
+                        <span class="manage-section__row-title">{{ t('teamhub', 'Email all members') }}</span>
+                        <span class="manage-section__row-desc">{{ t('teamhub', 'Let members write one email to the whole team from the team menu in the sidebar.') }}</span>
+                    </div>
+                    <NcCheckboxRadioSwitch
+                        type="switch"
+                        :model-value="memberMailEnabled"
+                        :disabled="savingMemberMail"
+                        :aria-label="t('teamhub', 'Allow emailing all members of this team')"
+                        @update:model-value="saveMemberMailEnabled" />
+                </div>
+
                 <p v-if="meetingSettingsError" class="manage-settings-error">
                     {{ meetingSettingsError }}
+                </p>
+                <p v-if="memberMailError" class="manage-settings-error" role="alert">
+                    {{ memberMailError }}
                 </p>
             </div>
 
@@ -1228,7 +1249,7 @@
                                     v-if="installedApps.groupfolders"
                                     variant="tertiary"
                                     @click="createResource('files')">
-                                    {{ teamSpacesAvailable
+                                    {{ teamSpaceConversionEnabled
                                         ? t('teamhub', '+ Create team space')
                                         : t('teamhub', '+ Create new team folder') }}
                                 </NcButton>
@@ -3375,6 +3396,9 @@ export default {
             dashboardError: null,
             meetingSettingsSaved: false,
             meetingSettingsError: null,
+            // v4.20.0 — Email all members switch (Settings → Permissions).
+            savingMemberMail: false,
+            memberMailError: null,
             // Owner transfer
             ownerSearch: '',
             ownerSuggestions: [],
@@ -3482,6 +3506,15 @@ export default {
         // v4.6.15 — presenceConfig / decisionsConfig / timelineConfig joined the
         // list so the watchers below see the toggles this view itself commits.
         ...mapState(['intravoxAvailable', 'collectivesConfig', 'resourceWarningFocus', 'presenceModuleEnabled', 'decisionsModuleEnabled', 'presenceConfig', 'decisionsConfig', 'timelineConfig', 'project', 'projectTabFocus', 'manageTeamDeepLink', 'dashboardConfig', 'availableTabs', 'dashboardWidgetCatalog', 'teamType', 'openProjectConfig']),
+
+        /**
+         * v4.20.0 — read from the sidebar team row, the same field that
+         * decides whether the sidebar offers the action. Only an explicit
+         * `false` is off: a row from before this field existed means on.
+         */
+        memberMailEnabled() {
+            return this.team?.member_mail_enabled !== false
+        },
 
         /**
          * v4.5.35 — the Collective toggle has three states, not two.
@@ -3646,6 +3679,19 @@ export default {
          */
         teamSpacesAvailable() {
             return !!this.installedApps.teamSpaces
+        },
+
+        /**
+         * v4.20.1 — whether a folder made now becomes the team's space. False
+         * while the conversion is halted (DESIGN §2.184), when a new folder
+         * is an ordinary team folder. `teamSpacesAvailable` stays the version
+         * fact: a space that already exists still shows as one. Before this,
+         * the halt reached the server only, so the create button promised a
+         * space and the badge told owners their brand-new folder was shared
+         * with other teams (issue #113).
+         */
+        teamSpaceConversionEnabled() {
+            return this.teamSpacesAvailable && !!this.installedApps.teamSpaceConversion
         },
 
         /** v4.10.2 — the active files row when it is the team's space, else null. */
@@ -5536,6 +5582,10 @@ export default {
          * team folder on 35 is one that could not become the space — shared
          * with other groups or teams — and its title says why, so the owner
          * knows what to change rather than what is missing.
+         *
+         * v4.20.1 — while the conversion is halted every new folder is a plain
+         * team folder, so that reason would be false; the title names the
+         * halt instead, in the sentence the admin My Work page already uses.
          */
         filesBadgeLabel(row) {
             if (!row.resourceId.startsWith('gf:')) {
@@ -5553,6 +5603,9 @@ export default {
             }
             if (row.isTeamSpace) {
                 return t('teamhub', 'This folder belongs to the team alone. Nextcloud manages it as the team\'s space.')
+            }
+            if (!this.teamSpaceConversionEnabled) {
+                return t('teamhub', 'Converting team folders to team spaces is paused in this version.')
             }
             return t('teamhub', 'This folder is shared with other groups or teams, so it is not the team\'s space. The daily check makes it one once it is the team\'s alone.')
         },
@@ -6820,6 +6873,32 @@ export default {
             } catch (e) {
                 const msg = e?.response?.data?.error || t('teamhub', 'Failed to save')
                 this.meetingSettingsError = msg
+            }
+        },
+
+        /**
+         * v4.20.0 — switch Email all members for this team. The store row is
+         * updated only after the server agrees, so the sidebar menu and this
+         * switch never show a state that was not saved.
+         *
+         * @param {boolean} enabled the new value
+         */
+        async saveMemberMailEnabled(enabled) {
+            this.savingMemberMail = true
+            this.memberMailError = null
+            try {
+                const { data } = await axios.put(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/members/mail/config`),
+                    { member_mail_enabled: !!enabled },
+                )
+                this.$store.commit('SET_TEAM_MEMBER_MAIL_ENABLED', {
+                    teamId: this.team.id,
+                    enabled: data?.member_mail_enabled !== false,
+                })
+            } catch (e) {
+                this.memberMailError = t('teamhub', 'Could not save the email setting. Try again.')
+            } finally {
+                this.savingMemberMail = false
             }
         },
 
