@@ -326,7 +326,12 @@ export default {
 	flex-direction: column;
 	gap: var(--th-space-sm, 8px);
 	padding: var(--th-space-lg, 16px);
-	border: 1px solid var(--color-border);
+	/* v4.13.60 — the accent border, Justin: this is the requester's own
+	   side of the page and it was one grey card among the catalogue's grey
+	   cards. The element colour, and only on the border, so the card stands
+	   out without a fill competing with the service cards beside it. The
+	   width stays 1px — the colour is the signal. */
+	border: 1px solid var(--color-primary-element);
 	border-radius: var(--th-radius-card, var(--border-radius-container));
 	background: var(--color-main-background);
 }

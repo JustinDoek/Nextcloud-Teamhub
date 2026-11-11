@@ -1236,8 +1236,23 @@ class ActivityService {
                         if (!$cal instanceof \OCP\Calendar\ICreateFromString) {
                             break;
                         }
-                        $cal->createFromString($objUri, $ical);
-                        $writtenViaPublic = true;
+                        // v4.13.53 (Issue #41) — a room on the attendee list
+                        // cannot be scheduled through ICreateFromString. See
+                        // writeViaResourceAwareDavServer() for why. Returns
+                        // false when the private path is unavailable, and the
+                        // ordinary public write below then runs unchanged.
+                        if ($bookingRoom) {
+                            $writtenViaPublic = $this->writeViaResourceAwareDavServer(
+                                $user->getUID(),
+                                $cal->getUri(),
+                                $objUri,
+                                $ical
+                            );
+                        }
+                        if (!$writtenViaPublic) {
+                            $cal->createFromString($objUri, $ical);
+                            $writtenViaPublic = true;
+                        }
                         break;
                     }
                 } catch (\Throwable $e) {
@@ -1270,6 +1285,121 @@ class ActivityService {
         // Return the iCal UID so callers (e.g. DecisionService::scheduleApproverMeeting)
         // can record a back-reference from the proposal to the event.
         return $uid;
+    }
+
+    /**
+     * Write a VEVENT through a CalDAV server that can resolve room and
+     * resource principals, so sabre delivers the iTIP REQUEST to a booked
+     * room (Issue #41, v4.13.53).
+     *
+     * Why this exists. `ICreateFromString::createFromString()` — the public
+     * `OCP\Calendar` write we moved to in 3.82.6 (DESIGN §2.24) — builds an
+     * `EmbeddedCalDavServer` whose ACL plugin is told about two principal
+     * collections only:
+     *
+     *     $acl->principalCollectionSet = ['principals/users', 'principals/groups'];
+     *
+     * `remote.php/dav` (apps/dav/lib/Server.php) additionally registers
+     * `principals/calendar-resources` and `principals/calendar-rooms`, and
+     * sabre's `DAVACL\Plugin::getPrincipalByUri()` searches **only** the
+     * collections in that set. So a `mailto:` addressed to a room resolves
+     * to nothing on the embedded server, local delivery stops at
+     * `3.7;Could not find principal.`, and the dav app's auto-accept in
+     * `Schedule\Plugin::scheduleLocalDelivery()` is never reached — the room
+     * never receives the event and stays NEEDS-ACTION forever. Human
+     * attendees on the same write are delivered normally, which is what made
+     * this look intermittent for three years.
+     *
+     * This is an upstream Nextcloud defect, not a CRM one: every app writing
+     * through the public Calendar API has it. Verified on claudius
+     * (NC 35, dav 2.0.0-dev.1, calendar 6.6.4,
+     * calendar_resource_management 1.0.0) on 2026-10-30 — the same room,
+     * booked from NC Calendar through `remote.php/dav`, is accepted.
+     *
+     * What we do instead is what `CalendarImpl::createFromStringInServer()`
+     * does, on a server whose ACL plugin has been told about the two missing
+     * collections first. Nothing else about the write changes: same iCal,
+     * same scheduling plugin, same auth shape.
+     *
+     * Returns false — without writing — when this Nextcloud has neither
+     * server class or the plugins are not shaped as expected, so the caller
+     * falls back to the ordinary public write. An exception from the write
+     * itself propagates, exactly as `createFromString()` would.
+     *
+     * @param string $userId      owner of the calendar home being written to
+     * @param string $calendarUri calendar URI inside that home
+     * @param string $objUri      object file name, e.g. "<uid>.ics"
+     * @param string $ical        the VCALENDAR blob
+     */
+    private function writeViaResourceAwareDavServer(
+        string $userId,
+        string $calendarUri,
+        string $objUri,
+        string $ical
+    ): bool {
+        if ($calendarUri === '') {
+            return false;
+        }
+
+        try {
+            // NC 34+ writes through EmbeddedCalDavServer; earlier releases
+            // used InvitationResponseServer. Both carry the same truncated
+            // principal collection set and the same getServer() shape.
+            if (class_exists(\OCA\DAV\CalDAV\EmbeddedCalDavServer::class)) {
+                $holder = new \OCA\DAV\CalDAV\EmbeddedCalDavServer(false);
+            } elseif (class_exists(\OCA\DAV\CalDAV\InvitationResponse\InvitationResponseServer::class)) {
+                $holder = new \OCA\DAV\CalDAV\InvitationResponse\InvitationResponseServer(false);
+            } else {
+                return false;
+            }
+            $server = $holder->getServer();
+
+            $acl = $server->getPlugin('acl');
+            if (!$acl instanceof \Sabre\DAVACL\Plugin) {
+                return false;
+            }
+            foreach (['principals/calendar-resources', 'principals/calendar-rooms'] as $collection) {
+                if (!in_array($collection, $acl->principalCollectionSet, true)) {
+                    $acl->principalCollectionSet[] = $collection;
+                }
+            }
+
+            // The server is constructed non-public, so its auth plugin is
+            // CustomPrincipalPlugin and the write runs as the organiser.
+            $auth = $server->getPlugin('auth');
+            if (!$auth instanceof \OCA\DAV\CalDAV\Auth\CustomPrincipalPlugin) {
+                return false;
+            }
+            $auth->setCurrentPrincipal('principals/users/' . $userId);
+
+            $path = sprintf('calendars/%s/%s/%s', $userId, $calendarUri, $objUri);
+
+            // Without this the scheduling plugin cannot tell which object the
+            // change belongs to and skips iTIP entirely.
+            $scheduling = $server->getPlugin('caldav-schedule');
+            if (!$scheduling instanceof \OCA\DAV\CalDAV\Schedule\Plugin) {
+                return false;
+            }
+            $scheduling->setPathOfCalendarObjectChange($path);
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][ActivityService] resource-aware CalDAV server unavailable; using the public write', [
+                'exception' => get_class($e),
+                'message'   => $e->getMessage(),
+                'app'       => Application::APP_ID,
+            ]);
+            return false;
+        }
+
+        $stream = fopen('php://memory', 'rb+');
+        fwrite($stream, $ical);
+        rewind($stream);
+        try {
+            $server->createFile($path, $stream);
+        } finally {
+            fclose($stream);
+        }
+
+        return true;
     }
 
     /**

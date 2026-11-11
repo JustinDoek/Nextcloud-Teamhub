@@ -221,7 +221,7 @@ export default {
             // Defensive fallback if a locked slot somehow has a null label —
             // shouldn't happen (holiday lock always carries a type) but a
             // null here would interpolate as the literal string "null".
-            if (s.is_locked) return `${s.presence_type_label || halfLabel} (${t('teamhub', 'Holiday — locked')})`
+            if (s.is_locked) return `${s.presence_type_label || halfLabel} (${t('teamhub', 'Holiday: locked')})`
             return s.presence_type_label || halfLabel
         },
 
@@ -233,11 +233,12 @@ export default {
             })
             // A slot row exists even after the user clears it (presence_type_id=null);
             // its presence_type_label comes through as null in that case. Treat a
-            // null label as "not set" — otherwise NC's t() runs String.replace with
-            // a null param and throws, which Vue then propagates and the entire
-            // calendar render fails. One bad slot must not blank the calendar.
+            // null label as not working — otherwise NC's t() runs String.replace
+            // with a null param and throws, which Vue then propagates and the
+            // entire calendar render fails. One bad slot must not blank the calendar.
             if (!s || !s.presence_type_label) {
-                return t('teamhub', '{date} {half}: not set. Click to set.', { date: dateStr, half: halfLabel })
+                // TRANSLATORS: the half-day carries no workplace, so it reads as time the member does not work
+                return t('teamhub', '{date} {half}: not working. Click to set.', { date: dateStr, half: halfLabel })
             }
             if (s.is_locked) return t('teamhub', '{date} {half}: {type} (holiday, locked)', { date: dateStr, half: halfLabel, type: s.presence_type_label })
             return t('teamhub', '{date} {half}: {type}. Click to change.', { date: dateStr, half: halfLabel, type: s.presence_type_label })

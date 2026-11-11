@@ -293,7 +293,7 @@ class DecisionWorkProvider implements IWorkProvider {
                 $items[] = $this->buildItem(
                     $query, $decision,
                     Category::ACTION_REQUIRED, self::STATUS_AWAITING_FINALIZE, Priority::NORMAL,
-                    $this->l->t('You proposed this — only you can finalize it'),
+                    $this->l->t('You proposed this: only you can finalize it'),
                     null, null, false,
                 );
                 continue;
@@ -308,7 +308,7 @@ class DecisionWorkProvider implements IWorkProvider {
                 $items[] = $this->buildItem(
                     $query, $decision,
                     Category::WAITING_FOR_OTHERS, self::STATUS_OPEN_FOR_APPROVER, Priority::LOW,
-                    $this->l->t('Open for discussion — it will come to you for approval'),
+                    $this->l->t('Open for discussion: it will come to you for approval'),
                     $this->proposerParty($decision),
                     null, false,
                 );
@@ -475,13 +475,13 @@ class DecisionWorkProvider implements IWorkProvider {
         if ($status === 'open' && $isMine) {
             return $this->buildItem($query, $decision, Category::ACTION_REQUIRED,
                 self::STATUS_AWAITING_FINALIZE, Priority::NORMAL,
-                $this->l->t('You proposed this — only you can finalize it'),
+                $this->l->t('You proposed this: only you can finalize it'),
                 null, null, false);
         }
         if ($status === 'open' && $isApprover) {
             return $this->buildItem($query, $decision, Category::WAITING_FOR_OTHERS,
                 self::STATUS_OPEN_FOR_APPROVER, Priority::LOW,
-                $this->l->t('Open for discussion — it will come to you for approval'),
+                $this->l->t('Open for discussion: it will come to you for approval'),
                 $this->proposerParty($decision), null, false);
         }
         return $this->buildItem($query, $decision, Category::WAITING_FOR_OTHERS,
@@ -1042,7 +1042,7 @@ class DecisionWorkProvider implements IWorkProvider {
             $status   = self::STATUS_REVIEW_WAITING;
             $category = Category::WAITING_FOR_OTHERS;
             $priority = Priority::NORMAL;
-            $reason   = $this->l->t('You asked for a review — it is with the approvers');
+            $reason   = $this->l->t('You asked for a review: it is with the approvers');
             $waiting  = $this->firstApproverParty($teamId, $decision, $cache);
         }
 

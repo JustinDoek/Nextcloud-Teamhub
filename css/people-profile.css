@@ -1,0 +1,9 @@
+/* Uses native Nextcloud theme variables without replacing the profile page. */
+.teamhub-people-profile { max-width: 760px; margin: 2rem auto; padding: 0 1.5rem; color: var(--color-main-text); }
+.teamhub-people-profile h1 { font-size: 1.6rem; margin-bottom: 1.5rem; }
+.teamhub-people-profile h2 { font-size: 1.3rem; margin-bottom: 1.5rem; }
+.teamhub-people-profile__fields { display: grid; gap: .4rem; }
+.teamhub-people-profile__field { display: grid; grid-template-columns: minmax(150px, 220px) 1fr; gap: 1.5rem; padding: .85rem 0; border-bottom: 1px solid var(--color-border); }
+.teamhub-people-profile__field dt { font-weight: 600; }
+.teamhub-people-profile__field dd { margin: 0; overflow-wrap: anywhere; }
+@media(max-width: 600px) { .teamhub-people-profile__field { grid-template-columns: 1fr; gap: .3rem; } }

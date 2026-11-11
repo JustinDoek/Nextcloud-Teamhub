@@ -3,13 +3,13 @@ declare(strict_types=1);
 
 namespace OCA\TeamHub\Service;
 
-use OCA\TeamHub\BackgroundJob\PresenceCalendarSyncJob;
 use OCA\TeamHub\Db\HolidayMapper;
 use OCA\TeamHub\Db\PresenceSlot;
 use OCA\TeamHub\Db\PresenceSlotMapper;
+use OCA\TeamHub\Db\PresenceTemplateMapper;
+use OCP\IDBConnection;
 use OCA\TeamHub\Db\PresenceTypeMapper;
 use OCA\TeamHub\Exception\PresenceConflictException;
-use OCA\TeamHub\Service\PresenceCalendarService;
 use OCP\AppFramework\Db\DoesNotExistException;
 use OCP\BackgroundJob\IJobList;
 use Psr\Log\LoggerInterface;
@@ -17,9 +17,8 @@ use Psr\Log\LoggerInterface;
 /**
  * Per-slot user actions: read a date range, override a single slot.
  *
- * B4 addition: after every slot write the slot is synced to the user's default
- * calendar via PresenceCalendarService. Calendar sync failures are non-fatal —
- * logged as warnings, the slot write succeeds regardless.
+ * Workplace overrides never write to a calendar; Nextcloud owns working hours
+ * and free/busy. Legacy calendar events may need a separate manual cleanup.
  *
  * Slot sources:
  *   'template' — auto-materialised from the user's week template.
@@ -33,9 +32,10 @@ class PresenceSlotService {
 
     public function __construct(
         private PresenceSlotMapper      $slotMapper,
+        private PresenceTemplateMapper  $templateMapper,
+        private IDBConnection           $db,
         private PresenceTypeMapper      $typeMapper,
         private HolidayMapper           $holidayMapper,
-        private PresenceCalendarService $calendarService,
         private IJobList                $jobList,
         private LoggerInterface         $logger,
     ) {}
@@ -62,10 +62,33 @@ class PresenceSlotService {
             $types[$t->getId()] = $t;
         }
 
-        return array_map(
-            fn(PresenceSlot $s) => $this->serialize($s, $types),
-            $slots
-        );
+        $out = [];
+        foreach ($slots as $slot) {
+            $type = $types[$slot->getPresenceTypeId() ?? -1] ?? null;
+            if ($slot->getSource() === 'holiday' || $type === null
+                || ($type->getIsBusy() === 1 && $slot->getSource() !== 'override')) {
+                continue; // Ignore legacy busy templates, retain deliberate time-off overrides.
+            }
+            $out[$slot->getSlotDate() . '_' . $slot->getHalfDay()] = $this->serialize($slot, $types);
+        }
+        $day = new \DateTimeImmutable($fromDate . ' 12:00:00');
+        $last = new \DateTimeImmutable($toDate . ' 12:00:00');
+        // Bound the public endpoint to the range used by the calendar UI.
+        for ($i = 0; $i < 150 && $day <= $last; $i++, $day = $day->modify('+1 day')) {
+            $date = $day->format('Y-m-d');
+            $holiday = $this->holidayMapper->findByDate($date);
+            if ($holiday === null) { continue; }
+            foreach ([0, 1] as $half) {
+                $out[$date . '_' . $half] = [
+                    'slot_date' => $date, 'half_day' => $half,
+                    'presence_type_id' => null, 'presence_type_slug' => 'holiday',
+                    'presence_type_label' => $holiday->getName(),
+                    'presence_type_color' => '#C2185B', 'is_locked' => true,
+                    'source' => 'holiday', 'location_room_id' => null,
+                ];
+            }
+        }
+        return array_values($out);
     }
 
     // -------------------------------------------------------------------------
@@ -87,7 +110,7 @@ class PresenceSlotService {
         $slotDate  = $this->assertIsoDate($data['slot_date'] ?? '');
         $halfDay   = $this->validateHalfDay($data['half_day'] ?? null);
         $typeId    = isset($data['presence_type_id']) && $data['presence_type_id'] !== null
-            ? $this->validateTypeId((int)$data['presence_type_id'])
+            ? $this->validateTypeId((int)$data['presence_type_id'], true)
             : null;
         $roomId    = isset($data['location_room_id']) && $data['location_room_id'] !== null
             ? (int)$data['location_room_id']
@@ -143,19 +166,135 @@ class PresenceSlotService {
             $userId, $slotDate, $halfDay, $typeId ?? 'null'
         ));
 
-        // Sync the calendar for this specific date synchronously — fast (2 slots max).
-        // This handles the all-day merge/split logic for the affected date immediately.
-        // Non-fatal: calendar failure must never prevent the slot save from succeeding.
-        try {
-            $this->calendarService->syncSlotsForDate($userId, $slotDate);
-        } catch (\Throwable $e) {
-            $this->logger->warning(sprintf(
-                '[TeamHub][PresenceSlotService] syncSlotsForDate failed for %s on %s: %s',
-                $userId, $slotDate, $e->getMessage()
-            ));
+        return $this->serialize($saved, $types);
+    }
+
+    // -------------------------------------------------------------------------
+    // Date-range absences (and restoring the regular workplace)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Apply one user-selected absence type to a whole date range, choosing
+     * morning, afternoon, or both. A special restore action brings back the
+     * regular workplace template instead of storing a null override.
+     *
+     * We validate before opening a transaction, skip admin-locked public
+     * holidays, then commit all remaining days or none of them.
+     *
+     * @return array{updated: int, skipped: int}
+     */
+    public function overrideRange(
+        string $userId,
+        string $fromDate,
+        string $toDate,
+        string $part,
+        ?int $typeId,
+        bool $restore = false,
+    ): array {
+        $from = new \DateTimeImmutable($this->assertIsoDate($fromDate) . ' 12:00:00');
+        $to = new \DateTimeImmutable($this->assertIsoDate($toDate) . ' 12:00:00');
+        $days = (int)$from->diff($to)->format('%r%a') + 1;
+        if ($days < 1 || $days > 120) {
+            throw new \InvalidArgumentException('Date range must contain 1 to 120 days');
+        }
+        if (!in_array($part, ['all', 'morning', 'afternoon'], true)) {
+            throw new \InvalidArgumentException('part must be all, morning or afternoon');
+        }
+        if (!$restore) {
+            if ($typeId === null) {
+                throw new \InvalidArgumentException('Choose an absence type');
+            }
+            $this->validateTypeId($typeId, true);
+            $type = $this->typeMapper->findById($typeId);
+            if ($type === null || !in_array($type->getSlug(), ['vacation', 'sick', 'non_working_day'], true)) {
+                throw new \InvalidArgumentException('Ranges can only be used for vacation or non-working time');
+            }
         }
 
-        return $this->serialize($saved, $types);
+        $halves = $part === 'all' ? [0, 1] : [$part === 'morning' ? 0 : 1];
+        $dates = [];
+        $skipped = 0;
+        for ($day = $from; $day <= $to; $day = $day->modify('+1 day')) {
+            $date = $day->format('Y-m-d');
+            if ($this->holidayMapper->findByDate($date) !== null) {
+                $skipped++;
+                continue;
+            }
+            $locked = false;
+            foreach ($halves as $half) {
+                $existing = $this->slotMapper->findSlot($userId, $date, $half);
+                if ($existing?->getSource() === 'holiday') {
+                    $locked = true;
+                    break;
+                }
+            }
+            if ($locked) {
+                $skipped++;
+                continue;
+            }
+            $dates[] = $date;
+        }
+        if ($dates === []) {
+            throw new PresenceConflictException('All selected dates are protected public holidays');
+        }
+
+        $this->db->beginTransaction();
+        try {
+            $updated = 0;
+            foreach ($dates as $date) {
+                foreach ($halves as $half) {
+                    if ($restore) {
+                        $this->restoreDefault($userId, $date, $half);
+                    } else {
+                        $this->overrideSlot($userId, [
+                            'slot_date' => $date,
+                            'half_day' => $half,
+                            'presence_type_id' => $typeId,
+                            'location_room_id' => null,
+                        ]);
+                    }
+                    $updated++;
+                }
+            }
+            $this->db->commit();
+            return ['updated' => $updated, 'skipped' => $skipped];
+        } catch (\Throwable $e) {
+            $this->db->rollBack();
+            throw $e;
+        }
+    }
+
+    /** Restore the user's normal workplace after removing a date override. */
+    private function restoreDefault(string $userId, string $date, int $half): void {
+        $slot = $this->slotMapper->findSlot($userId, $date, $half);
+        if ($slot?->getSource() === 'holiday') {
+            throw new PresenceConflictException('This date is an admin-locked public holiday');
+        }
+        $dow = (int)(new \DateTimeImmutable($date))->format('N') - 1;
+        $template = $this->templateMapper->findCell($userId, $dow, $half);
+        if ($template === null || $template->getPresenceTypeId() === null) {
+            if ($slot !== null) {
+                $this->slotMapper->delete($slot);
+            }
+            return;
+        }
+        $slot ??= new PresenceSlot();
+        $isNew = $slot->getId() === null;
+        if ($isNew) {
+            $slot->setUserId($userId);
+            $slot->setSlotDate($date);
+            $slot->setHalfDay($half);
+            $slot->setCreatedAt(time());
+        }
+        $slot->setPresenceTypeId($template->getPresenceTypeId());
+        $slot->setLocationRoomId($template->getLocationRoomId());
+        $slot->setSource('template');
+        $slot->setUpdatedAt(time());
+        if ($isNew) {
+            $this->slotMapper->insert($slot);
+        } else {
+            $this->slotMapper->update($slot);
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -196,9 +335,17 @@ class PresenceSlotService {
         return $i;
     }
 
-    private function validateTypeId(int $typeId): int {
-        if ($this->typeMapper->findById($typeId) === null) {
+    private function validateTypeId(int $typeId, bool $allowAbsence = false): int {
+        $type = $this->typeMapper->findById($typeId);
+        if ($type === null) {
             throw new DoesNotExistException("Presence type {$typeId} not found");
+        }
+        if ($type->getSelectableByUser() !== 1) {
+            throw new \InvalidArgumentException('This type is not selectable by users');
+        }
+        if ($type->getIsBusy() === 1 && (!$allowAbsence
+            || !in_array($type->getSlug(), ['vacation', 'sick', 'non_working_day'], true))) {
+            throw new \InvalidArgumentException('Only approved time-off types can be used for non-working time');
         }
         return $typeId;
     }

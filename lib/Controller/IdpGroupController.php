@@ -82,7 +82,10 @@ class IdpGroupController extends Controller {
     #[AuthorizedAdminSetting(settings: \OCA\TeamHub\Settings\AdminSettings::class)]
     public function decline(int $id, string $reason = ''): JSONResponse {
         return $this->run(
-            function (string $uid): array {
+            // `use` is what the arrow function in accept() gets for free. A
+            // plain closure captures nothing, so this ran with $id and $reason
+            // undefined and declined whatever group id null resolves to.
+            function (string $uid) use ($id, $reason): array {
                 $this->requests->decline($id, $uid, $reason);
                 return ['declined' => true];
             },

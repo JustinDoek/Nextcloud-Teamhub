@@ -53,7 +53,7 @@
                                     v-if="item.user"
                                     :user="item.user"
                                     :display-name="item.user"
-                                    :size="24"
+                                    :size="AVATAR_MD"
                                     :hide-status="true"
                                     :disable-menu="true"
                                     class="activity-feed__avatar" />
@@ -124,7 +124,7 @@ import ClockOutline    from 'vue-material-design-icons/ClockOutline.vue'
 import WalletOutline   from 'vue-material-design-icons/WalletOutline.vue'
 import Lifebuoy from 'vue-material-design-icons/Lifebuoy.vue'
 import { deskActivityLine, isDeskActivity } from '../constants/serviceTeams.js'
-import { ICON_BODY, ICON_INLINE, ICON_LARGE, ICON_XL } from '../constants/uiTokens.js'
+import { ICON_BODY, ICON_INLINE, ICON_LARGE, ICON_XL, AVATAR_MD } from '../constants/uiTokens.js'
 
 const ICON_MAP = {
     AccountMultiple, File, FilePlus, FileEdit, FileRemove,
@@ -199,7 +199,7 @@ export default {
         CardText, Calendar, Chat, Bell,
     },
     data() {
-        return { ICON_BODY, ICON_INLINE, ICON_LARGE, ICON_XL, activities: [], loading: false }
+        return { ICON_BODY, ICON_INLINE, ICON_LARGE, ICON_XL, AVATAR_MD, activities: [], loading: false }
     },
 
     computed: {

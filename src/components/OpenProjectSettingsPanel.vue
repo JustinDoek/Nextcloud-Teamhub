@@ -1,9 +1,9 @@
 <template>
     <div class="manage-section op-panel" data-section="openproject">
-        <h3 class="op-panel__title">
+        <h2 class="op-panel__title">
             <BriefcaseOutline :size="ICON_TOOLBAR" aria-hidden="true" />
             {{ t('teamhub', 'OpenProject') }}
-        </h3>
+        </h2>
         <p class="op-panel__desc">
             {{ t('teamhub', 'The OpenProject project this team was created for. It was chosen when the team was created and cannot be changed here; the project itself is managed in OpenProject.') }}
         </p>
@@ -42,15 +42,14 @@
                         <template v-else>{{ t('teamhub', 'Never') }}</template>
                     </dd>
                 </div>
-                <div class="op-panel__row">
-                    <dt>{{ t('teamhub', 'Integration app') }}</dt>
-                    <dd>
-                        <StatusMark :ok="capabilities.integrationAppEnabled" />
-                        <template v-if="!capabilities.integrationAppInstalled">{{ t('teamhub', 'Not installed') }}</template>
-                        <template v-else-if="!capabilities.integrationAppEnabled">{{ t('teamhub', 'Installed, but disabled') }}</template>
-                        <template v-else>{{ t('teamhub', 'Enabled') }}</template>
-                    </dd>
-                </div>
+                <!-- v4.13.5 — the "Integration app" row is gone (Justin,
+                     2026-10-18). A team admin reading this panel has no use
+                     for the install state of a Nextcloud app they did not
+                     choose and cannot change; what they need is whether
+                     there is a host, whether their own account is
+                     connected, and what the last read did. The capability
+                     envelope still carries the flags for the Nextcloud
+                     administrator's own diagnostics. -->
                 <div class="op-panel__row">
                     <dt>{{ t('teamhub', 'OpenProject host') }}</dt>
                     <dd>
@@ -113,7 +112,7 @@
                  OpenProject here, and a role changed there is reported, not
                  reverted. -->
             <section v-if="link" class="op-panel__members">
-                <h4 class="op-panel__subtitle">{{ t('teamhub', 'Members in OpenProject') }}</h4>
+                <h3 class="op-panel__subtitle">{{ t('teamhub', 'Members in OpenProject') }}</h3>
                 <p class="op-panel__desc">
                     {{ t('teamhub', 'Compares this team\'s members with the project\'s members in OpenProject. Members can be added to the project from here; nothing is ever removed from OpenProject by TeamHub.') }}
                 </p>

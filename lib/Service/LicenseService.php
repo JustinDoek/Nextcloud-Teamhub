@@ -48,13 +48,28 @@ use Psr\Log\LoggerInterface;
  * (see PUBLIC_KEY_PEM). No runtime call is made to enforce validity —
  * everything happens in-process, once, cached in-request.
  *
- * NO OUTBOUND CALLS
- * -----------------
- * Fully air-gapped, fully manual (v4.3.22+). The instance never contacts
- * the licensing back-end for anything: no trials, no daily check-ins, no
- * install/uninstall pings, no renewed-JWT downloads. Trials and paid
- * licenses are issued by hand from the licensing dashboard in response
- * to email, and the customer pastes the JWT into the License tab.
+ * OUTBOUND CALLS — NONE FOR VALIDATION, ONE FOR METERED BILLING
+ * -------------------------------------------------------------
+ * **Validation is still entirely offline, for every licence kind.** The
+ * signature is checked in-process against PUBLIC_KEY_PEM; nothing is ever
+ * fetched to decide whether a key is good. There are no trials fetched, no
+ * daily check-ins, no install/uninstall pings and no renewed-JWT downloads.
+ * Keys are issued by hand from the portal and pasted into the License tab.
+ *
+ * **What changed in v4.13.30** (docs/metered-licensing-architecture.md): a
+ * licence whose `kind` claim is `metered` has no seat cap and instead reports
+ * its effective member count twice a month, so the customer is billed for
+ * what they use rather than for a 50-seat band. That report is the app's only
+ * licensing-related outbound call, it is made by SeatReportService and never
+ * from this class, and it is **a property of the licence, not of the app**:
+ * a banded key makes no outbound call on any app version, which is what the
+ * air-gapped pilot depends on.
+ *
+ * Before v4.13.30 this section read "fully air-gapped, fully manual… the
+ * instance never contacts the licensing back-end for anything". That is now
+ * true of a banded licence only, and `docs/nextcloud-admin/licensing.md` said
+ * the same thing to customers; both had to be rewritten rather than quietly
+ * left to rot.
  *
  * ENFORCEMENT LEVELS
  * ------------------
@@ -71,6 +86,13 @@ use Psr\Log\LoggerInterface;
  *  - 'unlicensed'— no JWT saved at all. Same effect as soft-lock for new
  *                  Advanced creation, but no data has ever been generated so
  *                  there's nothing to lock down.
+ *
+ * A metered licence has a **second** way into soft-lock, independent of its
+ * dates: REPORT_LOCK_DAYS of silence (reportStateFor()). It is the only thing
+ * in the app where reporting state changes what is allowed, it fires on a key
+ * that is otherwise perfectly valid, and `invalidReason` says so in words so
+ * an administrator is never left guessing why a current licence stopped
+ * working. A banded licence and a trial can never reach it.
  *
  * GRANDFATHERING RULE
  * -------------------
@@ -89,15 +111,30 @@ use Psr\Log\LoggerInterface;
 class LicenseService {
 
     /**
-     * Public half of the RS256 signing keypair used by the licensing
-     * back-end. Ship-time value below is a PLACEHOLDER — every real
-     * verification against it will fail signature check, which is the
-     * correct behavior until the real key is pasted in. See docblock.
+     * Public half of the RS256 signing keypair the licensing portal signs
+     * with.
      *
-     * Regenerate:
+     * **This is the real key, and the comment that used to say otherwise was
+     * wrong.** It read "Ship-time value below is a PLACEHOLDER — every real
+     * verification against it will fail signature check", which would mean no
+     * licence has ever verified on any instance. The pilot's working licence
+     * was the clue.
+     *
+     * Checked on 2026-10-26 against `portal-private/storage/keys/public.pem`
+     * on the portal host: the key material is identical (the file itself has
+     * CRLF line endings, so the two are not byte-equal — compare the base64,
+     * not the bytes). Proven the way that actually matters: a licence signed
+     * by that keypair's private half verifies against this constant through
+     * `Jwt::verifyRs256()`.
+     *
+     * The private half lives only on the portal host, at
+     * `portal-private/storage/keys/private.pem`, and is read by
+     * `lic_sign_version()` through the `private_key_path` config value.
+     *
+     * Rotating it means shipping an app update, and every licence in the field
+     * has to be reissued from the new key — so it is a release, not a task.
      *   openssl genrsa -out private.pem 2048
      *   openssl rsa -in private.pem -pubout -out public.pem
-     * then paste the contents of public.pem below (including BEGIN/END).
      */
     public const PUBLIC_KEY_PEM = "-----BEGIN PUBLIC KEY-----\n"
 		. "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4VS5N+E08RpCTpZu2v+j\n"
@@ -118,10 +155,42 @@ class LicenseService {
      */
     public const PAID_GRACE_DAYS = 14;
 
-    /** IConfig app key names. All namespaced under app='teamhub'. */
-    private const CFG_JWT                    = 'license_jwt';
-    private const CFG_LAST_TELEMETRY_AT      = 'license_last_telemetry_at';
-    private const CFG_LAST_TELEMETRY_PAYLOAD = 'license_last_telemetry_payload';
+    /**
+     * Days of silence from a metered licence at which each rung of the
+     * reporting ladder is reached (v4.13.30, docs/metered-licensing-architecture.md
+     * §6.5). A period is at most sixteen days, so twenty is slack for a cron
+     * gap rather than a grace.
+     *
+     * Forty-five is the floor Justin chose over a recommended seventy-five,
+     * which moves the risk onto the two warnings: an instance that misses its
+     * 1st-of-month report has 24 days of notice, not two months. Shortening
+     * these further leaves no room for a holiday period, and the first
+     * customer locked out by a proxy change is a refund and a reputation.
+     */
+    public const REPORT_WARN_DAYS     = 21;
+    public const REPORT_ESCALATE_DAYS = 32;
+    public const REPORT_LOCK_DAYS     = 45;
+
+    /** The licence `kind` claim that carries a reporting obligation. */
+    public const KIND_METERED = 'metered';
+
+    /**
+     * IConfig app key names. All namespaced under app='teamhub'.
+     *
+     * The CFG_SEAT_REPORT_* keys are **written by SeatReportService and read
+     * here**, and that direction is load-bearing: this service already
+     * depends on TelemetryService and SeatReportService depends on this one,
+     * so a dependency back on SeatReportService would be a constructor cycle
+     * NC's DI cannot resolve (the same trap TelemetryService::isEnabled()
+     * records). The ladder is therefore a static pure function plus five
+     * config reads — the shape §2.140 used for graceDaysFor().
+     */
+    public const  CFG_JWT                      = 'license_jwt';
+    public const  CFG_SEAT_REPORT_LAST_OK_AT   = 'license_seat_report_last_ok_at';
+    public const  CFG_SEAT_REPORT_LAST_PERIOD  = 'license_seat_report_last_period';
+    public const  CFG_SEAT_REPORT_LAST_PAYLOAD = 'license_seat_report_last_payload';
+    public const  CFG_SEAT_REPORT_LAST_ERROR   = 'license_seat_report_last_error';
+    public const  CFG_SEAT_REPORT_SINCE        = 'license_seat_report_since';
 
     /**
      * `getStatus()`'s result for the rest of this request (v4.8.31).
@@ -174,9 +243,24 @@ class LicenseService {
      *   seatEnforcement: 'none'|'over-warn'|'over-lock',
      *   seatCap: int|null,
      *   seatLockAt: int|null,
-     *   lastTelemetryAt: int|null,
-     *   lastTelemetryPayload: array|null
+     *   reportState: 'not-required'|'ok'|'due'|'overdue'|'locked',
+     *   reportOverdueDays: int,
+     *   reportLastOkAt: int|null,
+     *   reportLastPeriod: string|null,
+     *   reportNextDueAt: int|null,
+     *   reportLockAt: int|null,
+     *   reportLastPayload: array|null,
+     *   reportLastError: string|null
      * }
+     *
+     * v4.13.30 — `lastTelemetryAt` and `lastTelemetryPayload` are **gone**.
+     * They were in this envelope from the connected-licensing model and
+     * **nothing ever wrote them**: both were null on every instance, for
+     * every release, and no caller in `src/` ever read them. They are replaced
+     * rather than repurposed, because a seat report is not telemetry (see
+     * SeatReportService's docblock) and a field named for the thing we promise
+     * *not* to do on a licensed instance is the wrong place to record what we
+     * now do.
      */
     public function getStatus(): array {
         if ($this->statusMemo !== null) {
@@ -210,12 +294,10 @@ class LicenseService {
         $now = time();
         $instanceUuid = $this->getInstanceUuid();
         $seatsUsed    = $this->countLicensedSeats();
-        $lastAt       = $this->getIntConfig(self::CFG_LAST_TELEMETRY_AT);
-        $lastPayload  = $this->getJsonConfig(self::CFG_LAST_TELEMETRY_PAYLOAD);
 
         $rawJwt = $this->config->getAppValue(Application::APP_ID, self::CFG_JWT, '');
         if ($rawJwt === '') {
-            return $this->emptyStatus($instanceUuid, $seatsUsed, $lastAt, $lastPayload);
+            return $this->emptyStatus($instanceUuid, $seatsUsed);
         }
 
         // Attempt strict verification first. Any failure → surface as
@@ -235,6 +317,13 @@ class LicenseService {
                 && $this->peekUuidMatches($peeked, $instanceUuid)) {
                 $p = $peeked['payload'];
                 [$level, $graceLeft, $graceDays] = self::expiredLevel($p, $expiry, $now);
+                $report = $this->reportFragment($p, $now);
+                if ($report['reportState'] === 'locked') {
+                    // Expired *and* silent. Grace is for a customer who is
+                    // late renewing, not for one we cannot bill at all.
+                    $level     = 'soft-lock';
+                    $graceLeft = 0;
+                }
                 return [
                     'hasKey'               => true,
                     'valid'                => false,
@@ -260,18 +349,23 @@ class LicenseService {
                     'seatsUsed'            => $seatsUsed,
                     'seatsOverBy'          => $this->overBy($seatsUsed, $p['seats'] ?? null),
                     ...$this->computeSeatEnforcement($seatsUsed, $p['seats'] ?? null),
-                    'lastTelemetryAt'      => $lastAt,
-                    'lastTelemetryPayload' => $lastPayload,
+                    ...$report,
                 ];
             }
             // Signature mismatch, UUID mismatch, malformed — treat as
             // unlicensed. Admin sees "invalid key: <reason>" and can
             // re-paste.
-            return $this->emptyStatus($instanceUuid, $seatsUsed, $lastAt, $lastPayload, $e->getMessage());
+            return $this->emptyStatus($instanceUuid, $seatsUsed, $e->getMessage());
         }
 
         $expiry = (int)$claims['exp'];
         $daysRem = max(0, intdiv($expiry - $now, 86400));
+
+        // Hoisted so enforcement can read it: a metered licence that has gone
+        // silent past REPORT_LOCK_DAYS is soft-locked even though its key is
+        // still inside its term. This is the only place reporting state
+        // changes what the app allows — see the ladder on reportStateFor().
+        $report = $this->reportFragment($claims, $now);
 
         return [
             'hasKey'               => true,
@@ -290,15 +384,143 @@ class LicenseService {
             'paidUntil'            => (int)($claims['paid_until'] ?? $expiry),
             'paidDaysRemaining'    => max(0, intdiv(((int)($claims['paid_until'] ?? $expiry)) - $now, 86400)),
             'graceDays'            => self::graceDaysFor($claims),
-            'enforcementLevel'     => 'none',
+            'enforcementLevel'     => $report['reportState'] === 'locked' ? 'soft-lock' : 'none',
             'graceRemaining'       => null,
-            'invalidReason'        => null,
+            'invalidReason'        => $report['reportState'] === 'locked'
+                ? 'This licence requires a twice-monthly member-count report, and none has reached the licensing service for '
+                    . $report['reportOverdueDays'] . ' days.'
+                : null,
             'instanceUuid'         => $instanceUuid,
             'seatsUsed'            => $seatsUsed,
             'seatsOverBy'          => $this->overBy($seatsUsed, $claims['seats'] ?? null),
             ...$this->computeSeatEnforcement($seatsUsed, $claims['seats'] ?? null),
-            'lastTelemetryAt'      => $lastAt,
-            'lastTelemetryPayload' => $lastPayload,
+            ...$report,
+        ];
+    }
+
+    /**
+     * Drop the per-request memo so the next `getStatus()` recomputes.
+     *
+     * `saveKey()` and `clearKey()` do this for themselves. This is for
+     * SeatReportService, which writes the five CFG_SEAT_REPORT_* keys this
+     * service reads: without it, a request that sends a report and then
+     * renders the panel would show the state from before the send.
+     */
+    public function forgetStatus(): void {
+        $this->statusMemo = null;
+    }
+
+    /**
+     * Whether a licence `kind` claim carries a reporting obligation.
+     *
+     * **An explicit claim, deliberately, rather than inferring "metered" from
+     * an unlimited seat count.** An unlimited licence has been issuable since
+     * v3.100.6 — `computeSeatEnforcement()` uncaps at 999999 — so inferring
+     * the obligation from the cap would retroactively convert any unlimited
+     * licence already in the field into a reporting one, and then, at
+     * REPORT_LOCK_DAYS, soft-lock it. A licence's obligations must not change
+     * because the app was upgraded.
+     */
+    public static function isMetered(?string $kind): bool {
+        return $kind === self::KIND_METERED;
+    }
+
+    /**
+     * Where a licence sits on the reporting ladder (v4.13.30).
+     *
+     *   not-required — a banded licence. Never reports, never nagged.
+     *   ok           — reported within REPORT_WARN_DAYS.
+     *   due          — a banner, and the admin notification.
+     *   overdue      — the banner names the date the instance will lock.
+     *   locked       — enforcement becomes soft-lock.
+     *
+     * **A trial never reaches `locked`** (Justin, 2026-10-26). It reports and
+     * the figure is recorded, but the ladder stops at `overdue`: a trial ends
+     * by itself at `exp`, and `thp_trial_registry` on the portal is unique per
+     * instance for ever — so a wrongly locked trial cannot be re-requested and
+     * the prospect is simply gone. **If a later edit "simplifies" the trial arm
+     * away as redundant, that is the regression**; the test for it names this.
+     *
+     * Static and pure so the whole ladder is testable without a container,
+     * a clock or a licence — and so the numbers live in exactly one place.
+     *
+     * @param array|null $claims    The verified or peeked JWT payload, null when none.
+     * @param int|null   $clockFrom Last successful report, else when the key
+     *                              was first seen. Null = never measured.
+     * @return array{0: 'not-required'|'ok'|'due'|'overdue'|'locked', 1: int}
+     *         The state, and days since $clockFrom.
+     */
+    public static function reportStateFor(?array $claims, ?int $clockFrom, int $now): array {
+        if ($claims === null || !self::isMetered(is_string($claims['kind'] ?? null) ? $claims['kind'] : null)) {
+            return ['not-required', 0];
+        }
+        // Nothing to measure yet: a licence pasted five minutes ago has not
+        // missed anything. SeatReportService::ensureClockStarted() writes the
+        // start, so this is only the window between saving a key and the next
+        // job tick.
+        if ($clockFrom === null || $clockFrom <= 0) {
+            return ['ok', 0];
+        }
+        $days = intdiv(max(0, $now - $clockFrom), 86400);
+
+        if ($days >= self::REPORT_LOCK_DAYS && empty($claims['is_trial'])) {
+            return ['locked', $days];
+        }
+        if ($days >= self::REPORT_ESCALATE_DAYS) {
+            return ['overdue', $days];
+        }
+        if ($days >= self::REPORT_WARN_DAYS) {
+            return ['due', $days];
+        }
+        return ['ok', $days];
+    }
+
+    /**
+     * The reporting half of the status envelope, ready to spread into all
+     * three paths (valid, expired-peek, empty) the way
+     * `computeSeatEnforcement()` already is.
+     *
+     * @param array|null $claims The verified or peeked payload, null when none.
+     */
+    private function reportFragment(?array $claims, int $now): array {
+        // Kind first, before any config read: a banded licence pays nothing
+        // for a mechanism it is not subject to, and must not be shown a
+        // countdown it can never reach.
+        if ($claims === null || !self::isMetered(is_string($claims['kind'] ?? null) ? $claims['kind'] : null)) {
+            return [
+                'reportState'       => 'not-required',
+                'reportOverdueDays' => 0,
+                'reportLastOkAt'    => null,
+                'reportLastPeriod'  => null,
+                'reportNextDueAt'   => null,
+                'reportLockAt'      => null,
+                'reportLastPayload' => null,
+                'reportLastError'   => null,
+            ];
+        }
+
+        $lastOkAt  = $this->getIntConfig(self::CFG_SEAT_REPORT_LAST_OK_AT);
+        $since     = $this->getIntConfig(self::CFG_SEAT_REPORT_SINCE);
+        $clockFrom = $lastOkAt ?? $since;
+        [$state, $days] = self::reportStateFor($claims, $clockFrom, $now);
+
+        $error  = $this->config->getAppValue(Application::APP_ID, self::CFG_SEAT_REPORT_LAST_ERROR, '');
+        $period = $this->config->getAppValue(Application::APP_ID, self::CFG_SEAT_REPORT_LAST_PERIOD, '');
+
+        return [
+            'reportState'       => $state,
+            'reportOverdueDays' => $days,
+            'reportLastOkAt'    => $lastOkAt,
+            'reportLastPeriod'  => $period !== '' ? $period : null,
+            'reportNextDueAt'   => SeatReportService::nextPeriodStart($now),
+            // The date the instance locks, so the banner can name it rather
+            // than leaving the administrator to do the arithmetic. Null for a
+            // trial, which never locks.
+            'reportLockAt'      => (!empty($claims['is_trial']) || $clockFrom === null || $clockFrom <= 0)
+                ? null
+                : $clockFrom + self::REPORT_LOCK_DAYS * 86400,
+            'reportLastPayload' => $this->getJsonConfig(self::CFG_SEAT_REPORT_LAST_PAYLOAD),
+            'reportLastError'   => $error !== '' ? $error : null,
         ];
     }
 
@@ -439,10 +661,75 @@ class LicenseService {
         $jwt = trim($jwt);
         $claims = $this->verifyJwt($jwt);  // throws on any failure
         $this->config->setAppValue(Application::APP_ID, self::CFG_JWT, $jwt);
+        $this->adoptReportingClock($claims);
         // The request that saves a key goes on to render the admin panel from
         // the new state; a memo from before the write would show the old one.
         $this->statusMemo = null;
         return $claims;
+    }
+
+    /**
+     * Point the reporting clock at the key that was just saved.
+     *
+     * Three cases, and the distinction between the last two is what stops the
+     * soft-lock being a formality:
+     *
+     * - **A banded key** clears every reporting value. A customer moving from
+     *   metered back to banded must not keep an overdue clock for an
+     *   obligation their new key does not carry.
+     * - **A different metered key** (a renewal, an upgrade, a replacement
+     *   issued after a billing conversation) starts a fresh clock. This is
+     *   what makes "pasting a new key immediately restores" true for a
+     *   reporting lock as well as an expiry one — and it is deliberately the
+     *   *only* way back, because it requires us to have issued something.
+     * - **The same metered key again** changes nothing. Re-pasting the key you
+     *   already have is not a renewal, and if it reset the clock the ladder
+     *   would be a button the locked instance could press itself.
+     */
+    private function adoptReportingClock(array $claims): void {
+        $keys = [
+            self::CFG_SEAT_REPORT_LAST_OK_AT,
+            self::CFG_SEAT_REPORT_LAST_PERIOD,
+            self::CFG_SEAT_REPORT_LAST_PAYLOAD,
+            self::CFG_SEAT_REPORT_LAST_ERROR,
+            self::CFG_SEAT_REPORT_SINCE,
+        ];
+
+        if (!self::isMetered(is_string($claims['kind'] ?? null) ? $claims['kind'] : null)) {
+            foreach ($keys as $key) {
+                $this->config->deleteAppValue(Application::APP_ID, $key);
+            }
+            return;
+        }
+
+        $incoming = (string)($claims['lic'] ?? '');
+        $lastPayload = $this->getJsonConfig(self::CFG_SEAT_REPORT_LAST_PAYLOAD);
+        $reportedFor = is_array($lastPayload) ? (string)($lastPayload['lic'] ?? '') : '';
+        $since       = $this->getIntConfig(self::CFG_SEAT_REPORT_SINCE);
+
+        // Same licence id as the one we last reported for → leave the clock
+        // exactly where it is.
+        if ($incoming !== '' && $incoming === $reportedFor) {
+            return;
+        }
+
+        // A new metered licence, or the first one on this instance.
+        if ($incoming !== '' && $reportedFor !== '') {
+            foreach ([
+                self::CFG_SEAT_REPORT_LAST_OK_AT,
+                self::CFG_SEAT_REPORT_LAST_PERIOD,
+                self::CFG_SEAT_REPORT_LAST_PAYLOAD,
+                self::CFG_SEAT_REPORT_LAST_ERROR,
+            ] as $key) {
+                $this->config->deleteAppValue(Application::APP_ID, $key);
+            }
+            $this->config->setAppValue(Application::APP_ID, self::CFG_SEAT_REPORT_SINCE, (string)time());
+            return;
+        }
+
+        if ($since === null || $since <= 0) {
+            $this->config->setAppValue(Application::APP_ID, self::CFG_SEAT_REPORT_SINCE, (string)time());
+        }
     }
 
     /**
@@ -456,6 +743,18 @@ class LicenseService {
      */
     public function clearKey(): void {
         $this->config->deleteAppValue(Application::APP_ID, self::CFG_JWT);
+        // No key, no reporting obligation and nothing to measure silence
+        // against. Leaving the clock behind would mean a later metered key
+        // inherited the gap before it was issued.
+        foreach ([
+            self::CFG_SEAT_REPORT_LAST_OK_AT,
+            self::CFG_SEAT_REPORT_LAST_PERIOD,
+            self::CFG_SEAT_REPORT_LAST_PAYLOAD,
+            self::CFG_SEAT_REPORT_LAST_ERROR,
+            self::CFG_SEAT_REPORT_SINCE,
+        ] as $key) {
+            $this->config->deleteAppValue(Application::APP_ID, $key);
+        }
         $this->statusMemo = null;
     }
 
@@ -547,7 +846,7 @@ class LicenseService {
     }
 
     private function emptyStatus(
-        string $instanceUuid, int $seatsUsed, ?int $lastAt, ?array $lastPayload, ?string $reason = null,
+        string $instanceUuid, int $seatsUsed, ?string $reason = null,
     ): array {
         return [
             'hasKey'               => false,
@@ -572,8 +871,7 @@ class LicenseService {
             'seatEnforcement'      => 'none',
             'seatCap'              => null,
             'seatLockAt'           => null,
-            'lastTelemetryAt'      => $lastAt,
-            'lastTelemetryPayload' => $lastPayload,
+            ...$this->reportFragment(null, time()),
         ];
     }
 

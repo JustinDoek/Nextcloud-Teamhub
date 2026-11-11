@@ -140,6 +140,13 @@ class OpenProjectWorkPackageService {
             // can show or hide its create action without depending on the
             // Project info widget, which a team admin may have hidden.
             'canCreateWorkPackage' => $this->canCreateWorkPackage($userId, $projectId),
+            // v4.13.9 — can the OpenProject connection in force send
+            // PATCH at all. Rides the same payload for the same reason,
+            // and it is the *connection's* capability: whether a given
+            // row may be changed is `canEdit` on the row, which is
+            // OpenProject's answer per work package. The widget needs
+            // both before it offers the action.
+            'canEditWorkPackages'  => $this->client->supportsMethod('PATCH'),
         ];
 
         $this->cache->set($key, $payload, OpenProjectCache::TTL_MY_WORK);
@@ -573,6 +580,278 @@ class OpenProjectWorkPackageService {
         // Every member's cached widget page and overview counts are now one
         // work package behind; the generation bump is how the cache forgets
         // a whole team at once.
+        $this->cache->invalidateTeam($teamId);
+        return $wp;
+    }
+
+    /**
+     * OpenProject's **edit** form for one work package, as this user
+     * (v4.13.9).
+     *
+     * `POST work_packages/{id}/form`, carrying the work package's current
+     * `lockVersion` and nothing else (v4.13.11 — see the body): OpenProject
+     * answers with the schema as it applies to *this* work package and
+     * *this* user, which is the only way to learn two things we must not
+     * guess:
+     *
+     *  - **which status transitions are legal.** A workflow restricts the
+     *    statuses a given type may move to, per role. Offering the full
+     *    status list would put choices in front of people that OpenProject
+     *    will refuse.
+     *  - **the current `lockVersion`**, which the PATCH has to carry.
+     *
+     * The form is also OpenProject's permission answer: a user who may not
+     * edit gets 403, which the caller surfaces rather than interpreting.
+     *
+     * @return array{
+     *   workPackage: array<string, mixed>,
+     *   types: list<array{id: int, name: string}>,
+     *   statuses: list<array{id: int, name: string}>,
+     *   assignees: list<array{id: int, name: string}>,
+     *   assigneesUnavailable: bool
+     * }
+     * @throws OpenProjectException
+     */
+    public function editForm(string $userId, int $workPackageId): array {
+        if ($workPackageId <= 0) {
+            throw new ValidationException('Invalid work package id');
+        }
+        // v4.13.11 — the form POST has to carry the current `lockVersion`.
+        // OpenProject runs `WorkPackages::UpdateContract` on the *form* and
+        // not only on the PATCH, and that contract adds `error_conflict`
+        // when the payload's lock version is absent or does not match:
+        //
+        //     attribute :lock_version, permission: %i[edit_work_packages …] do
+        //       if model.lock_version.nil? || model.lock_version_changed?
+        //         errors.add :base, :error_conflict
+        //
+        // which is also the only thing that makes "lockVersion is required
+        // for an update" true. An empty body therefore read as a conflict:
+        // 409 *on opening the editor*, for every work package. The create
+        // form is unaffected — `CreateContract` has no such check — which
+        // is why `createForm()` has always worked with no body at all.
+        //
+        // The version is read fresh here and deliberately **not** taken
+        // from the widget row the editor was opened from: those rows are
+        // cached, so a stale one would come back as a conflict that looks
+        // like somebody else's edit when nobody edited anything.
+        $current = $this->client->get($userId, 'work_packages/' . $workPackageId);
+        $lockVersion = OpenProjectNormalizer::workPackage($current)['lockVersion'];
+        if ($lockVersion === null) {
+            throw new OpenProjectException(
+                OpenProjectException::UNSUPPORTED_RESPONSE,
+                'work_packages/{id} carried no lockVersion',
+            );
+        }
+
+        $raw = $this->client->post($userId, 'work_packages/' . $workPackageId . '/form', [
+            'lockVersion' => $lockVersion,
+        ]);
+        if (($raw['_type'] ?? null) !== 'Form') {
+            throw new OpenProjectException(
+                OpenProjectException::UNSUPPORTED_RESPONSE,
+                'work_packages/{id}/form did not return a Form',
+            );
+        }
+        $schema  = $raw['_embedded']['schema'] ?? [];
+        $payload = $raw['_embedded']['payload'] ?? [];
+
+        // The payload is the work package as the form sees it, and the
+        // `lockVersion` the editor sends back with its PATCH is the one the
+        // form answered with — not the one read above — so the version
+        // belongs to the same moment as the allowed values.
+        $wp = OpenProjectNormalizer::workPackage(is_array($payload) ? $payload : []);
+        if ($wp['lockVersion'] === null) {
+            // Without it a PATCH cannot be sent safely at all.
+            throw new OpenProjectException(
+                OpenProjectException::UNSUPPORTED_RESPONSE,
+                'the edit form carried no lockVersion',
+            );
+        }
+        $wp['url'] = $this->client->workPackageUrl($workPackageId);
+
+        $assignees   = [];
+        $unavailable = false;
+        $href        = $schema['assignee']['_links']['allowedValues']['href'] ?? null;
+        if (is_string($href) && str_starts_with($href, '/api/v3/')) {
+            try {
+                $assignees = $this->availableAssignees($userId, substr($href, strlen('/api/v3/')));
+            } catch (\Throwable) {
+                // Same rule as the create form: a failed assignee read
+                // costs the list, never the form.
+                $unavailable = true;
+            }
+        } else {
+            $unavailable = true;
+        }
+
+        return [
+            'workPackage'          => $wp,
+            'types'                => $this->allowedValues($schema, 'type'),
+            'statuses'             => $this->allowedValues($schema, 'status'),
+            'assignees'            => $assignees,
+            'assigneesUnavailable' => $unavailable,
+        ];
+    }
+
+    /**
+     * The inline `allowedValues` of one schema field, as id/name pairs
+     * (v4.13.9).
+     *
+     * Extracted from `createForm()`'s type handling, which did this for
+     * `type` alone; the edit form needs the same for `status`. Anything
+     * without a numeric id or a readable title is dropped rather than
+     * guessed at — a half-read option in a picker is worse than a missing
+     * one.
+     *
+     * @param array<string, mixed> $schema
+     * @return list<array{id: int, name: string}>
+     */
+    private function allowedValues(array $schema, string $field): array {
+        $out = [];
+        foreach ((array)($schema[$field]['_links']['allowedValues'] ?? []) as $link) {
+            if (!is_array($link) || !is_string($link['href'] ?? null)) {
+                continue;
+            }
+            $segment = OpenProjectNormalizer::trailingSegment($link['href']);
+            $title   = $link['title'] ?? null;
+            if (!ctype_digit($segment) || !is_string($title) || trim($title) === '') {
+                continue;
+            }
+            $out[] = ['id' => (int)$segment, 'name' => OpenProjectNormalizer::text($title)];
+        }
+        return $out;
+    }
+
+    /**
+     * Change one work package, as the viewer (v4.13.9).
+     *
+     * **The write §2.124 and §2.126 recorded as impossible.** It needs
+     * HTTP PATCH, which the official integration app's request layer does
+     * not send; `OpenProjectClient::patch()` refuses before sending on a
+     * transport that cannot, with `method_unsupported`.
+     *
+     * Only the fields given are sent. `lockVersion` is **required** and is
+     * the one the caller read from the edit form: OpenProject compares it
+     * with the stored one and answers 409 (`edit_conflict`) if somebody
+     * else wrote first, which is the whole point of sending it. A caller
+     * that sent a freshly-read version instead would turn a conflict into
+     * a silent overwrite.
+     *
+     * `null` for `assigneeId` or `dueDate` means **clear it**, which is
+     * why they are distinguished from absent: unassigning somebody and
+     * leaving the assignee alone are different edits.
+     *
+     * @param array<string, mixed> $input
+     * @return array<string, mixed> the updated work package
+     * @throws OpenProjectException
+     */
+    public function update(string $userId, string $teamId, int $workPackageId, array $input): array {
+        if ($workPackageId <= 0) {
+            throw new ValidationException('Invalid work package id');
+        }
+        $lockVersion = $input['lockVersion'] ?? null;
+        if (!is_numeric($lockVersion) || (int)$lockVersion < 0) {
+            throw new ValidationException('A lockVersion is required to change a work package');
+        }
+
+        $body = ['lockVersion' => (int)$lockVersion];
+        $links = [];
+
+        if (array_key_exists('subject', $input)) {
+            $subject = trim((string)$input['subject']);
+            if ($subject === '' || mb_strlen($subject) > self::SUBJECT_MAX_LENGTH) {
+                throw new ValidationException('A subject of 1 to ' . self::SUBJECT_MAX_LENGTH . ' characters is required');
+            }
+            $body['subject'] = $subject;
+        }
+
+        if (array_key_exists('typeId', $input)) {
+            $typeId = (int)$input['typeId'];
+            if ($typeId <= 0) {
+                throw new ValidationException('Invalid type');
+            }
+            $links['type'] = ['href' => '/api/v3/types/' . $typeId];
+        }
+
+        if (array_key_exists('statusId', $input)) {
+            $statusId = (int)$input['statusId'];
+            if ($statusId <= 0) {
+                throw new ValidationException('Invalid status');
+            }
+            $links['status'] = ['href' => '/api/v3/statuses/' . $statusId];
+        }
+
+        if (array_key_exists('assigneeId', $input)) {
+            $assigneeId = $input['assigneeId'];
+            if ($assigneeId === null || $assigneeId === '') {
+                // Explicitly unassigned.
+                $links['assignee'] = ['href' => null];
+            } else {
+                $assigneeId = (int)$assigneeId;
+                if ($assigneeId <= 0) {
+                    throw new ValidationException('Invalid assignee');
+                }
+                $links['assignee'] = ['href' => '/api/v3/users/' . $assigneeId];
+            }
+        }
+
+        if (array_key_exists('dueDate', $input)) {
+            $dueDate = $input['dueDate'];
+            if ($dueDate === null || $dueDate === '') {
+                $body['dueDate'] = null;
+            } else {
+                $dueDate = (string)$dueDate;
+                $parsed  = \DateTimeImmutable::createFromFormat('!Y-m-d', $dueDate, new \DateTimeZone('UTC'));
+                if ($parsed === false || $parsed->format('Y-m-d') !== $dueDate) {
+                    throw new ValidationException('Invalid due date');
+                }
+                $body['dueDate'] = $dueDate;
+            }
+        }
+
+        if (array_key_exists('percentageDone', $input)) {
+            $percent = $input['percentageDone'];
+            if ($percent === null || $percent === '') {
+                $body['percentageDone'] = null;
+            } else {
+                if (!is_numeric($percent) || (int)$percent < 0 || (int)$percent > 100) {
+                    throw new ValidationException('Percentage complete must be between 0 and 100');
+                }
+                $body['percentageDone'] = (int)$percent;
+            }
+        }
+
+        if (array_key_exists('description', $input)) {
+            $description = trim((string)$input['description']);
+            if (mb_strlen($description) > self::DESCRIPTION_MAX_LENGTH) {
+                throw new ValidationException('The description is too long');
+            }
+            $body['description'] = ['format' => 'markdown', 'raw' => $description];
+        }
+
+        if ($links !== []) {
+            $body['_links'] = $links;
+        }
+        if (count($body) === 1) {
+            // `lockVersion` alone: nothing to change. Refused here rather
+            // than sent, because OpenProject would accept it and bump the
+            // version, which looks like an edit in its activity log.
+            throw new ValidationException('Nothing to change');
+        }
+
+        $raw = $this->client->patch($userId, 'work_packages/' . $workPackageId, $body);
+        if (($raw['_type'] ?? null) !== 'WorkPackage' || (int)($raw['id'] ?? 0) <= 0) {
+            throw new OpenProjectException(
+                OpenProjectException::UNSUPPORTED_RESPONSE,
+                'the PATCH did not return a WorkPackage',
+            );
+        }
+        $wp        = OpenProjectNormalizer::workPackage($raw);
+        $wp['url'] = $this->client->workPackageUrl($wp['id']);
+
+        // Every member's cached widget page, overview counts and My Work
+        // rows are now one edit behind.
         $this->cache->invalidateTeam($teamId);
         return $wp;
     }

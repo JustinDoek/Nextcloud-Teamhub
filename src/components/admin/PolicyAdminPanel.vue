@@ -22,7 +22,21 @@
 			</p>
 		</div>
 
-		<template v-if="!loading">
+		<!-- v4.13.56 — the list is hidden while one of the three editors is
+		     open, because each of them is now a page on this tab rather than
+		     a modal over it. See the note above the profile editor below. -->
+		<template v-if="!loading && !editorOpen">
+
+			<!-- v4.13.75 — Nextcloud's own Teams app switch is no longer here.
+			     It was the first section of this tab (v4.13.16, DESIGN §2.190),
+			     on the reasoning that it decides whether there is a second,
+			     unaudited way into the same teams at all. Justin moved it to
+			     the Getting started tab on 2026-11-02: deciding that TeamHub
+			     is where teams are managed is a thing an administrator does
+			     once while setting the instance up, not a standing policy they
+			     revisit. It lives in `admin/TeamsFrontendSwitch.vue` now, with
+			     its own fetch and save, so there is still exactly one place
+			     that writes it. -->
 
 			<!-- ── Conflicts ──────────────────────────────────────────────
 			     A warning surface, never a save-blocker: blocking would make
@@ -34,7 +48,7 @@
 					{{ t('teamhub', 'Templates and profiles that disagree') }}
 				</h3>
 				<p class="th-policy__hint">
-					{{ t('teamhub', 'The profile always wins, so a team created from one of these pairs is still correct — it simply does not get everything the template offers. Change one side if that is not what you meant.') }}
+					{{ t('teamhub', 'The profile always wins, so a team created from one of these pairs is still correct: it simply does not get everything the template offers. Change one side if that is not what you meant.') }}
 				</p>
 				<ul class="th-policy__conflict-list">
 					<li v-for="(c, i) in conflicts" :key="i" class="th-policy__conflict">
@@ -49,9 +63,20 @@
 			     made of, which is the thing an administrator sets up before
 			     deciding how sensitive any of them are. -->
 			<section class="th-policy__section">
-				<h3 class="th-policy__h3">{{ t('teamhub', 'Team templates') }}</h3>
+				<div class="th-policy__section-head">
+					<h3 class="th-policy__h3">{{ t('teamhub', 'Team templates') }}</h3>
+					<!-- v4.13.24 — every Nextcloud administrator can make one.
+					     The table was read-and-edit only until now: the five
+					     templates TeamHub seeds were the only kinds of team an
+					     estate could have, which is a strange thing for a
+					     screen with an Edit button on every row to imply. Same
+					     affordance as Profiles below. -->
+					<NcButton variant="primary" @click="openNewTemplate">
+						{{ t('teamhub', 'New template') }}
+					</NcButton>
+				</div>
 				<p class="th-policy__hint">
-					{{ t('teamhub', 'A template decides what a new team is created with: its apps, its modules, and whether teams of that kind can be given an expiration date.') }}
+					{{ t('teamhub', 'A template decides what a new team is created with: its apps, its modules, the integrations its teams take part in, and whether teams of that kind can be given an expiration date.') }}
 				</p>
 				<p v-if="!liveAtCreation" class="th-policy__warn">
 					<AlertCircleOutlineIcon :size="iconInline" aria-hidden="true" />
@@ -99,6 +124,19 @@
 							<td class="th-policy__row-actions">
 								<NcButton variant="tertiary" @click="openEditTemplate(tpl)">
 									{{ t('teamhub', 'Edit') }}
+								</NcButton>
+								<!-- v4.13.24 — a seeded template has no Delete
+								     at all rather than one that fails: the
+								     upgrade's repair step re-inserts the
+								     shipped set, so deleting one would undo
+								     itself at the next occ upgrade. Hidden,
+								     not disabled — CLAUDE.md § Permissions. -->
+								<NcButton
+									v-if="!tpl.isSeeded"
+									variant="tertiary"
+									:aria-label="t('teamhub', 'Delete {name}', { name: templateName(tpl.templateKey, tpl.label) })"
+									@click="confirmDeleteTemplate(tpl)">
+									{{ t('teamhub', 'Delete') }}
 								</NcButton>
 							</td>
 						</tr>
@@ -175,13 +213,35 @@
 		</template>
 
 		<!-- ── Profile editor ─────────────────────────────────────────────── -->
-		<NcModal
-			v-if="profileEditor"
-			:name="profileEditor.isNew ? t('teamhub', 'New profile') : t('teamhub', 'Edit profile')"
-			size="large"
-			@close="closeProfileEditor">
-			<div class="th-policy__modal">
-				<h3 class="th-policy__modal-title">
+		<!-- v4.13.56 — all three editors on this tab were modals, and the
+		     template one opened the layout editor as a second modal on top of
+		     the first. A modal over a modal is the shape that got reported;
+		     the size of the template form is why it was noticed there first.
+
+		     They are now pages on the tab itself. Three things make that work
+		     and none of them should be undone separately:
+
+		       - the list is hidden while a page is open (`editorOpen`), so the
+		         page is the whole tab rather than a form below a table;
+		       - each page opens with a back control instead of a close cross,
+		         because there is no overlay left to dismiss;
+		       - the layout page hides the template page rather than replacing
+		         it, so `templateEditor` is still set underneath and going back
+		         from a layout lands on the template it belongs to.
+
+		     `AdminSettings.vue` listens for `update:editing` so the unrelated
+		     section it renders beside this panel is hidden too. Without that
+		     the page would have "Telling people apart" bolted to the bottom
+		     of it. -->
+		<section v-if="profileEditor" class="th-policy__page">
+			<div class="th-policy__page-head">
+				<NcButton variant="tertiary" @click="closeProfileEditor">
+					<template #icon><ArrowLeft :size="iconBody" /></template>
+					{{ t('teamhub', 'Back to policy') }}
+				</NcButton>
+			</div>
+			<div class="th-policy__page-body">
+				<h3 class="th-policy__page-title">
 					{{ profileEditor.isNew ? t('teamhub', 'New profile') : t('teamhub', 'Edit profile') }}
 				</h3>
 
@@ -210,7 +270,7 @@
 					<NcTextArea
 						v-model="profileEditor.description"
 						:label="t('teamhub', 'Description shown when creating a team')"
-						:placeholder="t('teamhub', 'Explain what this policy means for the team — who can find it, who can join, what is shared.')"
+						:placeholder="t('teamhub', 'Explain what this policy means for the team: who can find it, who can join, what is shared.')"
 						:rows="4" />
 					<span class="th-policy__hint">
 						{{ t('teamhub', 'Shown under the policy dropdown in the team creation wizard, and in the list above. Leave empty to show nothing.') }}
@@ -364,7 +424,7 @@
 					</div>
 				</div>
 
-				<div class="th-policy__modal-actions">
+				<div class="th-policy__page-actions">
 					<NcButton variant="tertiary" @click="closeProfileEditor">
 						{{ t('teamhub', 'Cancel') }}
 					</NcButton>
@@ -373,16 +433,38 @@
 					</NcButton>
 				</div>
 			</div>
-		</NcModal>
+		</section>
 
 		<!-- ── Template editor ────────────────────────────────────────────── -->
-		<NcModal
-			v-if="templateEditor"
-			:name="t('teamhub', 'Edit template')"
-			size="normal"
-			@close="templateEditor = null">
-			<div class="th-policy__modal">
-				<h3 class="th-policy__modal-title">{{ t('teamhub', 'Edit template') }}</h3>
+		<!-- Hidden while the layout page is open rather than unmounted: the
+		     draft apps and modules the layout editor was handed live on
+		     `templateEditor`, and going back has to land on the form the
+		     administrator was filling in, not on the table. -->
+		<section v-if="templateEditor && !layoutEditor" class="th-policy__page">
+			<div class="th-policy__page-head">
+				<NcButton variant="tertiary" @click="templateEditor = null">
+					<template #icon><ArrowLeft :size="iconBody" /></template>
+					{{ t('teamhub', 'Back to policy') }}
+				</NcButton>
+			</div>
+			<div class="th-policy__page-body">
+				<h3 class="th-policy__page-title">
+					{{ templateEditor.isNew ? t('teamhub', 'New template') : t('teamhub', 'Edit template') }}
+				</h3>
+
+				<!-- v4.13.24 — the key, on a new template only. It is stored on
+				     every team ever created from the template
+				     (`teamhub_team_type.type`) and there is no migration
+				     behind a rename, so it is settled once, here. -->
+				<div v-if="templateEditor.isNew" class="th-policy__field">
+					<NcTextField
+						v-model="templateEditor.templateKey"
+						:label="t('teamhub', 'Key')"
+						:maxlength="32" />
+					<span class="th-policy__hint">
+						{{ t('teamhub', 'Lowercase letters, digits and underscores. Every team created from this template stores the key, so it cannot be changed afterwards.') }}
+					</span>
+				</div>
 
 				<div class="th-policy__field">
 					<NcTextField
@@ -476,16 +558,101 @@
 					ref="blueprintSection"
 					:template-key="templateEditor.templateKey" />
 
-				<div class="th-policy__modal-actions">
+				<!-- v4.13.24 — which integrations this template's teams take
+				     part in. It was a section of the Integrations tab, with one
+				     picker per template; editing a template meant leaving the
+				     template editor to find that template again somewhere
+				     else. It belongs with the apps and modules above: the same
+				     decision about what a team of this kind is made of.
+
+				     Unlike everything above it, this section writes on its own
+				     — each include or remove is its own confirmed change with
+				     its own impact preview, and takes effect for every team of
+				     the template at once, because inclusion is read live. The
+				     heading's hint says so, because a Save button sitting
+				     below a control that has already saved is otherwise a
+				     quiet lie. -->
+				<template v-if="!templateEditor.isNew">
+					<span class="th-policy__label">{{ t('teamhub', 'Integrations these teams take part in') }}</span>
+					<span class="th-policy__hint">
+						{{ t('teamhub', 'Each change here is saved and takes effect when you confirm it, not when you save the template.') }}
+					</span>
+					<IntegrationTemplateInclusion :template-key="templateEditor.templateKey" />
+				</template>
+				<!-- An inclusion is a row against a template key, so there has
+				     to be a template first. Saving a new one leaves this
+				     editor open on it — see `saveTemplate()` — rather than
+				     making the administrator find it in the table again. -->
+				<p v-else class="th-policy__hint">
+					{{ t('teamhub', 'Integrations can be included once the template is created.') }}
+				</p>
+
+				<!-- v4.13.34 — the default home layout for teams of this
+				     template (issue #109 phase 2). Like the inclusions above
+				     it writes on its own, and like them it takes effect for
+				     every team of the template at once, because the cascade
+				     reads it live and nothing is copied into anybody's row.
+
+				     It is read and removed here and **set from a team's Home
+				     view**: an arrangement is something you make by dragging
+				     cards, and the only honest editor for one is the grid. A
+				     list of widgets with a size dropdown would be a second,
+				     worse editor for the same thing. -->
+				<template v-if="!templateEditor.isNew">
+					<span class="th-policy__label">{{ t('teamhub', 'Default home layout') }}</span>
+					<p class="th-policy__hint">
+						{{ templateLayout
+							? n('teamhub', 'Teams of this template open with a layout of %n card.', 'Teams of this template open with a layout of %n cards.', templateLayout.layout.length, { n: templateLayout.layout.length })
+							: t('teamhub', 'Teams of this template open with the layout TeamHub ships.') }}
+					</p>
+					<div class="th-policy__head-actions">
+						<NcButton variant="secondary" @click="openTemplateLayoutEditor">
+							{{ templateLayout ? t('teamhub', 'Edit layout') : t('teamhub', 'Set a layout') }}
+						</NcButton>
+						<NcButton
+							v-if="templateLayout"
+							variant="tertiary"
+							:disabled="saving"
+							@click="clearTemplateLayout">
+							{{ t('teamhub', 'Remove') }}
+						</NcButton>
+					</div>
+				</template>
+
+				<div class="th-policy__page-actions">
 					<NcButton variant="tertiary" @click="templateEditor = null">
 						{{ t('teamhub', 'Cancel') }}
 					</NcButton>
 					<NcButton variant="primary" :disabled="saving" @click="saveTemplate">
-						{{ saving ? t('teamhub', 'Saving…') : t('teamhub', 'Save') }}
+						{{ saving
+							? t('teamhub', 'Saving…')
+							: (templateEditor.isNew ? t('teamhub', 'Create template') : t('teamhub', 'Save')) }}
 					</NcButton>
 				</div>
 			</div>
-		</NcModal>
+		</section>
+
+		<!-- v4.13.35 — the default home layout editor, for whichever width the
+		     administrator opened it on. One component: the two widths differ
+		     only in what they save to and what Reset goes back to, and a
+		     second copy of a fourteen-row editor would have been the thing
+		     that release spent its time undoing elsewhere.
+		     v4.13.56 — it is a page now, not a modal, and it draws its own
+		     back control from `backLabel`. -->
+		<LayoutDefaultEditor
+			v-if="layoutEditor"
+			:back-label="t('teamhub', 'Back to the template')"
+			:name="layoutEditor.title"
+			:layout="layoutEditor.layout"
+			:shipped="layoutEditor.shipped"
+			:apps="layoutEditor.apps"
+			:modules="layoutEditor.modules"
+			:template-key="layoutEditor.templateKey"
+			:reset-label="layoutEditor.resetLabel"
+			:busy="saving"
+			:error="layoutEditor.error"
+			@save="saveLayoutEditor"
+			@close="layoutEditor = null" />
 
 		<!-- ── Delete confirmation ────────────────────────────────────────── -->
 		<NcModal
@@ -504,6 +671,43 @@
 					</NcButton>
 					<NcButton variant="error" :disabled="saving" @click="doDelete">
 						{{ t('teamhub', 'Delete') }}
+					</NcButton>
+				</div>
+			</div>
+		</NcModal>
+
+		<!-- ── Template delete confirmation (v4.13.24) ───────────────────── -->
+		<!-- Teams already created from the template are the thing an
+		     administrator will worry about, so the count leads and the
+		     sentence says what happens to them: nothing. A template describes
+		     what a team is made with, not what it is. -->
+		<NcModal
+			v-if="pendingDeleteTemplate"
+			:name="t('teamhub', 'Delete this template?')"
+			size="small"
+			@close="pendingDeleteTemplate = null">
+			<div class="th-policy__modal">
+				<h3 class="th-policy__modal-title">{{ t('teamhub', 'Delete this template?') }}</h3>
+				<p>
+					{{ t('teamhub', '"{name}" will no longer be offered when someone creates a team.', {
+						name: templateName(pendingDeleteTemplate.templateKey, pendingDeleteTemplate.label),
+					}) }}
+				</p>
+				<p v-if="deleteTemplateTeamCount > 0">
+					{{ n('teamhub',
+						'%n team was created from it. It keeps every app, module and setting it was created with.',
+						'%n teams were created from it. They keep every app, module and setting they were created with.',
+						deleteTemplateTeamCount, { n: deleteTemplateTeamCount }) }}
+				</p>
+				<p class="th-policy__hint">
+					{{ t('teamhub', 'Integrations included in this template stop applying to those teams. Each team\'s own shown and hidden choices are kept.') }}
+				</p>
+				<div class="th-policy__modal-actions">
+					<NcButton variant="tertiary" @click="pendingDeleteTemplate = null">
+						{{ t('teamhub', 'Cancel') }}
+					</NcButton>
+					<NcButton variant="error" :disabled="saving" @click="doDeleteTemplate">
+						{{ t('teamhub', 'Delete template') }}
 					</NcButton>
 				</div>
 			</div>
@@ -620,7 +824,7 @@
 							<div class="th-policy__report-team" role="cell">{{ row.teamName }}</div>
 							<div role="cell">
 								<span v-if="row.detail">{{ row.detail }}</span>
-								<span v-else class="th-policy__hint">{{ t('teamhub', 'Already matched — nothing to change.') }}</span>
+								<span v-else class="th-policy__hint">{{ t('teamhub', 'Already matched: nothing to change.') }}</span>
 							</div>
 						</div>
 					</div>
@@ -646,9 +850,11 @@
 <script>
 import { translate as t, translatePlural as n } from '@nextcloud/l10n'
 import { generateUrl } from '@nextcloud/router'
+import LayoutDefaultEditor from './LayoutDefaultEditor.vue'
 import axios from '@nextcloud/axios'
 import { NcButton, NcCheckboxRadioSwitch, NcEmptyContent, NcLoadingIcon, NcModal, NcNoteCard, NcSelect, NcTextArea, NcTextField } from '@nextcloud/vue'
 import AlertCircleOutlineIcon from 'vue-material-design-icons/AlertCircleOutline.vue'
+import ArrowLeft from 'vue-material-design-icons/ArrowLeft.vue'
 import CheckIcon from 'vue-material-design-icons/Check.vue'
 import CloseIcon from 'vue-material-design-icons/Close.vue'
 import LockOutline from 'vue-material-design-icons/LockOutline.vue'
@@ -656,6 +862,10 @@ import ShieldLockOutlineIcon from 'vue-material-design-icons/ShieldLockOutline.v
 // v4.9.6 — Phase 2: the OpenProject template's workspace settings, inside
 // the template editor (one editor per template).
 import OpenProjectBlueprintSection from './OpenProjectBlueprintSection.vue'
+// v4.13.24 — the template's integration inclusions, moved here from the
+// Integrations tab. Its own component because it owns its writes, its impact
+// preview and its reconciliation pass.
+import IntegrationTemplateInclusion from './IntegrationTemplateInclusion.vue'
 
 import { ICON_INLINE, ICON_BODY, ICON_TOOLBAR, ICON_HERO } from '../../constants/uiTokens.js'
 import {
@@ -726,7 +936,9 @@ export default {
 	name: 'PolicyAdminPanel',
 	components: {
 		NcButton,
+		LayoutDefaultEditor,
 		OpenProjectBlueprintSection,
+		IntegrationTemplateInclusion,
 		NcCheckboxRadioSwitch,
 		NcEmptyContent,
 		NcLoadingIcon,
@@ -736,11 +948,20 @@ export default {
 		NcTextArea,
 		NcTextField,
 		AlertCircleOutlineIcon,
+		ArrowLeft,
 		CheckIcon,
 		CloseIcon,
 		LockOutline,
 		ShieldLockOutlineIcon,
 	},
+
+	/**
+	 * v4.13.56 — tells the tab that one of the editors has taken the page
+	 * over, so the sibling section `AdminSettings.vue` renders next to this
+	 * panel can hide itself. The panel owns no part of that section and must
+	 * not reach for it.
+	 */
+	emits: ['update:editing'],
 
 	data() {
 		return {
@@ -759,6 +980,23 @@ export default {
 			confidentialFiles: { appAvailable: false, labelsConfigured: false, tags: [] },
 			profiles: [],
 			templates: [],
+			// v4.13.34 — the default home layout for the template the editor is
+			// open on, and the one for the whole instance. Fetched rather than
+			// carried on the template row: they are several kilobytes each and
+			// the table that lists templates has no use for them.
+			templateLayout: null,
+			// v4.13.35 — the open layout editor, or null. Holds which width it
+			// is editing so one modal serves both: `scope` decides where a save
+			// goes, `fallback` what Reset restores.
+			layoutEditor: null,
+			// The layout TeamHub ships, from whichever GET answered last. The
+			// editor needs it for every widget's width and height, including
+			// the widgets a stored layout does not mention.
+			shippedLayout: [],
+			// v4.13.24 — template key => how many teams were made from it.
+			// Context for the delete confirmation; the server counts again
+			// when the delete runs and reports the real figure back.
+			teamsByTemplate: {},
 			// v4.8.27 — the rollout choice, and then its report. Null until a
 			// save comes back with a plan; `report` stays null until the
 			// administrator picks one of the two apply options, so one object
@@ -766,6 +1004,11 @@ export default {
 			rollout: null,
 			rolloutRunning: false,
 			conflicts: [],
+			// v4.13.16 — Circles' own `frontend_enabled`, read and written through
+			// TeamHub's admin API. Defaults to on-and-available so a panel that has
+			// not loaded yet shows the switch in the state the instance is almost
+			// certainly in (the Circles default), rather than flipping under the
+			// administrator when the GET lands.
 			apps: [],
 			modules: [],
 			liveAtCreation: false,
@@ -774,6 +1017,9 @@ export default {
 			profileEditor: null,
 			/** Field key => value, for the profile being edited. Absent = ungoverned. */
 			draftValues: {},
+			/** v4.13.24 — the template awaiting a delete confirmation. */
+			pendingDeleteTemplate: null,
+
 			/** @type {?object} open template editor, or null */
 			templateEditor: null,
 			/** @type {?object} profile awaiting delete confirmation */
@@ -844,7 +1090,7 @@ export default {
 					teamName: team.teamName || team.teamId,
 					status: 'fail',
 					detail: team.reason === 'not_carrying'
-						? t('teamhub', 'No longer uses this — skipped.')
+						? t('teamhub', 'No longer uses this: skipped.')
 						: (team.error || t('teamhub', 'Failed.')),
 				})
 			}
@@ -882,6 +1128,34 @@ export default {
 		 */
 		integrationChoices() {
 			return this.appChoices
+		},
+
+		/**
+		 * v4.13.56 — is one of the three editor pages open?
+		 *
+		 * Read in two places that must never disagree: it hides the list, and
+		 * through the watcher below it hides the sibling section on the tab.
+		 * Derived from the three editor objects rather than kept as a fourth
+		 * flag, because a flag and the objects are two descriptions of the
+		 * same state and the flag is the one that goes stale.
+		 */
+		editorOpen() {
+			return !!(this.profileEditor || this.templateEditor || this.layoutEditor)
+		},
+	},
+
+	watch: {
+		editorOpen(open) {
+			this.$emit('update:editing', open)
+			// A page that opens below the fold reads as nothing having
+			// happened. Only on the way in: going back should return the
+			// administrator to the table, and the browser's own position on it
+			// is a better answer than the top.
+			if (open) {
+				this.$nextTick(() => {
+					this.$el?.scrollIntoView?.({ block: 'start', behavior: 'smooth' })
+				})
+			}
 		},
 	},
 
@@ -972,6 +1246,19 @@ export default {
 			this.draftValues[fieldKey] = option ? option.id : ''
 		},
 
+		/**
+		 * v4.13.24 — how many teams were made from the template about to be
+		 * deleted. Read from the already-loaded template list rather than
+		 * asked for: `listTemplates` does not carry a count, and the number is
+		 * context for a confirmation, not the authority for it. The server
+		 * counts again and reports the real figure back.
+		 */
+		deleteTemplateTeamCount() {
+			const key = this.pendingDeleteTemplate?.templateKey
+			if (!key) return 0
+			return this.teamsByTemplate[key] || 0
+		},
+
 		/** Display names for a template's apps group. */
 		templateAppNames(tpl) {
 			return [
@@ -1023,6 +1310,8 @@ export default {
 			this.loading = true
 			this.error = null
 			try {
+				// v4.13.75 — no `/teams-frontend` here any more: that switch moved
+				// to the Getting started tab and fetches its own state.
 				const [fields, profiles, templates, conflicts] = await Promise.all([
 					axios.get(this.url('/fields')),
 					axios.get(this.url('/profiles')),
@@ -1037,6 +1326,7 @@ export default {
 				this.apps = templates.data.apps || []
 				this.modules = templates.data.modules || []
 				this.liveAtCreation = !!templates.data.liveAtCreation
+				this.teamsByTemplate = templates.data.teamsByTemplate || {}
 				this.conflicts = conflicts.data.conflicts || []
 			} catch (e) {
 				this.error = this.readError(e, t('teamhub', 'Could not load policy settings.'))
@@ -1361,8 +1651,171 @@ export default {
 
 		// ── Template editor ─────────────────────────────────────────────
 
-		openEditTemplate(tpl) {
+		/**
+		 * v4.13.24 — open the editor on a template that does not exist yet.
+		 *
+		 * The same editor as an edit, with the key field shown and the
+		 * integration inclusions withheld until there is a row for them to
+		 * hang off. Defaults are the emptiest honest ones: no apps, no
+		 * modules, no expiry, no default policy. An administrator making a
+		 * template knows what they want in it; a pre-ticked list would be a
+		 * guess they have to undo.
+		 */
+		openNewTemplate() {
 			this.templateEditor = {
+				isNew: true,
+				templateKey: '',
+				label: '',
+				description: '',
+				apps: [],
+				modules: [],
+				expiryEnabled: false,
+				expiryDefaultDays: 0,
+				// The preselection bits this panel does not edit. 0 is what a
+				// template with no opinion carries; the server masks whatever
+				// arrives to MANAGED_BITS regardless.
+				preselectConfig: 0,
+				sortIndex: this.nextTemplateSortIndex(),
+				defaultProfileKey: '',
+			}
+		},
+
+		/**
+		 * v4.13.34 — the default home layout for one kind of team.
+		 *
+		 * `templateLayout` is nulled before the read so a stale answer from the
+		 * template last opened cannot be shown against this one.
+		 */
+		async loadTemplateLayout(templateKey) {
+			this.templateLayout = null
+			try {
+				const { data } = await axios.get(this.url('/templates/' + encodeURIComponent(templateKey) + '/layout'))
+				this.templateLayout = data?.default || null
+				// `shipped` rides this response so the editor can open without
+				// a second round trip: it carries every card's height and the
+				// order TeamHub ships, and it is what Reset restores.
+				if (Array.isArray(data?.shipped)) this.shippedLayout = data.shipped
+			} catch (e) {
+				// A failed read shows "no layout set", which understates rather
+				// than invents. The section cannot create one, so there is
+				// nothing an error here would stop somebody doing.
+				this.templateLayout = null
+			}
+		},
+
+		async clearTemplateLayout() {
+			if (!this.templateEditor) return
+			this.saving = true
+			this.error = null
+			try {
+				await axios.delete(this.url('/templates/' + encodeURIComponent(this.templateEditor.templateKey) + '/layout'))
+				this.templateLayout = null
+				this.flash(t('teamhub', 'Home layout removed. Teams of this template open with the layout TeamHub ships.'))
+			} catch (e) {
+				this.error = this.readError(e, t('teamhub', 'Could not remove the default layout.'))
+			} finally {
+				this.saving = false
+			}
+		},
+
+		/**
+		 * v4.13.35 — open the editor on this kind of team's default.
+		 *
+		 * The apps and modules go with it, from the editor's own draft rather
+		 * than from the saved row: an administrator who has just ticked Deck
+		 * and opens the layout editor should be arranging a page that has
+		 * Tasks on it. The two are saved by the same dialog anyway.
+		 */
+		openTemplateLayoutEditor() {
+			if (!this.templateEditor) return
+			this.layoutEditor = {
+				templateKey: this.templateEditor.templateKey,
+				title: t('teamhub', 'Home layout for {template}', { template: this.templateEditor.label }),
+				layout: this.templateLayout ? this.templateLayout.layout : null,
+				shipped: this.shippedLayout,
+				apps: this.templateEditor.apps,
+				modules: this.templateEditor.modules,
+				resetLabel: t('teamhub', 'Back to the layout TeamHub ships'),
+				error: null,
+			}
+		},
+
+		/**
+		 * Save this kind of team's layout, then re-read it.
+		 *
+		 * Re-read rather than patched from the response: the stored layout is
+		 * cleaned on the way in (an unknown widget id is dropped), so what
+		 * comes back is what teams will actually get, and showing the editor's
+		 * own input instead would hide that.
+		 */
+		async saveLayoutEditor({ layout, tabOrder }) {
+			const editor = this.layoutEditor
+			if (!editor) return
+			this.saving = true
+			this.layoutEditor = { ...editor, error: null }
+			try {
+				await axios.put(
+					this.url('/templates/' + encodeURIComponent(editor.templateKey) + '/layout'),
+					{ layout, tabOrder },
+				)
+				await this.loadTemplateLayout(editor.templateKey)
+				this.flash(t('teamhub', 'Home layout saved for this kind of team.'))
+				this.layoutEditor = null
+			} catch (e) {
+				// Kept open on failure, with the server's own sentence on it:
+				// the refusals here are specific and the administrator has the
+				// arrangement in front of them to correct.
+				this.layoutEditor = {
+					...editor,
+					error: this.readError(e, t('teamhub', 'Could not save the home layout.')),
+				}
+			} finally {
+				this.saving = false
+			}
+		},
+
+		/** Last in the wizard's card order, in steps of ten like the seed. */
+		nextTemplateSortIndex() {
+			const highest = this.templates.reduce((max, tpl) => Math.max(max, tpl.sortIndex || 0), 0)
+			return highest + 10
+		},
+
+		confirmDeleteTemplate(tpl) {
+			this.pendingDeleteTemplate = tpl
+		},
+
+		async doDeleteTemplate() {
+			this.saving = true
+			this.error = null
+			const tpl = this.pendingDeleteTemplate
+			try {
+				const { data } = await axios.delete(this.url('/templates/' + encodeURIComponent(tpl.templateKey)))
+				this.pendingDeleteTemplate = null
+				await this.load()
+				// The server's own count, not the one the confirmation showed:
+				// a team could have been created from the template while the
+				// dialog was open.
+				this.flash(data?.teams_affected > 0
+					? n('teamhub',
+						'Template deleted. %n existing team keeps what it was created with.',
+						'Template deleted. %n existing teams keep what they were created with.',
+						data.teams_affected, { n: data.teams_affected })
+					: t('teamhub', 'Template deleted.'))
+			} catch (e) {
+				this.error = this.readError(e, t('teamhub', 'Could not delete the template.'))
+			} finally {
+				this.saving = false
+			}
+		},
+
+		openEditTemplate(tpl) {
+			// v4.13.34 — read this template's default layout alongside opening
+			// the editor. Deliberately not awaited: the section says "no
+			// layout" for a moment on a slow instance, which is better than an
+			// editor that will not open until a secondary read returns.
+			this.loadTemplateLayout(tpl.templateKey)
+			this.templateEditor = {
+				isNew: false,
 				templateKey: tpl.templateKey,
 				label: tpl.label,
 				description: tpl.description || '',
@@ -1422,7 +1875,10 @@ export default {
 			this.error = null
 			const editor = this.templateEditor
 			try {
-				const { data: saved } = await axios.put(this.url('/templates/' + encodeURIComponent(editor.templateKey)), {
+				// v4.13.24 — one body, two verbs. A create posts to the
+				// collection and carries the key; an edit puts to the row and
+				// cannot change it.
+				const body = {
 					label: editor.label,
 					description: editor.description || null,
 					apps: editor.apps,
@@ -1436,7 +1892,31 @@ export default {
 					preselectConfig: editor.preselectConfig,
 					sortIndex: editor.sortIndex,
 					defaultProfileKey: editor.defaultProfileKey || '',
-				})
+				}
+
+				if (editor.isNew) {
+					const { data: created } = await axios.post(this.url('/templates'), {
+						...body,
+						templateKey: editor.templateKey,
+					})
+					await this.load()
+					// Stay open on the template that now exists, so the
+					// integration inclusions can be set in the same sitting
+					// rather than sending the administrator back to the table
+					// to find what they just made.
+					this.templateEditor = {
+						...editor,
+						isNew: false,
+						templateKey: created?.templateKey || editor.templateKey,
+					}
+					this.flash(t('teamhub', 'Template created. Its integrations can be included below.'))
+					return
+				}
+
+				const { data: saved } = await axios.put(
+					this.url('/templates/' + encodeURIComponent(editor.templateKey)),
+					body,
+				)
 				// v4.9.6 — the OpenProject section saves its blueprint under the
 				// same button. Its own error shows inside the section; the
 				// template is already saved by then, which is the right order:
@@ -1535,12 +2015,78 @@ export default {
 	flex-wrap: wrap;
 }
 
+/* v4.13.35 — two buttons where a section head or a modal field had one. */
+.th-policy__head-actions {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-wrap: wrap;
+}
+
+/* The admin page's compact setting row: text on the start side, control on
+   the end side. Same geometry as `.admin-compact-row` in AdminSettings.vue,
+   which is in that file's scoped block and therefore out of reach here. */
+.th-policy__rows {
+	display: flex;
+	flex-direction: column;
+}
+
+.th-policy__row {
+	display: flex;
+	align-items: flex-start;
+	gap: var(--th-space-xl);
+	padding-block: var(--th-space-sm);
+}
+
+.th-policy__row-text {
+	display: flex;
+	flex-direction: column;
+	gap: var(--th-space-xs);
+	flex: 1 1 auto;
+	min-width: 0;
+}
+
+.th-policy__row-name {
+	font-weight: var(--th-font-weight-semibold);
+}
+
+/* v4.13.58 — same grammar as `.admin-compact-row__desc` on the Integrations
+   tab: the name carries the weight, the sentence under it carries the colour. */
+.th-policy__row-desc {
+	color: var(--color-text-maxcontrast);
+	line-height: var(--th-line-height-body);
+}
+
+.th-policy__row-control {
+	flex: 0 0 auto;
+	align-self: center;
+}
+
+/* Narrow panes: stack rather than squeeze, as the admin page does. */
+@media (max-width: 700px) {
+	.th-policy__row {
+		flex-direction: column;
+		gap: var(--th-space-sm);
+	}
+
+	.th-policy__row-control {
+		align-self: flex-start;
+	}
+}
+
+/* v4.13.58 — a section heading on this tab is a section heading on any other,
+   so it renders at the same height. `NcSettingsSection`'s own `h2` is 20px
+   bold, which every tab built from those sections gets for free; this tab and
+   the Services one build their sections by hand and were two steps down the
+   scale, which read as demoted beside them. `--th-font-heading-lg` *is* 20px
+   (widget-tokens: "view / section heading (H2)"), so this is the token scale,
+   not a number picked to match. */
 .th-policy__h3 {
 	display: flex;
 	align-items: center;
 	gap: 8px;
-	font-size: var(--th-font-heading);
-	font-weight: var(--th-font-weight-semibold);
+	font-size: var(--th-font-heading-lg);
+	font-weight: var(--th-font-weight-bold);
 	margin: 0;
 }
 
@@ -1764,6 +2310,50 @@ export default {
 	display: flex;
 	flex-direction: column;
 	gap: 12px;
+}
+
+/* v4.13.56 — the three editor pages. No padding of its own on the head:
+   the tab already has its own gutter, and a back control that sits inset
+   from the table it returns to reads as part of the form rather than as the
+   way out of it. */
+.th-policy__page {
+	display: flex;
+	flex-direction: column;
+	gap: var(--th-space-md);
+}
+
+.th-policy__page-head {
+	display: flex;
+	align-items: center;
+	padding-bottom: var(--th-space-sm);
+	border-bottom: 1px solid var(--color-border);
+}
+
+.th-policy__page-body {
+	display: flex;
+	flex-direction: column;
+	gap: var(--th-space-md);
+	/* The form is read, not scanned across the width of a settings page.
+	   Same measure the announcement view uses for its prose. */
+	max-width: 780px;
+}
+
+.th-policy__page-title {
+	font-size: var(--th-font-heading-lg);
+	font-weight: var(--th-font-weight-semibold);
+	margin: 0;
+}
+
+/* The row stays at the end of the form rather than becoming a sticky bar:
+   a page can be scrolled, and a bar pinned over a settings page competes
+   with Nextcloud's own. */
+.th-policy__page-actions {
+	display: flex;
+	justify-content: flex-end;
+	gap: var(--th-space-sm);
+	margin-top: var(--th-space-lg);
+	padding-top: var(--th-space-md);
+	border-top: 1px solid var(--color-border);
 }
 
 .th-policy__modal-title {

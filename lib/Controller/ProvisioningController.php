@@ -387,6 +387,31 @@ class ProvisioningController extends Controller {
     }
 
     /**
+     * POST /api/v1/provisioning/{id}/acknowledge
+     *
+     * Accept an operation that finished with something to look at, so the
+     * team page stops saying so (v4.13.30).
+     *
+     * Refused on a failed operation: that one needs a retry or a rollback,
+     * and letting it be waved away would turn a broken workspace into a
+     * silent one. The step rows keep their notes either way, so the details
+     * pane still shows what did not happen.
+     */
+    #[NoAdminRequired]
+    #[UserRateLimit(limit: 20, period: 60)]
+    public function acknowledge(int $id): JSONResponse {
+        $gate = $this->openProjectModuleGate();
+        if ($gate !== null) {
+            return $gate;
+        }
+        try {
+            return new JSONResponse($this->provisioning->acknowledge($id));
+        } catch (\Throwable $e) {
+            return $this->openProjectFailure($e, 'The setup notice could not be accepted', ['id' => $id]);
+        }
+    }
+
+    /**
      * POST /api/v1/provisioning/{id}/rollback  Body: { confirm?: bool }
      *
      * Without `confirm`, a dry run when any created resource may hold

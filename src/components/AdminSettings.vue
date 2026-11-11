@@ -17,7 +17,7 @@
             </button>
         </div>
 
-        <!-- ── Tab: Team creation ─────────────────────────────────────────── -->
+        <!-- ── Tab: Getting started (was Team creation until v4.13.75) ───── -->
         <div
             v-show="activeTab === 'creation'"
             id="tab-panel-creation"
@@ -150,6 +150,21 @@
                 </div>
             </NcDialog>
 
+            <!-- ── Where teams are managed (v4.13.75) ─────────────────────
+                 Justin, 2026-11-02: the Teams app switch belongs on this tab,
+                 not on Policy. It is the first thing to settle when standing
+                 an instance up — whether TeamHub is the only way into a team,
+                 or Nextcloud's own Teams app is a second, unaudited one — and
+                 it is settled once rather than revisited, which is what the
+                 rest of this tab is for and what the tab is now named after.
+                 Its own component so the switch and its PUT stay together;
+                 see admin/TeamsFrontendSwitch.vue. -->
+            <NcSettingsSection
+                :name="t('teamhub', 'Where teams are managed')"
+                :description="t('teamhub', 'Whether Nextcloud’s own Teams app offers a second way into the same teams, beside TeamHub.')">
+                <TeamsFrontendSwitch />
+            </NcSettingsSection>
+
             <!-- ── Team creation (v4.11.33) ───────────────────────────────
                  Three sections until now — Team creation wizard, Team
                  expiration and Creation permissions — each with a heading and
@@ -269,6 +284,63 @@
                     <p v-if="hintOpen('wizard')" id="admin-wizard-hint" class="admin-grid__hint">
                         {{ t('teamhub', 'Shown at the top of the Create new team dialog, to everybody who creates a team. Leave empty to show no text.') }}
                     </p>
+
+                    <!-- v4.13.56 — the welcome page's subline, written here.
+                         Sits directly under the create-team dialog text
+                         because it is the same kind of setting: a sentence an
+                         administrator writes and the app shows to somebody
+                         else. The two are the only such fields in TeamHub and
+                         a reader looking for one will look for the other
+                         here. Markdown, the same syntax team messages take,
+                         so a welcome can carry a link to the intranet or an
+                         internal policy without a second editor. -->
+                    <label class="admin-grid__label" for="admin-welcome-message">
+                        {{ t('teamhub', 'Welcome page message') }}
+                        <InfoHint
+                            controls="admin-welcome-hint"
+                            :open="hintOpen('welcome')"
+                            :label="t('teamhub', 'About the welcome page message')"
+                            @toggle="toggleHint('welcome')" />
+                    </label>
+                    <div class="admin-grid__control">
+                        <!-- v4.13.57 — the formatting buttons. The field takes
+                             markdown and an administrator should not have to
+                             know markdown to put a link in the first thing
+                             every user of the instance reads (Justin,
+                             2026-10-31). Six buttons; underline is absent on
+                             purpose, see MarkdownTextareaToolbar.vue.
+
+                             A toolbar change goes through the same
+                             `onWelcomeMessageInput` the textarea's own input
+                             does, so it autosaves identically. Routing it
+                             anywhere else is how a button ends up editing text
+                             that never gets written. -->
+                        <MarkdownTextareaToolbar
+                            :value="form.welcomeMessage"
+                            :resolve="resolveWelcomeTextarea"
+                            @update:value="onWelcomeMessageEdit" />
+                        <!-- Debounced autosave, same handler shape as the
+                             field above: the value is not a secret and the
+                             write is idempotent, so saving once the admin
+                             stops typing is safe. -->
+                        <NcTextArea
+                            id="admin-welcome-message"
+                            ref="welcomeMessageField"
+                            v-model="form.welcomeMessage"
+                            :label="t('teamhub', 'Welcome page message')"
+                            :placeholder="t('teamhub', 'Select a team from the sidebar to get started')"
+                            :maxlength="welcomeMessageMax"
+                            :rows="4"
+                            label-outside
+                            @update:model-value="onWelcomeMessageInput" />
+                    </div>
+                    <!-- TRANSLATORS: "Welcome to TeamHub" is the heading on
+                         the TeamHub start page and is itself translated.
+                         Translate it here the same way, or the sentence will
+                         name a heading the reader cannot find. -->
+                    <p v-if="hintOpen('welcome')" id="admin-welcome-hint" class="admin-grid__hint">
+                        {{ t('teamhub', 'Shown under "Welcome to TeamHub" on the TeamHub start page, to every user on this server. Markdown works here, the same way it does in a team message. Leave empty to show the standard line, which this field shows as its placeholder.') }}
+                    </p>
                 </div>
             </NcSettingsSection>
 
@@ -323,7 +395,7 @@
                             @update:model-value="onTeamAdoptionModeChange" />
                     </div>
                     <p v-if="hintOpen('adoptionMode')" id="admin-adoption-mode-hint" class="admin-grid__hint">
-                        {{ t('teamhub', 'With Ask before accepting it, the team goes to whoever this instance has for the job: the request queue of the team that holds the Nextcloud services, otherwise a task in the Nextcloud administrators’ My Work, otherwise this list alone. The other two answers need nobody — TeamHub decides within a few minutes of the team being made and tells its owner. Either way the team itself is left alone in Nextcloud until it is accepted.') }}
+                        {{ t('teamhub', 'With Ask before accepting it, the team goes to whoever this instance has for the job: the request queue of the team that holds the Nextcloud services, otherwise a task in the Nextcloud administrators’ My Work, otherwise this list alone. The other two answers need nobody. TeamHub decides within a few minutes of the team being made and tells its owner. Either way the team itself is left alone in Nextcloud until it is accepted.') }}
                     </p>
                 </div>
 
@@ -629,7 +701,7 @@
                         type="checkbox"
                         @update:model-value="inviteCircle = $event; save()">
                         {{ t('teamhub', 'Teams') }}
-                        <template #description>{{ t('teamhub', 'Add another team as a sub-team member — all its members gain access') }}</template>
+                        <template #description>{{ t('teamhub', 'Add another team as a sub-team member: all its members gain access') }}</template>
                     </NcCheckboxRadioSwitch>
                     <NcCheckboxRadioSwitch
                         :model-value="inviteEmail"
@@ -645,6 +717,35 @@
                         {{ t('teamhub', 'Federated users') }}
                         <template #description>{{ t('teamhub', 'Invite users from other Nextcloud instances (requires Circles federation)') }}</template>
                     </NcCheckboxRadioSwitch>
+                    <!-- v4.14.9 — teams this server does not own. Beside the
+                         federated-invite switch because it is the other half
+                         of the same question: that one lets a team here take
+                         a member from elsewhere, this one lets a member here
+                         see a team from elsewhere. DESIGN §2.253.
+                         v4.20.0 — one sentence under the box, the clean-up
+                         behind the (i). The (i) sits beside the checkbox, not
+                         in its label: a button inside a <label> would tick the
+                         box when pressed and nests two controls in one. -->
+                    <div class="admin-invite-types__item">
+                        <div class="admin-invite-types__row">
+                            <NcCheckboxRadioSwitch
+                                :model-value="form.federatedTeamsEnabled"
+                                type="checkbox"
+                                @update:model-value="form.federatedTeamsEnabled = $event; save()">
+                                {{ t('teamhub', 'Teams from other servers') }}
+                                <template #description>{{ t('teamhub', 'Show teams owned by another Nextcloud server to the people here who belong to them.') }}</template>
+                            </NcCheckboxRadioSwitch>
+                            <InfoHint
+                                class="admin-invite-types__info"
+                                controls="admin-fedteams-hint"
+                                :open="hintOpen('federatedTeams')"
+                                :label="t('teamhub', 'About teams from other servers')"
+                                @toggle="toggleHint('federatedTeams')" />
+                        </div>
+                        <p v-if="hintOpen('federatedTeams')" id="admin-fedteams-hint" class="admin-invite-types__hint">
+                            {{ t('teamhub', 'TeamHub also checks daily whether such a team still exists on its own server, and removes the local copy once that server says it is gone. A server that cannot be reached is left alone.') }}
+                        </p>
+                    </div>
                 </div>
             </NcSettingsSection>
 
@@ -686,7 +787,7 @@
             <div id="team-adoption">
                 <NcSettingsSection
                     :name="t('teamhub', 'Waiting to join TeamHub')"
-                    :description="t('teamhub', 'Teams made elsewhere in Nextcloud, and Nextcloud groups that have no team yet. Both are decided here; the rules that put them in this list are on the Team creation tab.')">
+                    :description="t('teamhub', 'Teams made elsewhere in Nextcloud, and Nextcloud groups that have no team yet. Both are decided here; the rules that put them in this list are on the Getting started tab.')">
 
                     <!-- v4.11.36 — the rule goes down as a prop rather than
                          the grid refetching it. Keying on the mode remounted
@@ -730,12 +831,18 @@
                 :name="t('teamhub', 'Bulk team export')"
                 :description="t('teamhub', 'Write teams out to a CSV file in the importer’s own format, either all of them or a selection.')">
                 <TeamExportPanel v-if="licenseActive && activeTab === 'importexport'" />
-                <div v-else-if="!licenseActive" class="integrity-banner integrity-banner--info">
-                    <InformationOutline :size="ICON_BODY" />
-                    <span>
-                        {{ t('teamhub', 'Bulk team export requires an active TeamHub license. Add or renew a license in the License tab to unlock it.') }}
-                    </span>
-                </div>
+                <!-- v4.13.58 — one shape for "this needs a license", on every
+                     tab that says it (Justin, 2026-10-31). Was a hand-rolled
+                     `.integrity-banner--info` div here, on My Work and on
+                     Compliance, each with its own icon markup and its own
+                     sentence ending; `/ui-standards` names NcNoteCard as the
+                     component that replaces exactly this, and it brings the
+                     icon, the role and the colours with it. The sentence is one
+                     translated string, `licenseRequiredNotice()`, so the three
+                     cannot drift apart again. -->
+                <NcNoteCard v-else-if="!licenseActive" type="info">
+                    {{ licenseRequiredNotice(t('teamhub', 'Bulk team export')) }}
+                </NcNoteCard>
             </NcSettingsSection>
         </div>
         <!-- ── Tab: Integrations ─────────────────────────────────────────── -->
@@ -763,19 +870,32 @@
                  fields) became two sections of compact rows. Each item is now
                  one row: name + description on the left, control on the
                  right, instead of a section header, a paragraph, a control
-                 and a hint stacked per setting. -->
+                 and a hint stacked per setting.
+                 v4.13.58 — and the description went behind the (i) (Justin,
+                 2026-10-31). Six modules, each with a paragraph explaining what
+                 switching it off does, made the list of switches a page of
+                 prose: the row an administrator came to flip was three lines
+                 down from the one above it. Same component and same grammar as
+                 the Team creation tab, which did this in v4.11.33. -->
             <NcSettingsSection :name="t('teamhub', 'Modules')">
                 <div class="admin-compact-rows">
                     <div class="admin-compact-row">
                         <div class="admin-compact-row__text">
-                            <span class="admin-compact-row__name">{{ t('teamhub', 'Presence module') }}</span>
-                            <span class="admin-compact-row__desc">{{ t('teamhub', 'When enabled, team admins can activate a Presence tab for their team and members can set their weekly schedule. When disabled, all presence UI is hidden across the app.') }}</span>
+                            <span class="admin-compact-row__name">
+                                {{ t('teamhub', 'People module') }}
+                                <InfoHint
+                                    controls="admin-modulepeople-hint"
+                                    :open="hintOpen('modulePeople')"
+                                    :label="t('teamhub', 'About the People module')"
+                                    @toggle="toggleHint('modulePeople')" />
+                            </span>
+                            <span v-if="hintOpen('modulePeople')" id="admin-modulepeople-hint" class="admin-compact-row__desc">{{ t('teamhub', 'People combines collaboration profiles with shared workplace planning. Working hours and absences are managed in Nextcloud.') }}</span>
                         </div>
                         <NcCheckboxRadioSwitch
                             class="admin-compact-row__control"
                             :model-value="form.presenceModuleEnabled"
                             type="switch"
-                            :aria-label="t('teamhub', 'Enable presence module for all teams')"
+                            :aria-label="t('teamhub', 'Enable People module for all teams')"
                             @update:model-value="form.presenceModuleEnabled = $event; if (!$event && activeTab === 'presence') { activeTab = 'integrations' } save()">
                             {{ form.presenceModuleEnabled ? t('teamhub', 'Enabled') : t('teamhub', 'Disabled') }}
                         </NcCheckboxRadioSwitch>
@@ -783,8 +903,15 @@
 
                     <div class="admin-compact-row">
                         <div class="admin-compact-row__text">
-                            <span class="admin-compact-row__name">{{ t('teamhub', 'Decisions module') }}</span>
-                            <span class="admin-compact-row__desc">{{ t('teamhub', 'When enabled, team admins can activate Decisions for their team. Members can record and track decisions through the message stream. When disabled, all Decisions UI is hidden across the app.') }}</span>
+                            <span class="admin-compact-row__name">
+                                {{ t('teamhub', 'Decisions module') }}
+                                <InfoHint
+                                    controls="admin-moduledecisions-hint"
+                                    :open="hintOpen('moduleDecisions')"
+                                    :label="t('teamhub', 'About the Decisions module')"
+                                    @toggle="toggleHint('moduleDecisions')" />
+                            </span>
+                            <span v-if="hintOpen('moduleDecisions')" id="admin-moduledecisions-hint" class="admin-compact-row__desc">{{ t('teamhub', 'When enabled, team admins can activate Decisions for their team. Members can record and track decisions through the message stream. When disabled, all Decisions UI is hidden across the app.') }}</span>
                         </div>
                         <NcCheckboxRadioSwitch
                             class="admin-compact-row__control"
@@ -806,8 +933,15 @@
                          could not diagnose. It follows the licence now. -->
                     <div class="admin-compact-row">
                         <div class="admin-compact-row__text">
-                            <span class="admin-compact-row__name">{{ t('teamhub', 'File reviews') }}</span>
-                            <span class="admin-compact-row__desc">{{ t('teamhub', 'Members can ask teammates to review a file from its menu in the Files app. Reviews are carried out in My Work, so they follow the license: available while one is active, and absent otherwise. There is nothing to switch here.') }}</span>
+                            <span class="admin-compact-row__name">
+                                {{ t('teamhub', 'File reviews') }}
+                                <InfoHint
+                                    controls="admin-modulereviews-hint"
+                                    :open="hintOpen('moduleReviews')"
+                                    :label="t('teamhub', 'About file reviews')"
+                                    @toggle="toggleHint('moduleReviews')" />
+                            </span>
+                            <span v-if="hintOpen('moduleReviews')" id="admin-modulereviews-hint" class="admin-compact-row__desc">{{ t('teamhub', 'Members can ask teammates to review a file from its menu in the Files app. Reviews are carried out in My Work, so they follow the license: available while one is active, and absent otherwise. There is nothing to switch here.') }}</span>
                         </div>
                         <span class="admin-compact-row__control admin-compact-row__derived">
                             {{ licenseActive ? t('teamhub', 'Available') : t('teamhub', 'Needs a license') }}
@@ -822,8 +956,21 @@
                          "Needs a license" like the one above. -->
                     <div class="admin-compact-row">
                         <div class="admin-compact-row__text">
-                            <span class="admin-compact-row__name">{{ t('teamhub', 'OpenProject module') }}</span>
-                            <span class="admin-compact-row__desc">{{ t('teamhub', 'When enabled, teams can be created from the OpenProject project template, with the project on the team home and its work packages in My Work. Needs the OpenProject Integration app configured with an OpenProject host. When disabled, all OpenProject UI is hidden across the app; existing teams keep their link.') }}</span>
+                            <span class="admin-compact-row__name">
+                                {{ t('teamhub', 'OpenProject module') }}
+                                <InfoHint
+                                    controls="admin-moduleopenproject-hint"
+                                    :open="hintOpen('moduleOpenProject')"
+                                    :label="t('teamhub', 'About the OpenProject module')"
+                                    @toggle="toggleHint('moduleOpenProject')" />
+                            </span>
+                            <!-- v4.13.5 — this used to end "Needs the
+                                 OpenProject Integration app configured with
+                                 an OpenProject host", which now sends an
+                                 administrator to install an app TeamHub no
+                                 longer asks them for. It points at our own
+                                 section instead. -->
+                            <span v-if="hintOpen('moduleOpenProject')" id="admin-moduleopenproject-hint" class="admin-compact-row__desc">{{ t('teamhub', 'When enabled, teams can be created from the OpenProject project template, with the project on the team home and its work packages in My Work. Needs an OpenProject connection under Integrations. When disabled, all OpenProject UI is hidden across the app; existing teams keep their link.') }}</span>
                         </div>
                         <NcCheckboxRadioSwitch
                             v-if="licenseActive"
@@ -848,8 +995,15 @@
                          only while a licence is active. -->
                     <div class="admin-compact-row">
                         <div class="admin-compact-row__text">
-                            <span class="admin-compact-row__name">{{ t('teamhub', 'Service teams module') }}</span>
-                            <span class="admin-compact-row__desc">{{ t('teamhub', 'When enabled, teams can be created from the Service template, publish services and answer requests from a queue, and everybody on the server gets the Service catalog in the navigation. When disabled, all of it is hidden across the app. Nothing is deleted: existing service teams, their services and their requests come back when it is switched on again.') }}</span>
+                            <span class="admin-compact-row__name">
+                                {{ t('teamhub', 'Service teams module') }}
+                                <InfoHint
+                                    controls="admin-moduleserviceteams-hint"
+                                    :open="hintOpen('moduleServiceTeams')"
+                                    :label="t('teamhub', 'About the service teams module')"
+                                    @toggle="toggleHint('moduleServiceTeams')" />
+                            </span>
+                            <span v-if="hintOpen('moduleServiceTeams')" id="admin-moduleserviceteams-hint" class="admin-compact-row__desc">{{ t('teamhub', 'When enabled, teams can be created from the Service template, publish services and answer requests from a queue, and everybody on the server gets the Service catalog in the navigation. When disabled, all of it is hidden across the app. Nothing is deleted: existing service teams, their services and their requests come back when it is switched on again.') }}</span>
                         </div>
                         <NcCheckboxRadioSwitch
                             v-if="licenseActive"
@@ -877,10 +1031,17 @@
                          here. -->
                     <div class="admin-compact-row">
                         <div class="admin-compact-row__text">
-                            <span class="admin-compact-row__name">{{ t('teamhub', 'Sub-teams module') }}</span>
-                            <span class="admin-compact-row__desc">{{ t('teamhub', 'When enabled, team admins can give part of their team its own space from Manage team → Sub-teams: its own members, files and modules, managed from the main team and shown nested under it in the navigation. When disabled, sub-teams disappear from the navigation and the tab is hidden. Nothing is deleted: a sub-team keeps its members, files and messages, and everything comes back when it is switched on again.') }}</span>
+                            <span class="admin-compact-row__name">
+                                {{ t('teamhub', 'Sub-teams module') }}
+                                <InfoHint
+                                    controls="admin-modulesubteams-hint"
+                                    :open="hintOpen('moduleSubTeams')"
+                                    :label="t('teamhub', 'About the sub-teams module')"
+                                    @toggle="toggleHint('moduleSubTeams')" />
+                            </span>
+                            <span v-if="hintOpen('moduleSubTeams')" id="admin-modulesubteams-hint" class="admin-compact-row__desc">{{ t('teamhub', 'When enabled, team admins can give part of their team its own space from Manage team → Sub-teams: its own members, files and modules, managed from the main team and shown nested under it in the navigation. When disabled, sub-teams disappear from the navigation and the tab is hidden. Nothing is deleted: a sub-team keeps its members, files and messages, and everything comes back when it is switched on again.') }}</span>
                             <!-- TRANSLATORS: warning shown to a Nextcloud administrator beside the sub-teams switch -->
-                            <span v-if="form.subTeamsModuleEnabled" class="admin-compact-row__desc">{{ t('teamhub', 'Before switching off: someone who was invited into a private sub-team from outside the main team, and is in no other team, then sees an empty navigation until it comes back.') }}</span>
+                            <span v-if="hintOpen('moduleSubTeams') && form.subTeamsModuleEnabled" class="admin-compact-row__desc">{{ t('teamhub', 'Before switching off: someone who was invited into a private sub-team from outside the main team, and is in no other team, then sees an empty navigation until it comes back.') }}</span>
                         </div>
                         <NcCheckboxRadioSwitch
                             v-if="licenseActive"
@@ -898,7 +1059,160 @@
                 </div>
             </NcSettingsSection>
 
-            <NcSettingsSection :name="t('teamhub', 'App integrations')">
+            <NcSettingsSection :name="t('teamhub', 'Integration settings')">
+                <!-- v4.13.5 — OpenProject goes first, and it is a block
+                     rather than a compact row because it is a form, not a
+                     setting: a host, a client and a secret, plus the
+                     redirect URI an administrator has to copy into
+                     OpenProject. The compact-row grammar puts one control
+                     on the right and cannot carry that.
+
+                     Two states. Without the module there is nothing to
+                     configure, so the block says which switch to throw and
+                     shows no fields at all — a form that saves into a
+                     switched-off module is a form whose effect nobody can
+                     see.
+
+                     **No text here mentions `integration_openproject`**
+                     (Justin, 2026-10-18). An administrator setting this up
+                     has no reason to know that app exists, and explaining
+                     TeamHub by reference to something they have never
+                     installed is confusing, not helpful. The fallback
+                     transport is unchanged in code; it is simply not a
+                     thing the interface talks about. Every sentence here
+                     is one line — the long-form explanation belongs in the
+                     documentation, not on a settings page. -->
+                <div class="admin-op-conn">
+                    <div class="admin-op-conn__head">
+                        <span class="admin-compact-row__name">{{ t('teamhub', 'OpenProject connection') }}</span>
+                        <span class="admin-compact-row__desc">{{ t('teamhub', 'Connect TeamHub to your OpenProject server.') }}</span>
+                    </div>
+
+                    <NcNoteCard v-if="!openProjectModuleAvailable" type="info">
+                        {{ licenseActive
+                            ? t('teamhub', 'Enable the OpenProject module under Modules above first.')
+                            : t('teamhub', 'Needs an active license. Add one under License, then enable the module under Modules above.') }}
+                    </NcNoteCard>
+
+                    <template v-else>
+                        <div class="admin-op-conn__grid">
+                            <NcTextField
+                                v-model="opConn.url"
+                                :label="t('teamhub', 'OpenProject URL')"
+                                placeholder="https://openproject.example.com"
+                                :disabled="opConnSaving" />
+                            <NcSelect
+                                v-model="opConnMethod"
+                                :options="opConnMethodOptions"
+                                label="label"
+                                :reduce="o => o.value"
+                                :clearable="false"
+                                :disabled="opConnSaving"
+                                input-id="th-op-auth-method"
+                                label-outside />
+                        </div>
+                        <label class="admin-compact-row__desc" for="th-op-auth-method">
+                            {{ t('teamhub', 'How members authenticate to OpenProject') }}
+                        </label>
+
+                        <!-- v4.13.8 — OAuth 2.0 needs a client registered
+                             in OpenProject; single sign-on needs none,
+                             because the token comes from the login. The
+                             two field sets are therefore exclusive. -->
+                        <div v-if="opConn.authMethod !== 'oidc'" class="admin-op-conn__grid">
+                            <NcTextField
+                                v-model="opConn.clientId"
+                                :label="t('teamhub', 'Client ID')"
+                                :disabled="opConnSaving" />
+                            <!-- Write-only, exactly like the RoomVox token
+                                 below: the server never returns it, so an
+                                 empty field means "keep what is stored". -->
+                            <NcTextField
+                                v-model="opConn.clientSecret"
+                                type="password"
+                                :label="t('teamhub', 'Client secret')"
+                                :placeholder="opConn.clientSecretSet
+                                    ? t('teamhub', 'Stored: leave empty to keep it')
+                                    : t('teamhub', 'Paste the secret from OpenProject')"
+                                :disabled="opConnSaving" />
+                        </div>
+
+                        <!-- Generated by the server, never typed: it has to
+                             match character for character in OpenProject.
+                             OAuth 2.0 only — single sign-on never sends a
+                             browser to OpenProject, so there is no
+                             redirect to register. -->
+                        <div v-if="opConn.authMethod !== 'oidc'" class="admin-op-conn__redirect">
+                            <NcTextField
+                                :model-value="opConn.redirectUri"
+                                :label="t('teamhub', 'Redirect URI: paste this into OpenProject')"
+                                readonly
+                                @focus="$event.target.select()" />
+                            <span class="admin-compact-row__desc">
+                                {{ t('teamhub', 'In OpenProject: Administration → Authentication → OAuth applications. Scope {scope}, Confidential ticked.', { scope: opConn.scope || 'api_v3' }) }}
+                            </span>
+                        </div>
+
+                        <!-- v4.13.8 — single sign-on. No client, no secret
+                             and nothing for a member to connect: the token
+                             comes from how they signed in. -->
+                        <template v-if="opConn.authMethod === 'oidc'">
+                            <NcNoteCard v-if="!opConn.oidcAvailable" type="warning">
+                                {{ t('teamhub', 'Single sign-on needs the “OpenID Connect user backend” app (user_oidc) installed and enabled.') }}
+                            </NcNoteCard>
+
+                            <div class="admin-op-conn__grid">
+                                <NcSelect
+                                    v-model="opConnSsoProvider"
+                                    :options="opConnSsoProviderOptions"
+                                    label="label"
+                                    :reduce="o => o.value"
+                                    :clearable="false"
+                                    :disabled="opConnSaving"
+                                    input-id="th-op-sso-provider"
+                                    label-outside />
+                                <NcTextField
+                                    v-model="opConn.audience"
+                                    :label="t('teamhub', 'OpenProject client ID in the identity provider')"
+                                    :disabled="opConnSaving" />
+                            </div>
+                            <label class="admin-compact-row__desc" for="th-op-sso-provider">
+                                {{ t('teamhub', 'Which identity provider issues the token') }}
+                            </label>
+
+                            <!-- Only meaningful for an external provider:
+                                 with Nextcloud as the issuer the token is
+                                 minted for OpenProject directly. -->
+                            <NcCheckboxRadioSwitch
+                                v-if="opConn.ssoProvider !== 'nextcloud_hub'"
+                                :model-value="opConn.tokenExchange"
+                                type="switch"
+                                :disabled="opConnSaving"
+                                @update:model-value="opConn.tokenExchange = $event">
+                                {{ t('teamhub', 'Exchange the login token for one addressed to OpenProject') }}
+                            </NcCheckboxRadioSwitch>
+                            <span v-if="opConn.ssoProvider !== 'nextcloud_hub' && !opConn.tokenExchange" class="admin-compact-row__desc">
+                                {{ t('teamhub', 'Without the exchange, the login token is sent as it is. If OpenProject refuses it, turn this on.') }}
+                            </span>
+                        </template>
+
+                        <div class="admin-op-conn__actions">
+                            <NcButton variant="primary" :disabled="opConnSaving" @click="saveOpenProjectConnection">
+                                <template #icon>
+                                    <NcLoadingIcon v-if="opConnSaving" :size="ICON_BODY" />
+                                    <ContentSave v-else :size="ICON_BODY" />
+                                </template>
+                                {{ t('teamhub', 'Save connection') }}
+                            </NcButton>
+                            <span class="admin-compact-row__desc">
+                                {{ opConn.configured
+                                    ? t('teamhub', 'Configured. Members connect their own account under Personal settings → TeamHub.')
+                                    : t('teamhub', 'Not configured yet.') }}
+                            </span>
+                        </div>
+                    </template>
+                </div>
+
                 <div class="admin-compact-rows">
                     <div class="admin-compact-row">
                         <div class="admin-compact-row__text">
@@ -938,71 +1252,28 @@
                             v-model="form.roomvoxApiToken"
                             type="password"
                             :label="t('teamhub', 'RoomVox API token')"
-                            :placeholder="form.roomvoxTokenConfigured ? t('teamhub', '••••••••• (configured — leave empty to keep)') : 'rvx_…'"
+                            :placeholder="form.roomvoxTokenConfigured ? t('teamhub', '••••••••• (configured: leave empty to keep)') : 'rvx_…'"
                             @blur="onRoomvoxTokenBlur" />
                     </div>
                 </div>
             </NcSettingsSection>
 
+            <!-- ── Integrations: availability, enablement, templates ─────
+                 v4.13.23 — this was a read-only list of what had registered.
+                 It is now the second and third of TeamHub's four governance
+                 levels: a Nextcloud administrator enables an available
+                 integration here, and decides which team templates include
+                 it. The panel is its own component because it owns two
+                 impact-preview dialogs and a template matrix, and this file
+                 is long enough.
+
+                 The section's own description deliberately no longer mentions
+                 the REST API: registration is in-process from the owning app's
+                 boot(), and a provider class can no longer arrive over HTTP. -->
             <NcSettingsSection
-                :name="t('teamhub', 'Registered integrations')"
-                :description="t('teamhub', 'Integrations registered by installed apps via the TeamHub API. Registration and deregistration require NC admin access and are done via the REST API or the app\'s own settings.')">
-
-                <div v-if="integrationsLoading" class="admin-integrations-loading">
-                    <NcLoadingIcon :size="ICON_LARGE" />
-                    <span>{{ t('teamhub', 'Loading integrations…') }}</span>
-                </div>
-
-                <div v-else-if="integrationsError" class="admin-integrations-error">
-                    {{ integrationsError }}
-                </div>
-
-                <!--
-                    Only show EXTERNAL (non-builtin) integrations.
-                    Built-in NC apps (Talk, Files, Calendar, Deck) are seeded into
-                    the registry automatically and did not register via the API.
-                    They are not third-party integrations and must not appear here.
-                -->
-                <div v-else-if="externalIntegrations.length === 0" class="admin-integrations-empty">
-                    {{ t('teamhub', 'No third-party integrations registered yet.') }}
-                </div>
-
-                <div v-else class="admin-integrations-list">
-                    <div
-                        v-for="item in externalIntegrations"
-                        :key="item.id"
-                        class="admin-integration-row">
-
-                        <div class="admin-integration-row__body">
-                            <div class="admin-integration-row__header">
-                                <!-- App icon — svg → png → hide fallback -->
-                                <img
-                                    :src="appIconUrl(item.app_id)"
-                                    :alt="item.app_id"
-                                    class="admin-integration-row__icon"
-                                    @error="onAppIconError($event, item)" />
-                                <span class="admin-integration-row__title">{{ item.title }}</span>
-                                <span class="admin-integration-row__appid">{{ item.app_id }}</span>
-                                <span
-                                    class="admin-integration-row__badge"
-                                    :class="'admin-integration-row__badge--' + item.integration_type">
-                                    {{ item.integration_type === 'widget' ? t('teamhub', 'Widget') : t('teamhub', 'Tab') }}
-                                </span>
-                            </div>
-                            <div v-if="item.description" class="admin-integration-row__desc">
-                                {{ item.description }}
-                            </div>
-                            <div class="admin-integration-row__urls">
-                                <span v-if="item.data_url">
-                                    <strong>{{ t('teamhub', 'Data URL:') }}</strong> {{ item.data_url }}
-                                </span>
-                                <span v-if="item.iframe_url">
-                                    <strong>{{ t('teamhub', 'iFrame URL:') }}</strong> {{ item.iframe_url }}
-                                </span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+                :name="t('teamhub', 'Integrations')"
+                :description="t('teamhub', 'Integrations other installed apps register with TeamHub. Enable the ones this server may use, then include them in the team templates that should have them.')">
+                <IntegrationGovernancePanel />
             </NcSettingsSection>
         </div>
 
@@ -1015,18 +1286,18 @@
 
             <NcSettingsSection
                 :name="t('teamhub', 'Instance summary')"
-                :description="t('teamhub', 'Aggregate counts for this Nextcloud instance. Unique team members counts every distinct person who has access to at least one team — directly, via a group, or via a sub-team — and is the metric per-seat licensing keys off.')">
+                :description="t('teamhub', 'Aggregate counts for this Nextcloud instance. Unique team members counts every distinct person who has access to at least one team (directly, via a group, or via a sub-team), and is the metric per-seat licensing keys off.')">
 
                 <div v-if="telemetryLoading" class="admin-loading">
                     <NcLoadingIcon :size="ICON_LARGE" />
                 </div>
                 <div v-else class="admin-stat-grid">
                     <div class="admin-stat-card">
-                        <div class="admin-stat-card__value">{{ telemetry.preview && telemetry.preview.team_count != null ? telemetry.preview.team_count : '—' }}</div>
+                        <div class="admin-stat-card__value">{{ telemetry.preview && telemetry.preview.team_count != null ? telemetry.preview.team_count : 'Not set' }}</div>
                         <div class="admin-stat-card__label">{{ t('teamhub', 'Teams') }}</div>
                     </div>
                     <div class="admin-stat-card">
-                        <div class="admin-stat-card__value">{{ telemetry.preview && telemetry.preview.unique_team_members != null ? telemetry.preview.unique_team_members : '—' }}</div>
+                        <div class="admin-stat-card__value">{{ telemetry.preview && telemetry.preview.unique_team_members != null ? telemetry.preview.unique_team_members : 'Not set' }}</div>
                         <div class="admin-stat-card__label">{{ t('teamhub', 'Unique team members') }}</div>
                     </div>
                 </div>
@@ -1035,7 +1306,7 @@
             <!-- ── Find teams for a user (moved from Compliance in v4.3.0) ── -->
             <NcSettingsSection
                 :name="t('teamhub', 'Find teams for a user')"
-                :description="t('teamhub', 'Search for a Nextcloud user to see every team they belong to and their role in each. Useful when a colleague changes jobs and you need to remove them from — or add them to — the right teams. Direct memberships can be removed from here; memberships inherited through a group or sub-team must be removed from that source.')">
+                :description="t('teamhub', 'Search for a Nextcloud user to see every team they belong to and their role in each. Useful when a colleague changes jobs and you need to remove them from (or add them to) the right teams. Direct memberships can be removed from here; memberships inherited through a group or sub-team must be removed from that source.')">
 
                 <!-- User search -->
                 <div class="audit-user-lookup">
@@ -1171,7 +1442,7 @@
                                 <template v-if="row.isOwner">
                                     <!-- TRANSLATORS: shown next to an Owner row to explain why the remove checkbox is disabled -->
                                     <span class="audit-user-grid__note audit-user-grid__note--warn">
-                                        {{ t('teamhub', 'Owner — reassign in the Maintenance tab first') }}
+                                        {{ t('teamhub', 'Owner: reassign in the Maintenance tab first') }}
                                     </span>
                                 </template>
                                 <template v-else-if="row.source === 'direct'">
@@ -1248,7 +1519,7 @@
                  renders under the banner. -->
             <NcSettingsSection
                 :name="t('teamhub', 'Telemetry contents')"
-                :description="t('teamhub', 'The fields listed here are everything TeamHub would include in an anonymous daily usage report. An active license (paid or trial) disables all telemetry — nothing on this list leaves the instance while your license is active. Unlicensed and soft-locked instances contribute this aggregate for capacity planning; no user IDs, no message bodies, no custom-link URLs (only bare hostnames).')">
+                :description="t('teamhub', 'The fields listed here are everything TeamHub would include in an anonymous daily usage report. An active license (paid or trial) disables all telemetry. Nothing on this list leaves the instance while your license is active. Unlicensed and soft-locked instances contribute this aggregate for capacity planning; no user IDs, no message bodies, no custom-link URLs (only bare hostnames).')">
 
                 <div v-if="telemetryLoading" class="admin-loading">
                     <NcLoadingIcon :size="ICON_LARGE" />
@@ -1262,7 +1533,7 @@
                         <span>
                             {{ telemetry.enabled
                                 ? t('teamhub', 'This instance has no active license, so the fields below are collected daily and sent to {url}.', { url: telemetry.report_url })
-                                : t('teamhub', 'An active license was detected — no data on this list is being sent.') }}
+                                : t('teamhub', 'An active license was detected: no data on this list is being sent.') }}
                         </span>
                     </div>
 
@@ -1305,9 +1576,9 @@
             class="teamhub-admin-panel">
 
             <!-- Title + description outside NcSettingsSection so the grid below is full-width -->
-            <div class="maint-header">
-                <h2 class="maint-header__title">{{ t('teamhub', 'All teams') }}</h2>
-                <p class="maint-header__desc">
+            <div class="admin-section-head">
+                <h2 class="admin-section-head__title">{{ t('teamhub', 'All teams') }}</h2>
+                <p class="admin-section-head__desc">
                     {{ t('teamhub', 'All user-created teams on this Nextcloud instance. You can assign a new owner or delete any team.') }}
                 </p>
             </div>
@@ -1500,7 +1771,7 @@
 
                         <!-- Description -->
                         <div class="maint-grid__cell maint-grid__cell--desc" role="cell">
-                            <span class="maint-team-desc">{{ team.description || '—' }}</span>
+                            <span class="maint-team-desc">{{ team.description || 'Not set' }}</span>
                         </div>
 
                         <!-- Members -->
@@ -1722,7 +1993,7 @@
                                     variant="secondary"
                                     :disabled="resettingConfigTeamId === team.id"
                                     :aria-label="t('teamhub', 'Reset config bitmask for {name}', { name: team.name })"
-                                    :title="t('teamhub', 'Reset config to clean defaults — clears any corrupted bits set on this team')"
+                                    :title="t('teamhub', 'Reset config to clean defaults: clears any corrupted bits set on this team')"
                                     @click="confirmResetTeamConfig(team)">
                                     <template #icon>
                                         <NcLoadingIcon v-if="resettingConfigTeamId === team.id" :size="ICON_BODY" />
@@ -1808,9 +2079,9 @@
 
             <!-- ── Membership integrity ─────────────────────────────────── -->
             <div class="maint-divider"></div>
-            <div class="maint-header">
-                <h2 class="maint-header__title">{{ t('teamhub', 'Membership cache integrity') }}</h2>
-                <p class="maint-header__desc">
+            <div class="admin-section-head">
+                <h2 class="admin-section-head__title">{{ t('teamhub', 'Membership cache integrity') }}</h2>
+                <p class="admin-section-head__desc">
                     {{ t('teamhub', 'Checks that each team\'s membership cache (circles_membership) is populated. A stale/empty cache means users added via groups or other teams won\'t appear in share pickers for Files, Calendar, Deck, etc. Run Repair to rebuild the cache.') }}
                 </p>
             </div>
@@ -1865,7 +2136,7 @@
                             <div class="maint-integrity-row__info">
                                 <span class="maint-integrity-row__name">{{ issue.name }}</span>
                                 <span class="maint-integrity-row__detail maint-integrity-row__detail--warn">
-                                    {{ t('teamhub', 'Team "{child}" is a member of this team, but has "Prevent from being a member of another team" enabled — remove the membership or update {child}\'s settings.', { child: issue.nested_team_name }) }}
+                                    {{ t('teamhub', 'Team "{child}" is a member of this team, but has "Prevent from being a member of another team" enabled: remove the membership or update {child}\'s settings.', { child: issue.nested_team_name }) }}
                                 </span>
                             </div>
                             <NcButton
@@ -1975,12 +2246,45 @@
                             </NcButton>
                         </template>
 
+                        <!-- Member rows whose member_id Circles refuses (v4.14.7) -->
+                        <template v-else-if="issue.issue_type === 'invalid_member_id'">
+                            <div class="maint-integrity-row__info">
+                                <span class="maint-integrity-row__name">{{ issue.name }}</span>
+                                <span class="maint-integrity-row__detail maint-integrity-row__detail--warn">
+                                    <span v-if="issue.owner_affected">
+                                        {{ n('teamhub',
+                                             'The owner row of this team carries a member id Nextcloud Teams refuses, so the team cannot be shared with another server. {n} row will be given a valid id.',
+                                             'The owner row of this team carries a member id Nextcloud Teams refuses, so the team cannot be shared with another server. {n} rows will be given a valid id.',
+                                             issue.invalid_count, { n: issue.invalid_count }) }}
+                                    </span>
+                                    <span v-else>
+                                        {{ n('teamhub',
+                                             '{n} member row of this team carries a member id Nextcloud Teams refuses.',
+                                             '{n} member rows of this team carry a member id Nextcloud Teams refuses.',
+                                             issue.invalid_count, { n: issue.invalid_count }) }}
+                                    </span>
+                                </span>
+                            </div>
+                            <NcButton
+                                variant="secondary"
+                                :disabled="!!membershipRepairing[issue.id + '_memberids']"
+                                @click="repairInvalidMemberIds(issue)">
+                                <template #icon>
+                                    <NcLoadingIcon v-if="membershipRepairing[issue.id + '_memberids']" :size="ICON_BODY" />
+                                    <WrenchIcon v-else :size="ICON_BODY" />
+                                </template>
+                                {{ membershipRepairing[issue.id + '_memberids']
+                                    ? t('teamhub', 'Repairing')
+                                    : t('teamhub', 'Repair member ids') }}
+                            </NcButton>
+                        </template>
+
                         <!-- Stale cache issue -->
                         <template v-else>
                             <div class="maint-integrity-row__info">
                                 <span class="maint-integrity-row__name">{{ issue.name }}</span>
                                 <span class="maint-integrity-row__detail">
-                                    {{ t('teamhub', 'Direct members: {m} — Effective cache: {c} (stale)', {
+                                    {{ t('teamhub', 'Direct members: {m}. Effective cache: {c} (stale)', {
                                         m: issue.direct_count,
                                         c: issue.effective_count,
                                     }) }}
@@ -2004,10 +2308,10 @@
             </div>
 
             <!-- ── Config bitmask integrity ─────────────────────────────── -->
-            <div class="maint-divider" style="margin-top: 40px;"></div>
-            <div class="maint-header">
-                <h2 class="maint-header__title">{{ t('teamhub', 'Team config bitmask integrity') }}</h2>
-                <p class="maint-header__desc">
+            <div class="maint-divider maint-divider--separated"></div>
+            <div class="admin-section-head">
+                <h2 class="admin-section-head__title">{{ t('teamhub', 'Team config bitmask integrity') }}</h2>
+                <p class="admin-section-head__desc">
                     {{ t('teamhub', 'Scans every user-created team for system bits that should never appear on a user team (CFG_SINGLE, CFG_PERSONAL, CFG_SYSTEM, CFG_NO_OWNER, CFG_HIDDEN, CFG_BACKEND). Nextcloud Circles refuses any config update on a team carrying one of these, so apps can no longer change it. Use Repair to reset a team\'s config to clean defaults.') }}
                 </p>
             </div>
@@ -2096,7 +2400,7 @@
                              { n: configCheck.appClaimed.length }) }}
                     </h3>
                     <p class="maint-integrity-claimed__desc">
-                        {{ t('teamhub', 'These teams carry the CFG_APP flag, which a Nextcloud app sets to mark the team as managed by it — enabling a Collective does this. It is not corruption and needs no repair. The flag stays behind if the app that set it is later removed.') }}
+                        {{ t('teamhub', 'These teams carry the CFG_APP flag, which a Nextcloud app sets to mark the team as managed by it: enabling a Collective does this. It is not corruption and needs no repair. The flag stays behind if the app that set it is later removed.') }}
                     </p>
                     <div class="maint-integrity-list">
                         <div
@@ -2119,9 +2423,9 @@
             </div>
 
             <!-- ── Ghost member cleanup ──────────────────────────────────── -->
-            <div class="maint-header" style="margin-top: 40px;">
-                <h2 class="maint-header__title">{{ t('teamhub', 'Deleted users in teams') }}</h2>
-                <p class="maint-header__desc">
+            <div class="admin-section-head admin-section-head--separated">
+                <h2 class="admin-section-head__title">{{ t('teamhub', 'Deleted users in teams') }}</h2>
+                <p class="admin-section-head__desc">
                     {{ t('teamhub', 'These users have been deleted from Nextcloud but are still listed as members in one or more teams. Removing them cleans up the team membership without affecting any other data.') }}
                 </p>
             </div>
@@ -2212,10 +2516,15 @@
                 </div>
             </template>
 
-            <!-- v4.9.6 — Phase 2: every workspace provisioning operation, with
-                 retry, continue and rollback. `v-if` so its GET fires when the
-                 tab is opened, like the other child panels. -->
-            <ProvisioningAdminPanel v-if="activeTab === 'maintenance'" />
+            <!-- v4.13.17 — the Workspace provisioning panel was here from v4.9.6
+                 and is gone at Justin's request: it listed every provisioning
+                 operation with retry, continue and rollback, and none of that is
+                 a Nextcloud administrator's decision — the team's own creator
+                 drives provisioning from the wizard, and the banner on the team
+                 page is where a failed run is picked up. The endpoints it used
+                 (`/api/v1/provisioning/{id}` and its retry/rollback siblings)
+                 stay: they are the team-side recovery path. Only
+                 `GET /api/v1/admin/provisioning` has no caller left. -->
         </div>
 
         <!-- ─────────────────────────────────────────────────────────────────
@@ -2232,6 +2541,17 @@
             <PresenceTypesManager v-if="activeTab === 'presence'" />
             <PresenceLocationsManager v-if="activeTab === 'presence'" />
             <PresenceHolidaysManager v-if="activeTab === 'presence'" />
+            <!-- Shift types (v4.13.68) — the vocabulary a team's roster week
+                 template is written from. Instance-wide, the same contract as
+                 the three sections above, and part of the People module rather
+                 than one of its own.
+
+                 v4.14.4 — the Shifts section that stood under this one is
+                 gone. It held an instance-wide weekly pattern, which the team
+                 roster template in Manage team, Module settings replaced one
+                 release later (DESIGN §2.247). Only the vocabulary is the
+                 instance's, so only the vocabulary is here. -->
+            <ShiftTypesManager v-if="activeTab === 'presence'" />
         </div>
 
         <!-- ─────────────────────────────────────────────────────────────────
@@ -2261,12 +2581,9 @@
             <NcSettingsSection
                 v-if="!licenseActive"
                 :name="t('teamhub', 'My Work')">
-                <div class="integrity-banner integrity-banner--info">
-                    <InformationOutline :size="ICON_BODY" aria-hidden="true" />
-                    <span>
-                        {{ t('teamhub', 'My Work requires an active TeamHub license. Add or renew a license in the License tab to unlock it.') }}
-                    </span>
-                </div>
+                <NcNoteCard type="info">
+                    {{ licenseRequiredNotice(t('teamhub', 'My Work')) }}
+                </NcNoteCard>
             </NcSettingsSection>
 
             <MyWorkAdminSettings v-else-if="activeTab === 'mywork'" />
@@ -2297,7 +2614,9 @@
             role="tabpanel"
             class="teamhub-admin-panel">
 
-            <PolicyAdminPanel v-if="activeTab === 'policy'" />
+            <PolicyAdminPanel
+                v-if="activeTab === 'policy'"
+                @update:editing="policyEditing = $event" />
 
             <!-- ── Telling people apart (v4.10.7, moved here v4.11.33) ─────
                  Was the sixth section of the Team creation tab, which is
@@ -2305,8 +2624,13 @@
                  about how a person is identified in every picker on the
                  instance, which is the same kind of instance-wide policy the
                  rest of this tab holds. -->
+            <!-- v4.13.56 — hidden while one of the Policy tab's editors has
+                 the page. Those editors became pages rather than modals, and
+                 this section has nothing to do with the template or profile
+                 being edited: left in place it would hang off the bottom of
+                 the form as if it belonged to it. -->
             <NcSettingsSection
-                v-if="activeTab === 'policy'"
+                v-if="activeTab === 'policy' && !policyEditing"
                 :name="t('teamhub', 'Telling people apart')"
                 :description="t('teamhub', 'The line under a person\'s name in every search result. The first two fields that are filled in are shown, in this order.')">
                 <div class="admin-invite-types">
@@ -2323,9 +2647,17 @@
                 <p v-if="sublineFields.length === 0" class="admin-section-hint">
                     {{ t('teamhub', 'No field is selected: search results show the name only.') }}
                 </p>
-                <p class="admin-section-hint">
-                    {{ t('teamhub', 'A field somebody set to private on their profile is shown to administrators only.') }}
-                </p>
+                <!-- v4.13.58 — the line about a field set to private on a
+                     profile is gone (Justin, 2026-10-31, "this seems to have
+                     no reference").
+                     NOTE for whoever reads this next: the rule it described is
+                     real and still enforced — `PersonSublineService::property()`
+                     drops a property whose scope is `SCOPE_PRIVATE` unless the
+                     reader is a Nextcloud administrator using an admin picker.
+                     Only the sentence went, not the behaviour, so do not treat
+                     its absence as licence to show private fields. The rule is
+                     documented in that class's own note. -->
+
             </NcSettingsSection>
         </div>
 
@@ -2346,12 +2678,9 @@
             <NcSettingsSection
                 v-if="!complianceUnlocked"
                 :name="t('teamhub', 'Compliance')">
-                <div class="integrity-banner integrity-banner--info">
-                    <InformationOutline :size="ICON_BODY" />
-                    <span>
-                        {{ t('teamhub', 'Compliance tab requires an active TeamHub license. Add or renew a license in the License tab to unlock them.') }}
-                    </span>
-                </div>
+                <NcNoteCard type="info">
+                    {{ licenseRequiredNotice(t('teamhub', 'The Compliance tab')) }}
+                </NcNoteCard>
             </NcSettingsSection>
 
             <template v-else>
@@ -2398,7 +2727,6 @@
                                         <InformationOutline :size="ICON_BODY" />
                                     </template>
                                     <NcActionText>
-                                        <template #icon><InformationOutline :size="ICON_BODY" /></template>
                                         {{ t('teamhub', 'Verifies shipped files against a SHA-256 manifest generated at build time.') }}
                                     </NcActionText>
                                     <NcActionText v-if="complianceControlsByCheck['Code integrity']">
@@ -2474,7 +2802,6 @@
                                     <InformationOutline :size="ICON_BODY" />
                                 </template>
                                 <NcActionText>
-                                    <template #icon><InformationOutline :size="ICON_BODY" /></template>
                                     {{ telemetryEnabledDerived
                                         ? t('teamhub', 'Anonymous usage statistics are sent daily. This instance has no active license, so telemetry is enabled.')
                                         : t('teamhub', 'No usage data leaves this instance. An active license disables telemetry automatically.') }}
@@ -2515,17 +2842,14 @@
                                     <InformationOutline :size="ICON_BODY" />
                                 </template>
                                 <NcActionText>
-                                    <template #icon><InformationOutline :size="ICON_BODY" /></template>
                                     {{ invitesExternalReach
-                                        ? t('teamhub', 'Team admins can invite people from outside this server by email or federated Nextcloud account. Change this on the Team creation tab under Allowed invite types.')
+                                        ? t('teamhub', 'Team admins can invite people from outside this server by email or federated Nextcloud account. Change this on the Getting started tab under Allowed invite types.')
                                         : t('teamhub', 'Invitations are restricted to local Nextcloud accounts and groups. Team admins cannot reach outside this server.') }}
                                 </NcActionText>
                                 <NcActionText v-if="inviteEmail">
-                                    <template #icon><InformationOutline :size="ICON_BODY" /></template>
                                     {{ t('teamhub', 'Email invitations: enabled') }}
                                 </NcActionText>
                                 <NcActionText v-if="inviteFederated">
-                                    <template #icon><InformationOutline :size="ICON_BODY" /></template>
                                     {{ t('teamhub', 'Federated Nextcloud invitations: enabled') }}
                                 </NcActionText>
                                 <NcActionText v-if="complianceControlsByCheck['Allowed invite types']">
@@ -2573,7 +2897,6 @@
                                     <InformationOutline :size="ICON_BODY" />
                                 </template>
                                 <NcActionText>
-                                    <template #icon><InformationOutline :size="ICON_BODY" /></template>
                                     {{ t('teamhub', 'Deleted Nextcloud users still listed as team members. Clean them up under Maintenance → Deleted users in teams.') }}
                                 </NcActionText>
                                 <NcActionText v-if="complianceSummary.report && complianceSummary.report.ghost_memberships.sample_uid">
@@ -2634,7 +2957,6 @@
                                     <InformationOutline :size="ICON_BODY" />
                                 </template>
                                 <NcActionText>
-                                    <template #icon><InformationOutline :size="ICON_BODY" /></template>
                                     {{ t('teamhub', 'Teams with no live owner. Assign a new owner under Maintenance → All teams to restore governance.') }}
                                 </NcActionText>
                                 <NcActionText v-if="complianceSummary.report && complianceSummary.report.orphan_teams.sample_name">
@@ -2710,7 +3032,6 @@
                                      this menu is where an admin decides what to
                                      do next. -->
                                 <NcActionText>
-                                    <template #icon><InformationOutline :size="ICON_BODY" /></template>
                                     {{ t('teamhub', 'Teams whose settings no longer match the policy profile they have applied. Check the maintenance tab for the non-compliant teams.') }}
                                 </NcActionText>
                                 <NcActionText v-if="profileCompliance">
@@ -2725,6 +3046,66 @@
                                 </NcActionText>
                             </NcActions>
                             <div class="compliance-row__refresh-slot" aria-hidden="true" />
+                        </div>
+                    </div>
+
+                    <!-- Row: Audit integrity (v4.13.17, DESIGN §2.191) — the
+                         chain over the audit trail. Above the retention row
+                         because retention is how long the record is kept and
+                         this is whether the record is still the record. The
+                         verdict is deliberately not a boolean: "no instance
+                         secret", "not anchored yet" and "signed with a
+                         different key" are each a reason the question cannot
+                         be answered, and showing them as "not ok" would tell
+                         an administrator their log had been tampered with when
+                         it had not. -->
+                    <div class="compliance-row" role="group" :aria-label="t('teamhub', 'Audit integrity')">
+                        <span class="compliance-row__label">{{ t('teamhub', 'Audit integrity:') }}</span>
+                        <span
+                            class="integrity-pill"
+                            :class="'integrity-pill--' + auditIntegrityState"
+                            role="status"
+                            aria-live="polite">
+                            <span class="integrity-pill__dot" />
+                            {{ auditIntegrityLabel }}
+                        </span>
+                        <span class="compliance-row__spacer" />
+                        <div class="compliance-row__actions">
+                            <NcActions
+                                :aria-label="t('teamhub', 'Audit integrity details')"
+                                :title="t('teamhub', 'Audit integrity details')">
+                                <template #icon>
+                                    <InformationOutline :size="ICON_BODY" />
+                                </template>
+                                <NcActionText>
+                                    {{ t('teamhub', 'Every audit row carries a keyed digest of its own content, and an hourly pass chains ranges of rows together. An edited row, a deleted row or a rewritten chain is detectable and provable. The signing key comes from config.php, so it is not in the database.') }}
+                                </NcActionText>
+                                <NcActionText v-if="auditIntegrity.summary">
+                                    {{ n('teamhub', '{n} row written since the last hourly pass is not chained yet', '{n} rows written since the last hourly pass are not chained yet', auditIntegrity.summary.unanchoredRows || 0, { n: auditIntegrity.summary.unanchoredRows || 0 }) }}
+                                </NcActionText>
+                                <NcActionText v-if="auditIntegrity.summary && auditIntegrity.summary.rowsWithoutHash">
+                                    {{ n('teamhub', '{n} row predates this feature and can never be verified', '{n} rows predate this feature and can never be verified', auditIntegrity.summary.rowsWithoutHash, { n: auditIntegrity.summary.rowsWithoutHash }) }}
+                                </NcActionText>
+                                <NcActionText v-if="auditIntegrity.report && auditIntegrity.report.firstBreak">
+                                    {{ t('teamhub', 'First mismatch: rows {from} to {to}', { from: auditIntegrity.report.firstBreak.fromId, to: auditIntegrity.report.firstBreak.toId }) }}
+                                </NcActionText>
+                                <NcActionText v-if="complianceControlsByCheck['Audit integrity']">
+                                    {{ t('teamhub', 'ISO 27001: {controls}', { controls: complianceControlsByCheck['Audit integrity'] }) }}
+                                </NcActionText>
+                            </NcActions>
+                            <div class="compliance-row__refresh-slot">
+                                <NcButton
+                                    variant="tertiary"
+                                    :disabled="auditIntegrity.verifying"
+                                    :aria-label="t('teamhub', 'Verify the audit trail now')"
+                                    :title="t('teamhub', 'Verify the audit trail now')"
+                                    @click="verifyAuditIntegrity">
+                                    <template #icon>
+                                        <NcLoadingIcon v-if="auditIntegrity.verifying" :size="ICON_BODY" />
+                                        <ShieldCheckIcon v-else :size="ICON_BODY" />
+                                    </template>
+                                </NcButton>
+                            </div>
                         </div>
                     </div>
 
@@ -2756,8 +3137,7 @@
                                     <InformationOutline :size="ICON_BODY" />
                                 </template>
                                 <NcActionText>
-                                    <template #icon><InformationOutline :size="ICON_BODY" /></template>
-                                    {{ t('teamhub', 'Events are appended and purged in bulk after the retention window. No code path updates or deletes an individual row, so a record cannot be rewritten before it expires.') }}
+                                    {{ t('teamhub', 'Events are appended and purged in bulk after the retention window. No code path updates or deletes an individual row, and the trail is chained so that a change made outside TeamHub is detectable. See Audit integrity above.') }}
                                 </NcActionText>
                                 <NcActionText v-if="complianceControlsByCheck['Audit log retention']">
                                     {{ t('teamhub', 'ISO 27001: {controls}', { controls: complianceControlsByCheck['Audit log retention'] }) }}
@@ -2767,6 +3147,99 @@
                         </div>
                     </div>
                 </div>
+            </NcSettingsSection>
+
+            <!-- ── Where team data goes (v4.13.16, DESIGN §2.194) ──────────── -->
+            <!-- The supplier register an ISO 27001 A.5.19 review opens with.
+                 Read-only and derived: the per-team switches, the resource
+                 registry and the provisioning ledger already hold all of it,
+                 and a register with its own storage would be a second copy
+                 that goes stale. Off-server integrations sort first, because
+                 they are the only rows that are a supplier question rather
+                 than an access question. -->
+            <NcSettingsSection
+                :name="t('teamhub', 'Where team data goes')"
+                :description="t('teamhub', 'Every integration this instance uses, how many teams use it, and whether it sends team data to another system. Modules are TeamHub\'s own code and storage and are not listed.')">
+
+                <div v-if="integrationRegister.loading" class="section-loading">
+                    <NcLoadingIcon :size="ICON_LARGE" />
+                </div>
+                <NcNoteCard v-else-if="integrationRegister.error" type="error">
+                    {{ integrationRegister.error }}
+                </NcNoteCard>
+                <NcEmptyContent
+                    v-else-if="integrationRegister.rows.length === 0"
+                    :name="t('teamhub', 'No integrations in use')"
+                    :description="t('teamhub', 'No team on this server has an integration switched on, so no team data reaches another app or another system.')">
+                    <template #icon><PuzzleIcon :size="ICON_HERO" /></template>
+                </NcEmptyContent>
+
+                <table v-else class="th-register">
+                    <thead>
+                        <tr>
+                            <th scope="col">{{ t('teamhub', 'Integration') }}</th>
+                            <th scope="col">{{ t('teamhub', 'Teams') }}</th>
+                            <th scope="col">{{ t('teamhub', 'Resources') }}</th>
+                            <th scope="col">{{ t('teamhub', 'First connected') }}</th>
+                            <th scope="col"><span class="th-register__sr">{{ t('teamhub', 'Teams using it') }}</span></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template v-for="row in integrationRegister.rows" :key="row.appId">
+                            <tr>
+                                <td>
+                                    <span class="th-register__name">{{ row.appId }}</span>
+                                    <NcChip
+                                        v-if="row.offServer"
+                                        no-close
+                                        variant="warning"
+                                        :text="t('teamhub', 'Another system')" />
+                                </td>
+                                <td>{{ row.teamsEnabled }}</td>
+                                <td>{{ row.resources }}</td>
+                                <td>{{ registerDate(row.firstLinkedAt) }}</td>
+                                <td>
+                                    <NcButton
+                                        variant="tertiary"
+                                        :aria-label="t('teamhub', 'Show the teams using {app}', { app: row.appId })"
+                                        @click="toggleIntegrationDetail(row.appId)">
+                                        <template #icon>
+                                            <ChevronUp v-if="integrationRegister.expanded === row.appId" :size="ICON_BODY" />
+                                            <ChevronDown v-else :size="ICON_BODY" />
+                                        </template>
+                                    </NcButton>
+                                </td>
+                            </tr>
+                            <tr v-if="integrationRegister.expanded === row.appId">
+                                <td colspan="5">
+                                    <ul class="th-register__teams">
+                                        <li v-for="team in (integrationRegister.detail[row.appId] || [])" :key="team.teamId">
+                                            <span class="th-register__name">{{ team.name }}</span>
+                                            <span class="th-register__meta">
+                                                {{ registerDate(team.firstLinkedAt) }}
+                                                <template v-if="team.host"> · {{ team.host }}</template>
+                                            </span>
+                                        </li>
+                                        <li v-if="(integrationRegister.detail[row.appId] || []).length === 0">
+                                            <span class="th-register__meta">{{ t('teamhub', 'No teams') }}</span>
+                                        </li>
+                                    </ul>
+                                </td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+
+                <!-- The actual suppliers: one line per external host, which is
+                     the thing a contract is with. -->
+                <ul v-if="integrationRegister.hosts.length" class="th-register__hosts">
+                    <li v-for="host in integrationRegister.hosts" :key="host.appId + host.host">
+                        <strong>{{ host.host }}</strong>
+                        <span class="th-register__meta">
+                            {{ n('teamhub', '{n} team', '{n} teams', host.teams, { n: host.teams }) }}
+                        </span>
+                    </li>
+                </ul>
             </NcSettingsSection>
 
             <!-- ── Audit log (existing) ────────────────────────────────────── -->
@@ -2801,7 +3274,7 @@
                 <label class="audit-retention__label">
                     {{ t('teamhub', 'Retention period') }}
                     <span class="admin-section-hint">
-                        {{ t('teamhub', 'Audit rows older than this are automatically purged. Allowed range: {min}–{max} days.', { min: auditRetention.min, max: auditRetention.max }) }}
+                        {{ t('teamhub', 'Audit rows older than this are automatically purged. Allowed range: {min}-{max} days.', { min: auditRetention.min, max: auditRetention.max }) }}
                     </span>
                 </label>
                 <!-- v4.6.2 — autosaves on a debounce; the Save button is gone.
@@ -2944,10 +3417,10 @@
                                 {{ auditRowTeamLabel(ev) }}
                             </td>
                             <td class="audit-table__event">{{ ev.event_type }}</td>
-                            <td>{{ ev.actor_uid || '—' }}</td>
+                            <td>{{ ev.actor_uid || 'Not set' }}</td>
                             <td class="audit-table__target">
                                 <span v-if="ev.target_type">{{ ev.target_type }}: </span>
-                                {{ ev.target_id || '—' }}
+                                {{ ev.target_id || 'Not set' }}
                             </td>
                             <td class="audit-table__details">
                                 <code v-if="ev.metadata">{{ summariseAuditMetadata(ev.metadata) }}</code>
@@ -3020,14 +3493,14 @@
                         value="soft30"
                         name="archive_mode"
                         type="radio">
-                        {{ t('teamhub', 'Soft delete — 30 day grace period') }}
+                        {{ t('teamhub', 'Soft delete: 30 day grace period') }}
                     </NcCheckboxRadioSwitch>
                     <NcCheckboxRadioSwitch
                         v-model="archiveSettings.archiveMode"
                         value="soft60"
                         name="archive_mode"
                         type="radio">
-                        {{ t('teamhub', 'Soft delete — 60 day grace period') }}
+                        {{ t('teamhub', 'Soft delete: 60 day grace period') }}
                     </NcCheckboxRadioSwitch>
                     <NcCheckboxRadioSwitch
                         v-model="archiveSettings.archiveMode"
@@ -3086,7 +3559,7 @@
                         {{ t('teamhub', 'Pseudonymize personal identifiers') }}
                     </NcCheckboxRadioSwitch>
                     <p class="archive-admin__help">
-                        {{ t('teamhub', 'Replaces user identifiers (UIDs) in the archive with stable aliases. Message and comment text is preserved as-is — names mentioned within content are not removed. The archive remains personal data under GDPR but with reduced linkability.') }}
+                        {{ t('teamhub', 'Replaces user identifiers (UIDs) in the archive with stable aliases. Message and comment text is preserved as-is. Names mentioned within content are not removed. The archive remains personal data under GDPR but with reduced linkability.') }}
                     </p>
                 </div>
 
@@ -3204,7 +3677,7 @@
                                             size="small"
                                             :aria-label="t('teamhub', 'Cancel failed archive for team {name} and make team usable again', { name: row.teamName })"
                                             @click="discardFailedArchive(row.id)">
-                                            {{ t('teamhub', 'Cancel — make team usable again') }}
+                                            {{ t('teamhub', 'Cancel: make team usable again') }}
                                         </NcButton>
                                     </div>
                                 </div>
@@ -3224,11 +3697,46 @@
              own save flow (PUT /license) so the global "Save settings"
              row is hidden while this tab is active.
              ───────────────────────────────────────────────────────────── -->
-        <NcSettingsSection
+        <!-- v4.13.58 — a plain panel like every other tab, not an
+             `NcSettingsSection` of its own. The title had to become ours so the
+             (i) could sit beside it (Justin, 2026-10-31), and that component
+             renders its `h2` unconditionally: dropping the `name` prop would
+             have left an empty heading in the accessibility tree above ours.
+             Same 20px/700 and the same 900px measure the section gave it, so
+             nothing about the tab changed except what sits next to the word
+             "License". -->
+        <div
             v-show="activeTab === 'license'"
             id="tab-panel-license"
             role="tabpanel"
-            :name="t('teamhub', 'License')">
+            class="teamhub-admin-panel teamhub-admin-panel--measured">
+
+            <div class="admin-section-head admin-section-head--inline">
+                <h2 class="admin-section-head__title">{{ t('teamhub', 'License') }}</h2>
+                <InfoHint
+                    controls="license-adds"
+                    :open="hintOpen('licenseAdds')"
+                    :label="t('teamhub', 'About what a TeamHub license adds')"
+                    @toggle="toggleHint('licenseAdds')" />
+            </div>
+            <!-- v4.13.58 — four lines, was five bullets of a paragraph each
+                 under a heading of its own. The long version was written for
+                 the 2026-09-22 company launch, when this tab was the only
+                 place the offer existed; the public pricing page carries it
+                 now, and an administrator on this tab is here to install a key,
+                 not to read the offer. It is no longer hidden once a licence is
+                 active either: behind an (i) it is reference rather than a
+                 pitch, and a customer renewing has the same question. -->
+            <ul v-if="hintOpen('licenseAdds')" id="license-adds" class="license-adds">
+                <li>{{ t('teamhub', 'All functionality unlocked') }}</li>
+                <li>{{ t('teamhub', 'No TeamHub branding, no telemetry') }}</li>
+                <!-- TRANSLATORS: one line of what a paid licence adds — help
+                     from the maintainer, not a Support menu or a department -->
+                <li>{{ t('teamhub', 'Support') }}</li>
+                <!-- TRANSLATORS: LTS is the usual abbreviation for a long-term
+                     support release and is normally left in English -->
+                <li>{{ t('teamhub', 'Long term Service (LTS) app version') }}</li>
+            </ul>
 
             <div v-if="license.loading" class="license-loading">
                 <NcLoadingIcon :size="ICON_BODY" /> {{ t('teamhub', 'Loading license status…') }}
@@ -3268,7 +3776,7 @@
                     v-else-if="license.status.seatEnforcement === 'over-lock'"
                     class="license-seat-banner license-seat-banner--lock"
                     role="alert">
-                    <strong>{{ t('teamhub', 'Seat cap exceeded — Advanced features locked: {used} of {cap} used (max {lockAt}).', {
+                    <strong>{{ t('teamhub', 'Seat cap exceeded. Advanced features locked: {used} of {cap} used (max {lockAt}).', {
                         used: license.status.seatsUsed,
                         cap: license.status.seatCap,
                         lockAt: license.status.seatLockAt,
@@ -3278,74 +3786,68 @@
                     </span>
                 </div>
 
-                <!-- v4.10.0 — the case for a licence, shown only while none is
-                     honoured (Justin, 2026-09-18, for the company launch of
-                     2026-09-22): what a licence adds, in the words of the public
-                     licensing model, and one click to ask for a quote. Gone the
-                     moment a licence is active, trial or grace — an admin who
-                     has paid is not sold to. No prices here: the model page
-                     carries them and says they may change, and a translated
-                     string in fourteen files cannot follow a price list. The
-                     quote mail is pre-filled with the two facts a quote is
-                     priced on, the instance UUID and the seats in use. -->
-                <section
-                    v-if="!licenseActive"
-                    class="license-pitch"
-                    aria-labelledby="license-pitch-title">
-                    <h3 id="license-pitch-title" class="license-pitch__title">
-                        {{ t('teamhub', 'What a TeamHub license adds') }}
-                    </h3>
-                    <ul class="license-pitch__list">
-                        <li>
-                            <strong>{{ t('teamhub', 'Every licensed module') }}</strong>
-                            <span class="license-pitch__sep" aria-hidden="true">—</span>
-                            <span>{{ t('teamhub', 'Advanced projects, What’s new, My Work with file reviews, the OpenProject module, bulk team creation and export.') }}</span>
-                        </li>
-                        <li>
-                            <strong>{{ t('teamhub', 'The Compliance tab') }}</strong>
-                            <span class="license-pitch__sep" aria-hidden="true">—</span>
-                            <span>{{ t('teamhub', 'Code-integrity check, policy compliance and governance signals in one place.') }}</span>
-                        </li>
-                        <li>
-                            <!-- TRANSLATORS: "Quiet mode" is the licensing model's own term for an
-                                 instance without TeamHub branding, prompts or telemetry -->
-                            <strong>{{ t('teamhub', 'Quiet mode') }}</strong>
-                            <span class="license-pitch__sep" aria-hidden="true">—</span>
-                            <span>{{ t('teamhub', 'No TeamHub branding, no license prompts, no telemetry.') }}</span>
-                        </li>
-                        <li>
-                            <strong>{{ t('teamhub', 'Development support') }}</strong>
-                            <span class="license-pitch__sep" aria-hidden="true">—</span>
-                            <span>{{ t('teamhub', 'A direct line to the maintainer, priority on bug reports, and a say in the roadmap.') }}</span>
-                        </li>
-                        <li>
-                            <!-- TRANSLATORS: heading of the bullet on how seats are counted -->
-                            <strong>{{ t('teamhub', 'Fair seats') }}</strong>
-                            <span class="license-pitch__sep" aria-hidden="true">—</span>
-                            <span>{{ t('teamhub', 'One seat per unique member across all your teams — a person in five teams counts once — and no connection to a license server, ever.') }}</span>
-                        </li>
-                    </ul>
-                    <div class="license-pitch__actions">
-                        <!-- TRANSLATORS: button; opens the admin's mail client to ask
-                             for a commercial price quote -->
-                        <NcButton variant="primary" :href="requestQuoteMailto">
-                            <template #icon>
-                                <EmailOutlineIcon :size="ICON_BODY" />
-                            </template>
-                            {{ t('teamhub', 'Request a quote') }}
-                        </NcButton>
-                        <a
-                            href="https://teamhub.doekworks.eu/licensing.html"
-                            class="license-pitch__link"
-                            target="_blank"
-                            rel="noopener">
-                            {{ t('teamhub', 'See the licensing model') }} →
-                        </a>
-                    </div>
-                    <p class="license-pitch__hint">
-                        {{ t('teamhub', 'Opens your mail client with this instance’s UUID and seats in use filled in. Send it from the address that should receive the quote.') }}
-                    </p>
-                </section>
+                <!-- v4.13.30 — reporting banner for a metered licence. Three
+                     rungs of one ladder (LicenseService::reportStateFor), and
+                     the escalation is the whole point: 'due' is a nudge,
+                     'overdue' names the date features stop, 'locked' says they
+                     already have. A banded licence never reaches any of them
+                     ('not-required') and a trial never reaches the last.
+                     Reuses the seat-banner classes — same shape of message,
+                     and inventing a second set would be two things to keep
+                     looking alike. -->
+                <div
+                    v-if="license.status.reportState === 'due'"
+                    class="license-seat-banner license-seat-banner--warn"
+                    role="status">
+                    <strong>{{ n('teamhub',
+                        'No member report has reached the licensing service for {n} day.',
+                        'No member report has reached the licensing service for {n} days.',
+                        license.status.reportOverdueDays,
+                        { n: license.status.reportOverdueDays }) }}</strong>
+                    <span>
+                        {{ t('teamhub', 'This licence reports its member count twice a month. Check that this server can reach the licensing service.') }}
+                    </span>
+                </div>
+                <div
+                    v-else-if="license.status.reportState === 'overdue'"
+                    class="license-seat-banner license-seat-banner--warn"
+                    role="alert">
+                    <strong>{{ n('teamhub',
+                        'No member report for {n} day. Action needed.',
+                        'No member report for {n} days. Action needed.',
+                        license.status.reportOverdueDays,
+                        { n: license.status.reportOverdueDays }) }}</strong>
+                    <span v-if="license.status.reportLockAt">
+                        {{ t('teamhub', 'If no report arrives, Advanced features lock on {date}. Check that this server can reach the licensing service.', {
+                            date: formatLicenseDate(license.status.reportLockAt),
+                        }) }}
+                    </span>
+                    <span v-else>
+                        {{ t('teamhub', 'Check that this server can reach the licensing service.') }}
+                    </span>
+                </div>
+                <div
+                    v-else-if="license.status.reportState === 'locked'"
+                    class="license-seat-banner license-seat-banner--lock"
+                    role="alert">
+                    <strong>{{ n('teamhub',
+                        'Advanced features are locked: no member report for {n} day.',
+                        'Advanced features are locked: no member report for {n} days.',
+                        license.status.reportOverdueDays,
+                        { n: license.status.reportOverdueDays }) }}</strong>
+                    <span>
+                        {{ t('teamhub', 'This licence is billed on reported members, so it cannot be honoured without them. Existing Advanced teams still work read-only. Restore access to the licensing service, or contact support@doekworks.eu.') }}
+                    </span>
+                </div>
+
+                <!-- v4.13.58 — the licence pitch that stood here is gone
+                     (Justin, 2026-10-31). Its five bullets are four lines
+                     behind the (i) beside the tab's title, and its *Request a
+                     quote* button moved down to the key row, beside *Save
+                     license key*, where an administrator already is. The
+                     *See the licensing model* link went with it: the public
+                     pricing page is one search away and the tab was offering
+                     it twice, here and again under the key field. -->
 
                 <!-- Detail table (only when there IS a key installed) -->
                 <dl v-if="license.status.hasKey" class="license-detail">
@@ -3390,6 +3892,69 @@
                         <dd class="license-over">{{ license.status.invalidReason }}</dd>
                     </template>
                 </dl>
+
+                <!-- v4.13.30 — Member reporting. Present only on a metered
+                     licence; a banded one reports nothing and must not be
+                     shown a panel about an obligation it does not have.
+
+                     The payload is printed back verbatim, from the stored
+                     copy of exactly what was posted. That is deliberate and
+                     is the same assurance the Compliance tab's telemetry pill
+                     gives: an administrator (and their DPO) can see what left
+                     the box rather than read a promise about it. -->
+                <div v-if="license.status.reportState !== 'not-required'" class="license-report">
+                    <div class="license-report__label">
+                        {{ t('teamhub', 'Member reporting') }}
+                    </div>
+                    <p class="license-report__hint">
+                        {{ t('teamhub', 'This licence has no seat cap. The number of unique team members is reported twice a month, on the 1st and the 16th, and is what you are billed for. Only that count, this instance’s UUID and the licence id are sent: no names, no team names, no content.') }}
+                    </p>
+                    <dl class="license-detail">
+                        <dt>{{ t('teamhub', 'Last report') }}</dt>
+                        <dd>
+                            <template v-if="license.status.reportLastOkAt">
+                                {{ formatLicenseDate(license.status.reportLastOkAt) }}
+                                <template v-if="license.status.reportLastPeriod">
+                                    ({{ license.status.reportLastPeriod }})
+                                </template>
+                            </template>
+                            <!-- TRANSLATORS: value of the "Last report" row when no
+                                 member-count report has ever been sent from this instance. -->
+                            <span v-else class="license-over">{{ t('teamhub', 'Never') }}</span>
+                        </dd>
+                        <template v-if="license.status.reportLastPayload">
+                            <dt>{{ t('teamhub', 'Members reported') }}</dt>
+                            <dd>{{ license.status.reportLastPayload.effective_members }}</dd>
+                        </template>
+                        <dt>{{ t('teamhub', 'Next report due') }}</dt>
+                        <dd>{{ formatLicenseDate(license.status.reportNextDueAt) }}</dd>
+                        <template v-if="license.status.reportLastError">
+                            <!-- TRANSLATORS: label above the reason the most recent
+                                 report attempt failed. Shown only after a failure. -->
+                            <dt>{{ t('teamhub', 'Last attempt') }}</dt>
+                            <dd class="license-over">{{ license.status.reportLastError }}</dd>
+                        </template>
+                    </dl>
+                    <!-- v4.13.30 - no "Send report now" button here, by
+                         Justin's decision: the member count is a billing
+                         matter between the instance's operator and us, and a
+                         button would make it look like something a team
+                         administrator is meant to manage. The panel still
+                         shows what was sent and when, which is the assurance
+                         an administrator and their DPO need. Triggering a send
+                         is `occ teamhub:seat-report`. -->
+                    <div class="license-report__actions">
+                        <NcButton
+                            v-if="license.status.reportLastPayload"
+                            variant="tertiary"
+                            @click="license.showPayload = !license.showPayload">
+                            {{ license.showPayload ? t('teamhub', 'Hide what was sent') : t('teamhub', 'Show what was sent') }}
+                        </NcButton>
+                    </div>
+                    <pre
+                        v-if="license.showPayload && license.status.reportLastPayload"
+                        class="license-report__payload">{{ reportPayloadJson }}</pre>
+                </div>
 
                 <!-- Instance UUID (always shown so admins can copy it into
                      a purchase form or email). -->
@@ -3441,32 +4006,100 @@
                             </template>
                             {{ license.saving ? t('teamhub', 'Saving…') : t('teamhub', 'Save license key') }}
                         </NcButton>
+                        <!-- v4.13.58 — beside Save license key, where it belongs
+                             (Justin, 2026-10-31): the two things an
+                             administrator does on this tab are install a key
+                             and ask for one. Secondary, because the primary
+                             action of the row is still saving the key that was
+                             pasted into the field above it.
+                             v4.14.12 — opens LicenseQuoteDialog instead of a
+                             mailto: the request goes from this server to the
+                             licensing service and is filed with the website's
+                             quote requests. The mailto survives as the
+                             dialog's fallback when the service is out of
+                             reach. Its icon moved off the envelope, which now
+                             belongs to Contact us.
+                             v4.14.13 — hidden while a licence is in force, a
+                             trial included (`salesActionsVisible`). It used to
+                             show always, for a customer adding seats or
+                             renewing; Justin reversed that on 2026-11-10
+                             because a licensed customer was promised a direct
+                             line to the maintainer, not a sales form. Seats
+                             and renewals go through that line. -->
+                        <NcButton
+                            v-if="salesActionsVisible"
+                            variant="secondary"
+                            @click="license.quoteOpen = true">
+                            <template #icon>
+                                <ReceiptTextOutlineIcon :size="ICON_BODY" />
+                            </template>
+                            {{ t('teamhub', 'Request a quote') }}
+                        </NcButton>
+                        <!-- v4.14.12 — the trial key, issued and installed in
+                             one step by LicenseTrialDialog. Hidden while any
+                             licence is in force, a trial included (v4.14.14):
+                             saving a trial key replaces whatever key is there,
+                             and a licensed instance is not offered a trial.
+                             So the extended-trial request is reached once the
+                             trial has expired, not during it. -->
+                        <NcButton
+                            v-if="salesActionsVisible"
+                            variant="secondary"
+                            @click="license.trialOpen = true">
+                            <template #icon>
+                                <KeyPlusIcon :size="ICON_BODY" />
+                            </template>
+                            {{ t('teamhub', 'Request a trial key') }}
+                        </NcButton>
+                        <!-- v4.14.12 — anything that is not a quote or a trial.
+                             A plain mailto to info@, with the UUID in the body
+                             so we know which server is writing.
+                             v4.14.13 — hidden while a licence is in force, a
+                             trial included: info@ is the company address, and
+                             a licensed customer writes to their own support
+                             contact instead. -->
+                        <NcButton
+                            v-if="salesActionsVisible"
+                            variant="tertiary"
+                            :href="contactMailto">
+                            <template #icon>
+                                <EmailOutlineIcon :size="ICON_BODY" />
+                            </template>
+                            {{ t('teamhub', 'Contact us') }}
+                        </NcButton>
                         <span v-if="license.saveError" class="admin-save-err">{{ license.saveError }}</span>
                     </div>
+                    <!-- v4.14.13 — goes with the buttons it describes: on a
+                         licensed instance there is nothing left in the row but
+                         Save license key. -->
+                    <p v-if="salesActionsVisible" class="license-key-row__hint">
+                        {{ t('teamhub', 'Request a quote for a license or for support only. We reply by email with a quotation.') }}
+                    </p>
                 </div>
 
-                <!-- Licensing info → public marketing/licensing page.
-                     Request-by-email → mailto with UUID prefilled. We issue
-                     every trial and every paid license by hand from the
-                     licensing dashboard and reply with the JWT. There is
-                     no automated trial endpoint. -->
-                <div class="license-links">
-                    <a href="https://teamhub.doekworks.eu/licensing.html" target="_blank" rel="noopener">
-                        {{ t('teamhub', 'Licensing info') }} →
-                    </a>
-                    <!-- TRANSLATORS: opens the admin's mail client to request
-                         a trial license. Pre-fills subject + UUID. -->
-                    <a
-                        :href="requestTrialMailto"
-                        class="license-trial-mailto">
-                        {{ t('teamhub', 'Request trial by email') }}
-                    </a>
-                </div>
-                <p class="license-trial-hint">
-                    {{ t('teamhub', 'Send the request from the address that should receive the license key — we reply to the sender.') }}
-                </p>
+                <LicenseQuoteDialog
+                    :open="license.quoteOpen"
+                    :instance-uuid="license.status.instanceUuid || ''"
+                    :seats-used="Number.isInteger(license.status.seatsUsed) ? license.status.seatsUsed : null"
+                    @close="license.quoteOpen = false" />
+                <LicenseTrialDialog
+                    :open="license.trialOpen"
+                    :instance-uuid="license.status.instanceUuid || ''"
+                    @installed="status => { license.status = status }"
+                    @close="license.trialOpen = false" />
+
+                <!-- v4.13.58 — the two links that stood here are gone
+                     (Justin, 2026-10-31). *Licensing info* pointed at the same
+                     public pricing page the removed pitch above did, and
+                     *Request trial by email* was a second mailto beside the
+                     quote one: every trial and every paid licence is issued by
+                     hand either way, so one address to write to is enough. The
+                     sentence under them went with them — what it said about
+                     replying to the sender is now part of the quote hint in the
+                     key row above. `requestTrialMailto` was removed with its
+                     only caller. -->
             </template>
-        </NcSettingsSection>
+        </div>
 
         <!-- v4.6.2 — the shared "Save settings" row is gone. It was rendered
              for every tab NOT in an exclusion list, and by this version the
@@ -3485,7 +4118,7 @@
             :open="confirmDeleteDialog"
             @update:open="cancelDeleteOrphan">
             <template #default>
-                <p style="margin: 0 0 8px;">
+                <p class="admin-dialog__paragraph">
                     {{ t('teamhub', 'Delete "{name}" and all its data? This cannot be undone.', { name: confirmDeleteTeam.name || confirmDeleteTeam.id }) }}
                 </p>
             </template>
@@ -3584,10 +4217,10 @@
                                      as non-compliant afterwards, so the external
                                      members wording would be wrong twice. -->
                                 <span v-if="c.reason === 'no_team_folder'" class="drift-dialog__note">
-                                    {{ t('teamhub', 'This team has no team folder, so there is nothing to tag. Nothing is reported for it — create a team folder and apply the profile again.') }}
+                                    {{ t('teamhub', 'This team has no team folder, so there is nothing to tag. Nothing is reported for it. Create a team folder and apply the profile again.') }}
                                 </span>
                                 <span v-else-if="c.applied === false" class="drift-dialog__note">
-                                    {{ t('teamhub', 'Not changed by applying — existing members are never removed. The team will be reported as non-compliant until they are.') }}
+                                    {{ t('teamhub', 'Not changed by applying: existing members are never removed. The team will be reported as non-compliant until they are.') }}
                                 </span>
                                 <span v-else-if="c.disables && c.disables.length" class="drift-dialog__note">
                                     {{ t('teamhub', 'These integrations are switched off for the team: {apps}. Their own data is not deleted.', { apps: c.disables.map(appLabelFor).join(', ') }) }}
@@ -3600,7 +4233,7 @@
                                      a second tag beside the applied one is what
                                      stops the classification biting. -->
                                 <span v-if="c.otherTags && c.otherTags.length" class="drift-dialog__note">
-                                    {{ t('teamhub', 'The folder also carries {tags}, which no profile governs. It stays — govern it from a profile, or name it from a Confidential files label, and it will be replaced next time.', { tags: c.otherTags.map(tg => tg.name || tg.id).join(', ') }) }}
+                                    {{ t('teamhub', 'The folder also carries {tags}, which no profile governs. It stays. Govern it from a profile, or name it from a Confidential files label, and it will be replaced next time.', { tags: c.otherTags.map(tg => tg.name || tg.id).join(', ') }) }}
                                 </span>
                             </div>
                             <div role="cell">{{ driftValueLabel(c.field, c.current, c.currentLabel) }}</div>
@@ -3690,7 +4323,7 @@
                                  around us in Contacts, because nothing outside
                                  TeamHub writes it. -->
                             <span v-if="f.enforced" class="drift-dialog__note">
-                                {{ t('teamhub', 'Set before the profile was applied — nothing outside TeamHub can change this.') }}
+                                {{ t('teamhub', 'Set before the profile was applied: nothing outside TeamHub can change this.') }}
                             </span>
                         </div>
                         <div role="cell">{{ driftValueLabel(f.field, f.expected, f.expectedLabel) }}</div>
@@ -3698,7 +4331,7 @@
                     </div>
                 </div>
                 <p class="drift-dialog__foot">
-                    {{ t('teamhub', 'Most of these can also be changed in Contacts or the Teams app, which report nothing back — so a difference is detected here, not prevented, and cannot name who made it.') }}
+                    {{ t('teamhub', 'Most of these can also be changed in Contacts or the Teams app, which report nothing back, so a difference is detected here, not prevented, and cannot name who made it.') }}
                 </p>
             </template>
             <template #actions>
@@ -3715,10 +4348,10 @@
             :open="confirmResetConfigDialog"
             @update:open="cancelResetTeamConfig">
             <template #default>
-                <p style="margin: 0 0 8px;">
+                <p class="admin-dialog__paragraph">
                     {{ t('teamhub', 'Reset all user-managed and system-flag bits on "{name}" to clean defaults?', { name: confirmResetConfigTeam.name || confirmResetConfigTeam.id }) }}
                 </p>
-                <p style="margin: 0; color: var(--color-text-maxcontrast);">
+                <p class="admin-dialog__paragraph admin-dialog__paragraph--muted">
                     {{ t('teamhub', 'This clears any corrupted bits set by older versions of TeamHub. The team owner will need to reconfigure its checkbox settings afterwards.') }}
                 </p>
             </template>
@@ -3749,13 +4382,13 @@
             :open="!!confirmUnlinkOpenProjectTeam"
             @update:open="cancelUnlinkOpenProject">
             <template #default>
-                <p style="margin: 0 0 8px;">
+                <p class="admin-dialog__paragraph">
                     {{ t('teamhub', 'Unlink "{project}" from "{name}"?', {
                         project: confirmUnlinkOpenProjectTeam.openproject.projectName || confirmUnlinkOpenProjectTeam.openproject.projectIdentifier,
                         name: confirmUnlinkOpenProjectTeam.name || confirmUnlinkOpenProjectTeam.id,
                     }) }}
                 </p>
-                <p style="margin: 0; color: var(--color-text-maxcontrast);">
+                <p class="admin-dialog__paragraph admin-dialog__paragraph--muted">
                     {{ t('teamhub', 'The team keeps everything else and loses its OpenProject widgets. Nothing changes in OpenProject, and the project can then be linked by a new team. A team cannot be linked again afterwards.') }}
                 </p>
             </template>
@@ -3798,7 +4431,7 @@
                         <dt>{{ t('teamhub', 'Requested until') }}</dt>
                         <dd><strong>{{ expiryReqActive.proposedOn }}</strong></dd>
                         <dt>{{ t('teamhub', 'Reason') }}</dt>
-                        <dd>{{ expiryReqActive.reason || '—' }}</dd>
+                        <dd>{{ expiryReqActive.reason || 'Not set' }}</dd>
                     </dl>
 
                     <!-- Prefilled with the requested date so the common case is
@@ -3819,7 +4452,7 @@
                         v-model="expiryReqNote[expiryReqActive.id]"
                         class="maint-expiry-req__note"
                         :label="t('teamhub', 'Note to the requester')"
-                        :placeholder="t('teamhub', 'Optional — required reading if you deny')" />
+                        :placeholder="t('teamhub', 'Optional: required reading if you deny')" />
                 </template>
 
                 <!-- The row says a request is pending but the request list does
@@ -3877,6 +4510,9 @@ import WrenchIcon from 'vue-material-design-icons/Wrench.vue'
 import DeleteIcon from 'vue-material-design-icons/Delete.vue'
 import AccountEditIcon from 'vue-material-design-icons/AccountEdit.vue'
 import ShieldCheckIcon from 'vue-material-design-icons/ShieldCheck.vue'
+// v4.13.16 — the integrations register's expand control.
+import ChevronDown from 'vue-material-design-icons/ChevronDown.vue'
+import ChevronUp from 'vue-material-design-icons/ChevronUp.vue'
 // v4.8.2 — Track F2a. Distinct from ShieldCheck (Compliance): Policy is where
 // the control is configured, Compliance is where the evidence is read.
 import ShieldLockOutlineIcon from 'vue-material-design-icons/ShieldLockOutline.vue'
@@ -3916,6 +4552,8 @@ import FileDocumentOutlineIcon from 'vue-material-design-icons/FileDocumentOutli
 import PresenceTypesManager     from './PresenceTypesManager.vue'
 import PresenceLocationsManager from './PresenceLocationsManager.vue'
 import PresenceHolidaysManager  from './PresenceHolidaysManager.vue'
+import TeamsFrontendSwitch    from './admin/TeamsFrontendSwitch.vue'
+import ShiftTypesManager       from './ShiftTypesManager.vue'
 import MyWorkAdminSettings     from './mywork/MyWorkAdminSettings.vue'
 import LifebuoyIcon           from 'vue-material-design-icons/Lifebuoy.vue'
 // v4.10.23 — the service-desk checklist row and its release button. The
@@ -3930,11 +4568,21 @@ import TeamExportPanel         from './admin/TeamExportPanel.vue'
 // v4.8.2 — Track F2a. Templates and classification profiles. Its own file for
 // the same reason the two above are: this one is already ~7 900 lines.
 import PolicyAdminPanel        from './admin/PolicyAdminPanel.vue'
+// v4.13.23 — integration availability, administrator enablement and
+// template inclusion. Its own component: two impact-preview dialogs and a
+// template matrix do not belong in this file.
+import IntegrationGovernancePanel from './admin/IntegrationGovernancePanel.vue'
 import InfoHint                from './admin/InfoHint.vue'
+import LicenseQuoteDialog      from './admin/LicenseQuoteDialog.vue'
+import LicenseTrialDialog      from './admin/LicenseTrialDialog.vue'
+import ReceiptTextOutlineIcon  from 'vue-material-design-icons/ReceiptTextOutline.vue'
+import KeyPlusIcon             from 'vue-material-design-icons/KeyPlus.vue'
+// v4.13.57 — formatting buttons for the welcome-page message, which
+// takes markdown. Generic: it drives any plain <textarea>.
+import MarkdownTextareaToolbar from './MarkdownTextareaToolbar.vue'
 // v4.10.45 — the service catalog's categories and links.
 import ServicesAdminPanel      from './admin/ServicesAdminPanel.vue'
 // v4.9.6 — Phase 2: the provisioning operations list on the Maintenance tab.
-import ProvisioningAdminPanel  from './admin/ProvisioningAdminPanel.vue'
 // v4.10.7 — the one way a person is drawn in a picker (owner picker, audit filter).
 import PersonRow               from './PersonRow.vue'
 // v4.8.0 — ISO 27001 control mapping for the Compliance tab and its report.
@@ -3967,12 +4615,17 @@ export default {
         KeyIcon, ContentCopyIcon, CloseIcon, LinkVariantIcon, LinkOffIcon,
         AlertOctagonIcon, FileDocumentOutlineIcon,
         PresenceTypesManager, PresenceLocationsManager, PresenceHolidaysManager,
+        ShiftTypesManager,
+        TeamsFrontendSwitch,
         ClipboardCheckIcon, MyWorkAdminSettings,
         LifebuoyIcon,
         TeamImportPanel, TeamExportPanel, PersonRow, TeamAdoptionGrid,
         CalendarClockIcon, CalendarRemoveIcon, EmailOutlineIcon,
-        PolicyAdminPanel, ShieldLockOutlineIcon, ServicesAdminPanel, InfoHint,
-        ProvisioningAdminPanel,
+        PolicyAdminPanel, ShieldLockOutlineIcon, ServicesAdminPanel, InfoHint, LicenseQuoteDialog, LicenseTrialDialog, ReceiptTextOutlineIcon, KeyPlusIcon,
+        MarkdownTextareaToolbar,
+        IntegrationGovernancePanel,
+        // v4.13.16 — the integrations register.
+        ChevronDown, ChevronUp,
     },
     data() {
         return {
@@ -3981,6 +4634,18 @@ export default {
             ICON_LARGE,
             ICON_HERO,
             activeTab: 'creation',
+
+            // v4.13.56 — matches TeamService::WELCOME_MESSAGE_MAX. The
+            // server truncates to the same number; this only stops the
+            // textarea accepting more than will be stored, so the admin is
+            // not shown text that silently vanished on save.
+            welcomeMessageMax: 4000,
+
+            // v4.13.56 — the Policy tab's template, profile and layout
+            // editors are pages on that tab now, and while one of them is
+            // open this file's own section beside the panel is hidden.
+            // PolicyAdminPanel reports it; nothing here sets it.
+            policyEditing: false,
 
             // v3.100.0 — Track F licensing tab state. All under one
             // object so unrelated tabs don't collide with 'saving'/'saved'.
@@ -3993,6 +4658,8 @@ export default {
                 refreshing:      false,
                 showPayload:     false,
                 uuidCopied:      false,
+                quoteOpen:       false,
+                trialOpen:       false,
             },
             loading: true,
             saving: false,
@@ -4000,9 +4667,14 @@ export default {
             saveError: null,
             form: {
                 wizardDescription: '',
+                // v4.13.56 — the welcome page's subline. '' means the
+                // page shows the line TeamHub ships.
+                welcomeMessage: '',
                 pinMinLevel: 'moderator',
                 intravoxParentPath: 'en/teamhub',
                 presenceModuleEnabled: false,
+                // v4.14.9 - teams owned by another server (DESIGN 2.253).
+                federatedTeamsEnabled: false,
                 decisionsModuleEnabled: false,
                 // v4.9.16 — the OpenProject module's switch (off by default).
                 openProjectModuleEnabled: false,
@@ -4104,6 +4776,30 @@ export default {
             integrations: [],
             integrationsLoading: false,
             integrationsError: null,
+            // v4.13.5 — TeamHub's own OpenProject connection. Kept out of
+            // `form` deliberately: `form` is one GET and one POST of the
+            // whole settings blob, and `clientSecret` must never travel in
+            // either direction except on its own deliberate save. The
+            // server never returns the secret, so `clientSecretSet` is all
+            // we know about it.
+            opConn: {
+                url: '',
+                authMethod: 'oauth2',
+                clientId: '',
+                clientSecret: '',
+                clientSecretSet: false,
+                configured: false,
+                redirectUri: '',
+                scope: 'api_v3',
+                // v4.13.8 — the single-sign-on half. `oidcAvailable` is
+                // the server's answer about `user_oidc`, not a setting.
+                ssoProvider: 'external',
+                tokenExchange: false,
+                audience: '',
+                oidcAvailable: false,
+            },
+            opConnLoading: false,
+            opConnSaving: false,
             // Statistics tab
             telemetry: { enabled: true, report_url: '', preview: {} },
             telemetryLoading: false,
@@ -4190,6 +4886,26 @@ export default {
             policySummary: {
                 loaded: false,
                 loading: false,
+                error: null,
+                report: null,
+            },
+
+            // v4.13.16 — the audit chain. `summary` rides the Compliance tab's
+            // own fetch (cheap); `report` arrives only when an administrator
+            // presses Verify, because that re-hashes up to 50,000 rows.
+            auditIntegrity: { summary: null, report: null, verifying: false },
+
+            // v4.13.16 — the integrations register (DESIGN §2.194): where this
+            // instance's team data goes. Loaded when the Compliance tab opens.
+            integrationRegister: { loaded: false, loading: false, error: null, rows: [], hosts: [], detail: {}, expanded: '' },
+
+            // v4.13.16 — whether Nextcloud's own Teams app still has its own
+            // interface, for the checklist row of the same name. Loaded on
+            // mount for the reason the policy summary is: the row is on the
+            // first tab. `decided` is what the row grades on — an explicit
+            // answer either way — not whether the frontend happens to be on.
+            teamsFrontend: {
+                loaded: false,
                 error: null,
                 report: null,
             },
@@ -4499,7 +5215,14 @@ export default {
 
         tabs() {
             const list = [
-                { id: 'creation',      label: this.t('teamhub', 'Team creation'), icon: 'AccountPlusIcon' },
+                // v4.13.75 — renamed from 'Team creation' (Justin, 2026-11-02). The
+                // tab holds what an administrator settles once while standing
+                // the instance up, and since the Teams app switch moved here
+                // from Policy it is no longer only about creation. The `id`
+                // stays `creation`: it is a stored and routed value, not a
+                // label, and renaming it would break a bookmarked tab for no
+                // gain — the same call v4.8.33 made for `integrations`.
+                { id: 'creation',      label: this.t('teamhub', 'Getting started'), icon: 'AccountPlusIcon' },
                 // v4.8.2 — Track F2a. Next to Team creation because that is
                 // what a template and a profile decide: what a new team is
                 // made of, and what its settings are set to. Deliberately NOT
@@ -4543,7 +5266,12 @@ export default {
             if (this.form.presenceModuleEnabled) {
                 const archiveIndex = list.findIndex(tab => tab.id === 'archive')
                 const at = archiveIndex === -1 ? list.length : archiveIndex
-                list.splice(at, 0, { id: 'presence', label: this.t('teamhub', 'Presence module'), icon: 'OfficeBuildingIcon' })
+                // v4.13.58 — the tab is called "People", not "People module"
+                // (Justin, 2026-10-31). Every other tab is named for the thing
+                // it administers rather than for the switch that turns it on,
+                // and that switch is on the Integrations tab, where it is still
+                // "People module".
+                list.splice(at, 0, { id: 'presence', label: this.t('teamhub', 'People'), icon: 'OfficeBuildingIcon' })
             }
             return list
         },
@@ -4588,6 +5316,54 @@ export default {
         licenseActive() {
             const level = this.license.status?.enforcementLevel
             return level === 'none' || level === 'grace'
+        },
+
+        /**
+         * v4.13.5 — is the OpenProject module actually on: the licence
+         * **and** the administrator's switch, the same two halves and the
+         * same order `OpenProjectModuleService::unavailableCode()` uses on
+         * the server. The connection block branches on it, and the two
+         * sentences it shows differ because the fixes differ — one is a
+         * switch on this page, the other is a licence.
+         */
+        openProjectModuleAvailable() {
+            return this.licenseActive && this.form.openProjectModuleEnabled
+        },
+
+        /**
+         * v4.13.8 — the two authorization methods, and the identity
+         * providers OIDC can take its token from. `NcSelect` wants
+         * objects, so these wrap the stored values the server reads.
+         */
+        opConnMethodOptions() {
+            return [
+                { value: 'oauth2', label: this.t('teamhub', 'OAuth 2.0') },
+                { value: 'oidc', label: this.t('teamhub', 'Single sign-on (OIDC)') },
+            ]
+        },
+        opConnMethod: {
+            get() {
+                return this.opConnMethodOptions.find(o => o.value === this.opConn.authMethod)
+                    || this.opConnMethodOptions[0]
+            },
+            set(value) {
+                this.opConn.authMethod = typeof value === 'string' ? value : (value?.value || 'oauth2')
+            },
+        },
+        opConnSsoProviderOptions() {
+            return [
+                { value: 'external', label: this.t('teamhub', 'An external identity provider') },
+                { value: 'nextcloud_hub', label: this.t('teamhub', 'This Nextcloud') },
+            ]
+        },
+        opConnSsoProvider: {
+            get() {
+                return this.opConnSsoProviderOptions.find(o => o.value === this.opConn.ssoProvider)
+                    || this.opConnSsoProviderOptions[0]
+            },
+            set(value) {
+                this.opConn.ssoProvider = typeof value === 'string' ? value : (value?.value || 'external')
+            },
         },
 
         // ── v4.3.0 Compliance-tab computeds ─────────────────────────
@@ -4675,6 +5451,54 @@ export default {
             return this.profileDriftCount > 0 ? 'err' : 'ok'
         },
         /**
+         * v4.13.16 — the audit-chain pill.
+         *
+         * `ok` only when a verification actually said so. The summary alone
+         * can say a chain exists and is current, which is `ok` for the purpose
+         * of this row — but a *verified* report that came back broken must win
+         * over it, which is why the report is tested first.
+         *
+         * @return {'ok'|'err'|'warn'|'unknown'}
+         */
+        auditIntegrityState() {
+            const r = this.auditIntegrity.report
+            if (r) {
+                if (r.verdict === 'ok') return 'ok'
+                if (r.verdict === 'broken') return 'err'
+                return 'warn'
+            }
+            const su = this.auditIntegrity.summary
+            if (!su) return 'unknown'
+            if (!su.keyed) return 'warn'
+            return su.anchors > 0 ? 'ok' : 'warn'
+        },
+        auditIntegrityLabel() {
+            const r = this.auditIntegrity.report
+            if (r) {
+                switch (r.verdict) {
+                case 'ok':
+                    // TRANSLATORS: the audit trail was re-hashed and still reconciles
+                    return t('teamhub', 'Verified')
+                case 'broken':
+                    return t('teamhub', 'Mismatch found')
+                case 'unkeyed':
+                    return t('teamhub', 'No signing key')
+                case 'not_anchored':
+                    return t('teamhub', 'Not chained yet')
+                case 'key_rotated':
+                    return t('teamhub', 'Key was rotated')
+                default:
+                    return t('teamhub', 'Partly checked')
+                }
+            }
+            const su = this.auditIntegrity.summary
+            if (!su) return t('teamhub', 'Checking…')
+            if (!su.keyed) return t('teamhub', 'No signing key')
+            if (!su.anchors) return t('teamhub', 'Not chained yet')
+            // TRANSLATORS: the chain exists and is up to date, but has not been re-verified in this session
+            return t('teamhub', 'Chained')
+        },
+        /**
          * v4.8.0 — check name → its ISO controls, as display strings.
          *
          * Derived from `buildComplianceReportChecks()` rather than repeated
@@ -4726,7 +5550,7 @@ export default {
                     glyph: '⚠',
                     label: this.t('teamhub', 'Who can create teams'),
                     value: this.t('teamhub', 'Everyone on this server'),
-                    hint:  this.t('teamhub', 'Creation permissions are empty, and empty means unrestricted — not admins only. Every new team provisions a Talk room, a Deck board, a calendar and a folder. Set a group under Creation permissions below to restrict it.'),
+                    hint:  this.t('teamhub', 'Creation permissions are empty, and empty means unrestricted: not admins only. Every new team provisions a Talk room, a Deck board, a calendar and a folder. Set a group under Creation permissions below to restrict it.'),
                 }
                 : {
                     id:    'creation',
@@ -4838,6 +5662,43 @@ export default {
                         // is the longer form because on a checklist beside "Team
                         // templates" the bare word would not say profiles of what.
                         : this.t('teamhub', 'A profile sets a team’s privacy settings and which integrations it may use. Teams take one when they are created; nothing is applied until then. Review them under Policy → Profiles.'),
+                })
+            }
+
+            // ── Nextcloud's own Teams app (v4.13.16, DESIGN §2.190) ──────
+            // Beside the Policy rows because the switch lives on that tab, and
+            // because it answers the question those rows assume: whether
+            // TeamHub is the only way teams are managed on this server. While
+            // Circles' frontend is on there is a second route — its own page,
+            // its OCS API and Contacts' team view — and nothing TeamHub audits
+            // covers it.
+            //
+            // The row grades on `decided`, not on `enabled`: both answers are
+            // legitimate, and "on" is Nextcloud's own default, so ⚠ would
+            // scold every untouched install. • until somebody has answered,
+            // ✓ once they have, either way — the preferenceRow convention.
+            const teamsFrontend = this.teamsFrontend.report
+            if (!teamsFrontend) {
+                rows.push({
+                    id: 'teamsfrontend', state: 'info', glyph: '•',
+                    label: this.t('teamhub', 'Nextcloud Teams app'),
+                    value: this.teamsFrontend.error
+                        ? this.t('teamhub', 'Unavailable')
+                        : this.t('teamhub', 'Checking…'),
+                    hint: this.teamsFrontend.error || '',
+                })
+            } else {
+                rows.push({
+                    id:    'teamsfrontend',
+                    state: teamsFrontend.decided ? 'ok' : 'info',
+                    glyph: teamsFrontend.decided ? '✓' : '•',
+                    label: this.t('teamhub', 'Nextcloud Teams app'),
+                    value: teamsFrontend.enabled
+                        ? this.t('teamhub', 'Enabled')
+                        : this.t('teamhub', 'Disabled'),
+                    hint: teamsFrontend.decided
+                        ? ''
+                        : this.t('teamhub', 'While the Teams app has its own interface, teams can also be created and changed outside TeamHub, where TeamHub cannot audit them. Decide this with the switch on the Getting started tab.'),
                 })
             }
 
@@ -4979,31 +5840,91 @@ export default {
                 this.form.roomvoxTokenConfigured,
             ))
 
-            // Registered third-party integrations. externalIntegrations is
-            // populated by loadIntegrations(); an empty list before it
-            // resolves reads as 0, which is also the correct steady state on
-            // most instances, so no separate "checking" row is warranted.
-            const integrationCount = this.externalIntegrations.length
+            // Integration packages other apps registered. Populated by
+            // loadIntegrations(); an empty list before it resolves reads as 0,
+            // which is also the correct steady state on most instances, so no
+            // separate "checking" row is warranted.
+            //
+            // v4.13.23 — the row reports how many are *enabled*, not how many
+            // registered: registering is the owning app's doing and enabling is
+            // the administrator's, and this index answers "what is configured
+            // here".
+            const enabledCount = this.integrations.filter(i => i.integration_enabled).length
             rows.push(preferenceRow(
                 'integrations',
-                this.t('teamhub', 'Registered integrations'),
-                this.n('teamhub', '{n} app', '{n} apps', integrationCount, { n: integrationCount }),
-                integrationCount > 0,
+                this.t('teamhub', 'Integrations'),
+                this.n('teamhub', '{n} integration enabled', '{n} integrations enabled', enabledCount, { n: enabledCount }),
+                enabledCount > 0,
             ))
 
             return rows
         },
 
+        /**
+         * The stored report payload, pretty-printed for the disclosure. A
+         * computed rather than JSON.stringify() in the template: the template
+         * stays readable and nothing depends on Vue's globals whitelist.
+         */
+        reportPayloadJson() {
+            const payload = this.license.status?.reportLastPayload
+            return payload ? JSON.stringify(payload, null, 2) : ''
+        },
         licenseStatusLabel() {
             const s = this.license.status
             if (!s) return ''
             switch (s.enforcementLevel) {
             case 'none':       return s.isTrial ? this.t('teamhub', 'Trial active') : this.t('teamhub', 'Active')
-            case 'grace':      return this.t('teamhub', 'Grace — renew soon')
-            case 'soft-lock':  return this.t('teamhub', 'Expired — Advanced features locked')
+            case 'grace':      return this.t('teamhub', 'Grace: renew soon')
+            case 'soft-lock':  return this.t('teamhub', 'Expired: Advanced features locked')
             case 'unlicensed': return this.t('teamhub', 'No license installed')
             default:           return this.t('teamhub', 'Unknown')
             }
+        },
+        /**
+         * v4.14.12, widened in v4.14.13 and corrected in v4.14.14 — whether
+         * this tab offers the three ways of reaching us: *Request a quote*,
+         * *Request a trial key* and *Contact us*, plus the hint under them.
+         *
+         * All three are hidden while a licence is **in force** — enforcement
+         * level `none` or `grace` — on Justin's instruction of 2026-11-10: a
+         * licensed customer was promised a direct line to the maintainer, so
+         * the admin panel does not put a sales form in front of them.
+         * Renewals and extra seats go through that line.
+         *
+         * **A trial counts as licensed.** v4.14.13 exempted it, and that was
+         * wrong: `AnnouncementService::isInstanceUnlicensed()` already treats
+         * any instance above `unlicensed` as licensed, which is what switches
+         * the announcement channel off, and a trial carries a key and has
+         * every module unlocked. One definition of "licensed" across the app,
+         * not one per surface.
+         *
+         * Shown again once entitlement ends — `soft-lock` or `unlicensed` —
+         * because that administrator needs a renewal quote, or, after a
+         * trial, the extended-trial request. A trial has no grace period
+         * (`graceDaysFor()` returns 0), so it goes straight from `none` to
+         * `soft-lock` and the buttons come back the day it expires.
+         *
+         * **This is deliberately stricter than the server.**
+         * TrialRequestService::blockedByPaidKey() refuses only a *paid* key in
+         * force, because that is the case where saving a trial key would
+         * destroy something. It still accepts a trial or extension request
+         * from a trial instance, and should: the hiding here is a commercial
+         * commitment, not a safety rule, and the e-mail route in the dialog
+         * stays open either way.
+         *
+         * False until the status envelope has loaded, so nothing flashes in
+         * front of a licensed administrator.
+         */
+        salesActionsVisible() {
+            const s = this.license.status
+            if (!s) return false
+            return !(s.hasKey && ['none', 'grace'].includes(s.enforcementLevel))
+        },
+        /** v4.14.12 — *Contact us*: info@, with the UUID so we know the server. */
+        contactMailto() {
+            const uuid = this.license.status?.instanceUuid || ''
+            const body = `\n\n\nUUID: ${uuid}`
+            return `mailto:info@doekworks.eu?subject=${encodeURIComponent('TeamHub')}&body=${encodeURIComponent(body)}`
         },
         licenseKindLabel() {
             switch (this.license.status?.kind) {
@@ -5013,58 +5934,10 @@ export default {
             }
         },
 
-        /**
-         * mailto: link for "Request trial by email". Opens the admin's mail
-         * client with subject + UUID pre-filled so Justin can issue the JWT
-         * manually. Used when the instance can't reach the licensing server
-         * (proxy, air-gap, corporate firewall).
-         *
-         * The body is intentionally minimal — the reply-to address on the
-         * message they send IS the address that will receive the key, so
-         * we don't ask for it explicitly.
-         */
-        requestTrialMailto() {
-            const uuid = this.license.status?.instanceUuid || ''
-            const subject = 'Request trial key'
-            const body = `UUID: ${uuid}\n\n(This email was generated by TeamHub. Please reply from the address that should receive the license key.)`
-            return `mailto:sales@doekworks.eu?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
-        },
-
-        /**
-         * v4.10.0 — mailto: for "Request a quote" on the unlicensed License
-         * tab. The subject is the one Justin's inbox sorts on ("Supporter
-         * quote"). The body is the quote form: three lines the admin
-         * completes (company name, country, contact e-mail — the same three
-         * the 4.10.0 announcement asks for) and the two facts a quote is
-         * priced on, filled in — the instance UUID the licence will be bound
-         * to and the seats in use. English on purpose: we read it.
-         */
-        requestQuoteMailto() {
-            const uuid  = this.license.status?.instanceUuid || ''
-            const seats = this.license.status?.seatsUsed
-            const lines = [
-                'Company name: ',
-                'Country: ',
-                'Contact e-mail: ',
-                '',
-                `UUID: ${uuid}`,
-            ]
-            if (Number.isInteger(seats)) {
-                lines.push(`Seats in use: ${seats}`)
-            }
-            lines.push('', '(This email was generated by TeamHub. Please complete the three lines above and send it from the address that should receive the quote.)')
-            return `mailto:sales@doekworks.eu?subject=${encodeURIComponent('Supporter quote')}&body=${encodeURIComponent(lines.join('\n'))}`
-        },
-
-        /**
-         * Only external (non-builtin) integrations.
-         * Built-in NC apps (Talk, Files, Calendar, Deck) are seeded automatically
-         * into the registry as is_builtin=true. They did NOT register via the
-         * integration API and must not appear in this admin list.
-         */
-        externalIntegrations() {
-            return this.integrations.filter(i => !i.is_builtin)
-        },
+        /* v4.14.12 — `requestQuoteMailto` is gone. *Request a quote* opens
+           LicenseQuoteDialog, which builds the same mailto (same address and
+           subject) as its fallback when the licensing service is out of
+           reach, with what the administrator typed already in it. */
 
         /**
          * Reporting → Telemetry contents (v4.3.1). Groups the flat `telemetry.preview`
@@ -5266,8 +6139,23 @@ export default {
             },
         },
         activeTab(tab) {
+            // v4.13.56 — PolicyAdminPanel is mounted with v-if, so leaving
+            // the tab with an editor page open unmounts it without a closing
+            // event and the flag would stay true for the rest of the visit.
+            // Reset here rather than teaching the panel about unmounting: the
+            // flag is this file's state and the tab switch is its own.
+            if (tab !== 'policy') {
+                this.policyEditing = false
+            }
             if (tab === 'integrations' && this.integrations.length === 0 && !this.integrationsLoading) {
                 this.loadIntegrations()
+            }
+            // v4.13.5 — its own condition, not folded into the one above:
+            // the registry list and the OpenProject connection are two
+            // endpoints, and an instance with no registered integrations
+            // must still load the connection.
+            if (tab === 'integrations' && !this.opConnLoading && this.opConn.redirectUri === '') {
+                this.loadOpenProjectConnection()
             }
             if (tab === 'statistics' && !this.telemetryLoading && !this.telemetry.preview.uuid) {
                 this.loadTelemetry()
@@ -5294,6 +6182,10 @@ export default {
                 if (!this.complianceSummary.loaded && !this.complianceSummary.loading) {
                     this.loadComplianceSummary()
                 }
+                // v4.13.16 — the integrations register, on the same tab open.
+                if (!this.integrationRegister.loaded && !this.integrationRegister.loading) {
+                    this.loadIntegrationRegister()
+                }
             }
             if (tab === 'archive') {
                 if (!this.archiveSettingsLoaded) {
@@ -5317,6 +6209,8 @@ export default {
         this.loadPolicySummary()
         // v4.10.23 — same reason: the service-desk row is on that checklist.
         this.loadServiceDesk()
+        // v4.13.16 — and the Teams-app row.
+        this.loadTeamsFrontend()
         // v4.10.50 — a link to the adoption grid (a notification, a request
         // in My Work) lands on its tab and scrolls to it.
         if (window.location.hash === '#team-adoption') {
@@ -5376,6 +6270,7 @@ export default {
             try {
                 const { data } = await axios.get(generateUrl('/apps/teamhub/api/v1/admin/settings'))
                 this.form.wizardDescription    = data.wizardDescription     || ''
+                this.form.welcomeMessage       = data.welcomeMessage        || ''
                 this.form.pinMinLevel          = data.pinMinLevel            || 'moderator'
                 this.form.intravoxParentPath   = data.intravoxParentPath     || 'en/teamhub'
                 this.form.presenceModuleEnabled = !!data.presenceModuleEnabled
@@ -5436,6 +6331,7 @@ export default {
                 this.inviteCircle    = types.includes('circle')
                 this.inviteEmail     = types.includes('email')
                 this.inviteFederated = types.includes('federated')
+                this.form.federatedTeamsEnabled = !!data.federatedTeamsEnabled
 
                 // v4.10.7 — subline fields. An empty string is a real answer
                 // ("show nothing"); only a missing key falls back to the default.
@@ -5463,40 +6359,29 @@ export default {
 
         // ── Integrations tab ──────────────────────────────────────────────
 
+        /**
+         * v4.13.23 — the tab itself is `IntegrationGovernancePanel`, which
+         * loads its own data. This read survives for one reason: the settings
+         * search index needs a count, and it needs it whether or not the tab
+         * has been opened.
+         *
+         * It reads the governance endpoint rather than the legacy
+         * `/ext/integrations` one, so the number is packages (what an
+         * administrator decides about) rather than single registrations. The
+         * legacy endpoint still exists for apps that call it; nothing in this
+         * file does any more.
+         */
         async loadIntegrations() {
             this.integrationsLoading = true
             this.integrationsError = null
             try {
-                const { data } = await axios.get(generateUrl('/apps/teamhub/api/v1/ext/integrations'))
-                this.integrations = Array.isArray(data) ? data : []
+                const { data } = await axios.get(generateUrl('/apps/teamhub/api/v1/admin/integrations'))
+                this.integrations = Array.isArray(data.integrations) ? data.integrations : []
             } catch (e) {
                 const msg = e?.response?.data?.error || e.message || 'unknown error'
                 this.integrationsError = this.t('teamhub', 'Failed to load integrations: {error}', { error: msg })
             } finally {
                 this.integrationsLoading = false
-            }
-        },
-
-        /**
-         * NC app icon URL — /apps/{app_id}/img/app.svg
-         * Mirrors TeamView.appIconUrl() and IntegrationWidget.appIconUrl().
-         */
-        appIconUrl(appId) {
-            return generateUrl(`/apps/${appId}/img/app.svg`)
-        },
-
-        /**
-         * Fallback: svg → png → hide.
-         * We store the app_id on the img via data attribute so we can track
-         * which fallback stage we are in without extra component state.
-         */
-        onAppIconError(event, item) {
-            const img = event.target
-            if (img.src.endsWith('.svg')) {
-                img.src = generateUrl(`/apps/${item.app_id}/img/app.png`)
-            } else {
-                // Both svg and png failed — hide the img entirely
-                img.style.display = 'none'
             }
         },
 
@@ -5637,6 +6522,44 @@ export default {
         },
 
         /**
+         * v4.13.56 — the welcome page message, debounced the same way and on
+         * its own timer. One shared timer would mean typing in either field
+         * cancelled a pending save of the other, and the loser would be the
+         * field the administrator had just finished with.
+         */
+        onWelcomeMessageInput() {
+            clearTimeout(this._welcomeSaveTimer)
+            this._welcomeSaveTimer = setTimeout(() => { this.save() }, 1200)
+        },
+
+        /**
+         * v4.13.57 — a formatting button changed the text.
+         *
+         * Writes the value the textarea's own `v-model` would have written and
+         * then runs the identical debounce, so a button and a keystroke are
+         * indistinguishable from the save path's point of view.
+         *
+         * @param {string} next the new field text
+         */
+        onWelcomeMessageEdit(next) {
+            this.form.welcomeMessage = next
+            this.onWelcomeMessageInput()
+        },
+
+        /**
+         * The `<textarea>` inside the welcome message's `NcTextArea`.
+         *
+         * Handed to the toolbar as a function rather than an element: the
+         * inner `textarea` does not exist until `NcTextArea` has mounted, so a
+         * prop evaluated when this component renders would be null for good.
+         *
+         * @return {?HTMLTextAreaElement}
+         */
+        resolveWelcomeTextarea() {
+            return this.$refs.welcomeMessageField?.$el?.querySelector('textarea') || null
+        },
+
+        /**
          * v4.6.13 — saves on `change` (blur or stepper click) rather than on
          * every keystroke, unlike the debounced text fields above. A number
          * field passes through nonsense on the way to a good value — typing
@@ -5646,6 +6569,27 @@ export default {
          */
         onExpiryWarningDaysInput() {
             this.save()
+        },
+
+        /**
+         * The one sentence every licensed surface says when no license is
+         * honoured (v4.13.58).
+         *
+         * Three tabs carried their own copy of it — Import/Export, My Work and
+         * Compliance — in three hand-rolled banners, and the copies had already
+         * drifted ("Compliance tab requires…" with no article, and one ending
+         * "to unlock them"). One string with a named placeholder means a
+         * translator sees it once and a fourth licensed surface cannot invent a
+         * fourth wording.
+         *
+         * @param {string} feature Already-translated name of the surface, as
+         *   the tab itself calls it.
+         * @return {string} The notice.
+         */
+        licenseRequiredNotice(feature) {
+            // TRANSLATORS: {feature} is the name of a licensed part of TeamHub,
+            // e.g. "My Work" or "Bulk team export"
+            return this.t('teamhub', '{feature} requires an active TeamHub license. Add or renew a license in the License tab to unlock it.', { feature })
         },
 
         /** Is this row's (i) explanation open? (v4.11.33) */
@@ -5843,6 +6787,75 @@ export default {
             this.save()
         },
 
+        // ── TeamHub's own OpenProject connection (v4.13.5) ───────────────
+        // Its own two endpoints rather than part of the settings blob, so
+        // the client secret is only ever sent when an administrator asks
+        // for it to be, and is never sent back.
+        async loadOpenProjectConnection() {
+            this.opConnLoading = true
+            try {
+                const { data } = await axios.get(generateUrl('/apps/teamhub/api/v1/admin/openproject/connection'))
+                this.applyOpenProjectConnection(data)
+            } catch (e) {
+                // Not fatal to the tab: the rest of Integrations still
+                // works, and the block simply stays empty.
+                console.error('[TeamHub][AdminSettings] Could not load the OpenProject connection', e)
+            } finally {
+                this.opConnLoading = false
+            }
+        },
+
+        applyOpenProjectConnection(data) {
+            this.opConn.url = data?.url || ''
+            this.opConn.authMethod = data?.authMethod === 'oidc' ? 'oidc' : 'oauth2'
+            this.opConn.clientId = data?.clientId || ''
+            this.opConn.clientSecretSet = !!data?.clientSecretSet
+            this.opConn.configured = !!data?.configured
+            this.opConn.redirectUri = data?.redirectUri || ''
+            this.opConn.scope = data?.scope || 'api_v3'
+            this.opConn.ssoProvider = data?.ssoProvider === 'nextcloud_hub' ? 'nextcloud_hub' : 'external'
+            this.opConn.tokenExchange = !!data?.tokenExchange
+            this.opConn.audience = data?.audience || ''
+            this.opConn.oidcAvailable = !!data?.oidcAvailable
+            // Never keep a typed secret in the component after a save: the
+            // field going back to its placeholder is what tells the
+            // administrator the value was taken.
+            this.opConn.clientSecret = ''
+        },
+
+        async saveOpenProjectConnection() {
+            this.opConnSaving = true
+            try {
+                const payload = {
+                    url: this.opConn.url.trim(),
+                    authMethod: this.opConn.authMethod,
+                    clientId: this.opConn.clientId.trim(),
+                    // v4.13.8 — sent whichever method is selected, so
+                    // switching to OIDC and back does not lose what was
+                    // typed. The server stores both sets regardless.
+                    ssoProvider: this.opConn.ssoProvider,
+                    tokenExchange: this.opConn.tokenExchange,
+                    audience: this.opConn.audience.trim(),
+                }
+                // An untouched field means "keep the stored secret"; the
+                // server treats an absent key that way and an empty string
+                // as "clear it", so the two must not be conflated here.
+                if (this.opConn.clientSecret !== '') {
+                    payload.clientSecret = this.opConn.clientSecret
+                }
+                const { data } = await axios.post(
+                    generateUrl('/apps/teamhub/api/v1/admin/openproject/connection'),
+                    payload,
+                )
+                this.applyOpenProjectConnection(data)
+                showSuccess(this.t('teamhub', 'OpenProject connection saved'))
+            } catch (e) {
+                showError(e?.response?.data?.error || this.t('teamhub', 'Could not save the OpenProject connection'))
+            } finally {
+                this.opConnSaving = false
+            }
+        },
+
         // ── Telling people apart (v4.10.7) ───────────────────────────────
         // The seven fields PersonSublineService knows. Labels are the words
         // Nextcloud's own profile page uses for the same fields.
@@ -5860,11 +6873,11 @@ export default {
         },
         sublineFieldHint(field) {
             switch (field) {
-            case 'role':         return this.t('teamhub', 'From the profile — "Controller", "Team lead"')
-            case 'organisation': return this.t('teamhub', 'From the profile — the company or the department, whichever the profile holds')
-            case 'headline':     return this.t('teamhub', 'From the profile — the one-line headline')
+            case 'role':         return this.t('teamhub', 'From the profile: "Controller", "Team lead"')
+            case 'organisation': return this.t('teamhub', 'From the profile: the company or the department, whichever the profile holds')
+            case 'headline':     return this.t('teamhub', 'From the profile: the one-line headline')
             case 'manager':      return this.t('teamhub', 'The manager set on the account, by name')
-            case 'groups':       return this.t('teamhub', 'Up to three of the groups the person is in — in many directories these are the departments. Visible to everyone who can search')
+            case 'groups':       return this.t('teamhub', 'Up to three of the groups the person is in: in many directories these are the departments. Visible to everyone who can search')
             case 'email':        return this.t('teamhub', 'The account email address')
             case 'uid':          return this.t('teamhub', 'The account name used to log in')
             default:             return ''
@@ -5896,10 +6909,12 @@ export default {
 
             const params = new URLSearchParams()
             params.set('wizardDescription',    this.form.wizardDescription)
+            params.set('welcomeMessage',       this.form.welcomeMessage)
             params.set('intravoxParentPath',   this.form.intravoxParentPath)
             params.set('createTeamGroup',      groupIds)
             params.set('pinMinLevel',          this.form.pinMinLevel)
             params.set('inviteTypes',          types.join(','))
+            params.set('federatedTeamsEnabled', this.form.federatedTeamsEnabled ? '1' : '0')
             params.set('personSublineFields',  this.sublineFields.join(','))
             params.set('presenceModuleEnabled',  this.form.presenceModuleEnabled ? '1' : '0')
             params.set('decisionsModuleEnabled', this.form.decisionsModuleEnabled ? '1' : '0')
@@ -5983,7 +6998,7 @@ export default {
          * additions that don't fit force a review of the group definition.
          */
         formatTelemetryScalar(value) {
-            if (value === null || value === undefined) return '—'
+            if (value === null || value === undefined) return 'Not set'
             if (typeof value === 'boolean') {
                 return value ? this.t('teamhub', 'Yes') : this.t('teamhub', 'No')
             }
@@ -6090,7 +7105,7 @@ export default {
                 return this.t('teamhub', 'No expiration date. Click to set one.')
             }
             if (team.expiry.expired) {
-                return this.t('teamhub', 'This date has passed. The team still works normally — nothing is deleted automatically. Click to set a new date.')
+                return this.t('teamhub', 'This date has passed. The team still works normally. Nothing is deleted automatically. Click to set a new date.')
             }
             return this.n('teamhub',
                 'Expires in {n} day. Click to change or clear the date.',
@@ -6287,10 +7302,10 @@ export default {
         /**
          * Format a MySQL datetime string (e.g. "2024-03-15 14:22:00") or ISO
          * string as a localised short date. Also tolerates a numeric Unix
-         * timestamp (seconds) as a fallback. Returns '—' when value is empty.
+         * timestamp (seconds) as a fallback. Returns 'Not set' when value is empty.
          */
         formatDate(value) {
-            if (!value && value !== 0) return '—'
+            if (!value && value !== 0) return 'Not set'
             try {
                 let d
                 if (typeof value === 'number' || /^\d+$/.test(String(value))) {
@@ -6300,10 +7315,10 @@ export default {
                     // "YYYY-MM-DD HH:MM:SS" → make it ISO-parseable
                     d = new Date(String(value).replace(' ', 'T'))
                 }
-                if (isNaN(d.getTime())) return '—'
+                if (isNaN(d.getTime())) return 'Not set'
                 return fmtDate(d, { year: 'numeric', month: 'short', day: 'numeric' })
             } catch (e) {
-                return '—'
+                return 'Not set'
             }
         },
 
@@ -6790,6 +7805,38 @@ export default {
             }
         },
 
+        /**
+         * v4.14.7 - give the team's member rows ids Nextcloud Teams accepts.
+         *
+         * The count comes back from the server rather than being assumed from
+         * the row: `invalid_count` was read when the check ran, and a team can
+         * gain or lose a member between the scan and the click.
+         */
+        async repairInvalidMemberIds(issue) {
+            const key = issue.id + '_memberids'
+            this.membershipRepairing[key] = true
+            try {
+                const { data } = await axios.post(
+                    generateUrl(`/apps/teamhub/api/v1/admin/maintenance/repair-member-ids/${issue.id}`)
+                )
+                this.membershipCheck.issues = this.membershipCheck.issues.filter(
+                    i => !(i.id === issue.id && i.issue_type === 'invalid_member_id')
+                )
+                this.membershipCheck.mismatched = this.membershipCheck.issues.length
+                const repaired = data?.repaired ?? 0
+                showSuccess(this.n('teamhub',
+                    '{n} member row repaired. The team can be shared with another server again.',
+                    '{n} member rows repaired. The team can be shared with another server again.',
+                    repaired, { n: repaired }))
+            } catch (e) {
+                showError(this.t('teamhub', 'Failed to repair member ids: {error}', {
+                    error: e?.response?.data?.error || e.message,
+                }))
+            } finally {
+                this.membershipRepairing[key] = false
+            }
+        },
+
         async clearCfgSingle(issue) {
             const key = issue.id + '_cfgsingle'
             this.membershipRepairing[key] = true
@@ -6929,6 +7976,11 @@ export default {
                 const { data } = await axios.get(generateUrl('/apps/teamhub/api/v1/admin/compliance/summary'))
                 this.complianceSummary.report = data
                 this.complianceSummary.loaded = true
+                // v4.13.16 — the audit chain's cheap half rides this payload.
+                // A fresh summary supersedes a verification from earlier in the
+                // session, because the chain has moved on since.
+                this.auditIntegrity.summary = data.audit_integrity || null
+                this.auditIntegrity.report = null
             } catch (e) {
                 this.complianceSummary.error = e?.response?.data?.error
                     || e?.message
@@ -6936,6 +7988,84 @@ export default {
             } finally {
                 this.complianceSummary.loading = false
             }
+        },
+
+        /**
+         * v4.13.16 — re-hash the audit trail and report (DESIGN §2.191).
+         *
+         * A button rather than part of the tab's fetch: it re-hashes up to
+         * 50,000 rows, and a Compliance tab that did that on every open would
+         * be a Compliance tab nobody opens.
+         */
+        async verifyAuditIntegrity() {
+            this.auditIntegrity.verifying = true
+            try {
+                const { data } = await axios.get(generateUrl('/apps/teamhub/api/v1/admin/audit/integrity'))
+                this.auditIntegrity.report = data
+                if (data.verdict === 'broken') {
+                    showError(this.t('teamhub', 'The audit trail no longer reconciles. See the details beside the row.'))
+                } else if (data.verdict === 'ok') {
+                    showSuccess(this.t('teamhub', 'The audit trail reconciles'))
+                }
+            } catch (e) {
+                showError(e?.response?.data?.error || this.t('teamhub', 'Could not verify the audit trail'))
+            } finally {
+                this.auditIntegrity.verifying = false
+            }
+        },
+
+        /**
+         * v4.13.16 — the integrations register (DESIGN §2.194). Read-only, and
+         * loaded with the Compliance tab rather than on mount: it is an
+         * auditor's artefact, not a first-tab fact.
+         */
+        async loadIntegrationRegister() {
+            this.integrationRegister.loading = true
+            this.integrationRegister.error = null
+            try {
+                const { data } = await axios.get(generateUrl('/apps/teamhub/api/v1/admin/integrations/register'))
+                this.integrationRegister.rows = Array.isArray(data.rows) ? data.rows : []
+                this.integrationRegister.hosts = Array.isArray(data.hosts) ? data.hosts : []
+                this.integrationRegister.loaded = true
+            } catch (e) {
+                this.integrationRegister.error = e?.response?.data?.error
+                    || this.t('teamhub', 'Could not build the integrations register.')
+            } finally {
+                this.integrationRegister.loading = false
+            }
+        },
+
+        /** Which teams use one integration. Fetched the first time it is opened. */
+        async toggleIntegrationDetail(appId) {
+            if (this.integrationRegister.expanded === appId) {
+                this.integrationRegister.expanded = ''
+                return
+            }
+            this.integrationRegister.expanded = appId
+            if (this.integrationRegister.detail[appId]) {
+                return
+            }
+            try {
+                const { data } = await axios.get(
+                    generateUrl('/apps/teamhub/api/v1/admin/integrations/register/' + encodeURIComponent(appId))
+                )
+                this.integrationRegister.detail = {
+                    ...this.integrationRegister.detail,
+                    [appId]: Array.isArray(data.teams) ? data.teams : [],
+                }
+            } catch (e) {
+                this.integrationRegister.detail = { ...this.integrationRegister.detail, [appId]: [] }
+            }
+        },
+
+        /**
+         * An epoch-seconds timestamp as a date, or an em dash when there is
+         * none. Delegates to this page's own `formatDate()`, which already
+         * takes seconds — the imported `formatDate` from localDate.js takes
+         * milliseconds, and mixing the two is a four-hundred-century bug.
+         */
+        registerDate(secs) {
+            return secs ? this.formatDate(secs) : 'Not set'
         },
 
         /**
@@ -6962,8 +8092,8 @@ export default {
         profileChipAria(team) {
             const label = this.profileChipLabel(team)
             return team.classification.compliant
-                ? this.t('teamhub', '{profile} — settings match this profile', { profile: label })
-                : this.t('teamhub', '{profile} — settings no longer match this profile', { profile: label })
+                ? this.t('teamhub', '{profile}: settings match this profile', { profile: label })
+                : this.t('teamhub', '{profile}: settings no longer match this profile', { profile: label })
         },
         // The drift dialog names each setting from its key. Exposed as a method
         // because a Vue 3 Options-API template can only reach `methods`,
@@ -7062,7 +8192,7 @@ export default {
                 // a team that is about to show a red chip.
                 const stuck = (data.notApplied || []).length
                 if (stuck) {
-                    showError(this.n('teamhub', 'Profile applied. {n} setting could not be changed and is reported instead — see the team’s profile chip.', 'Profile applied. {n} settings could not be changed and are reported instead — see the team’s profile chip.', stuck, { n: stuck }))
+                    showError(this.n('teamhub', 'Profile applied. {n} setting could not be changed and is reported instead. See the team’s profile chip.', 'Profile applied. {n} settings could not be changed and are reported instead. See the team’s profile chip.', stuck, { n: stuck }))
                 } else {
                     showSuccess(this.t('teamhub', 'Profile applied to {team}.', { team: this.assignPolicyTeam.name }))
                 }
@@ -7138,7 +8268,7 @@ export default {
                 return label || value
             }
             if (Array.isArray(value)) {
-                return value.length ? value.map(appLabel).join(', ') : '—'
+                return value.length ? value.map(appLabel).join(', ') : 'Not set'
             }
             return value ? this.t('teamhub', 'On') : this.t('teamhub', 'Off')
         },
@@ -7166,6 +8296,25 @@ export default {
                     || this.t('teamhub', 'Could not load the policy summary.')
             } finally {
                 this.policySummary.loading = false
+            }
+        },
+
+        /**
+         * v4.13.16 — the Nextcloud Teams frontend switch, read for the setup
+         * checklist. The Policy tab reads the same endpoint and owns the
+         * writing; this page never writes it, so there is no state to keep in
+         * step between the two.
+         */
+        async loadTeamsFrontend() {
+            this.teamsFrontend.error = null
+            try {
+                const { data } = await axios.get(generateUrl('/apps/teamhub/api/v1/admin/policy/teams-frontend'))
+                this.teamsFrontend.report = data
+                this.teamsFrontend.loaded = true
+            } catch (e) {
+                this.teamsFrontend.error = e?.response?.data?.error
+                    || e?.message
+                    || this.t('teamhub', 'Could not read the Teams app frontend setting.')
             }
         },
 
@@ -7625,7 +8774,7 @@ export default {
             if (teamId === this.auditInstanceScopeId) {
                 return this.t('teamhub', 'Not about one team')
             }
-            return ev?.team_name || teamId || '—'
+            return ev?.team_name || teamId || 'Not set'
         },
 
         resetAndLoadAuditEvents() {
@@ -7838,7 +8987,7 @@ export default {
         },
 
         formatBytes(bytes) {
-            if (!bytes || bytes === 0) return '—'
+            if (!bytes || bytes === 0) return 'Not set'
             if (bytes < 1024) return bytes + ' B'
             if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB'
             if (bytes < 1073741824) return (bytes / 1048576).toFixed(1) + ' MB'
@@ -7850,10 +8999,10 @@ export default {
          * Used by the archive table (archivedAt is a Unix timestamp integer).
          */
         formatUnixDate(unixTs) {
-            if (!unixTs) return '—'
+            if (!unixTs) return 'Not set'
             return fmtDate(unixTs * 1000, {
                 year: 'numeric', month: 'short', day: 'numeric',
-            }) || '—'
+            }) || 'Not set'
         },
 
         // ── v3.100.0 Licensing methods ──────────────────────────────
@@ -7908,10 +9057,39 @@ export default {
 </script>
 
 <style scoped>
+/* Shared dialog and maintenance layout styles use Nextcloud tokens. */
+.maint-divider--separated, .admin-section-head--separated { margin-top: 40px; }
+.admin-dialog__paragraph { margin: 0 0 8px; }
+.admin-dialog__paragraph--muted { margin: 0; color: var(--color-text-maxcontrast); }
+
 /* ── Wrapper ─────────────────────────────────────────────────────────────── */
+/* v4.13.58 — one left edge for the whole panel, wide enough to clear
+   Nextcloud's own navigation-toggle button. That button is absolutely
+   positioned over the top-left of the settings content whenever the settings
+   navigation is closed, and it was landing on the first tab of the tab bar and
+   on the hand-built headers of the Maintenance, Services and Policy tabs,
+   which carried no inline padding at all. The clearance lives here, once, so
+   it covers every tab rather than the three that happened to be reported.
+   The width is the button's own (`--default-clickable-area`) plus a block of
+   space, not a guessed number: the button's width alone measured right and
+   still overlapped on the instance, because Nextcloud offsets it from the
+   content edge by its own navigation padding and its icon has no inset of its
+   own. One token of gap past it is what reads as clear. */
 .teamhub-admin {
     display: flex;
     flex-direction: column;
+    box-sizing: border-box;
+    padding-inline: calc(var(--default-clickable-area) + var(--th-space-xl)) var(--th-space-lg);
+}
+
+/* NcSettingsSection carries its own 28px inline margin, which put a section on
+   one tab 28px further in than a hand-built header on another. With the
+   clearance on the wrapper the margin is double padding and a visible
+   misalignment between tabs, so the sections give it up and keep their block
+   margin. (0,3,0) here against the component's own (0,2,0) — no `!important`. */
+.teamhub-admin :deep(.settings-section) {
+    margin-inline: 0;
+    width: min(900px, 100%);
 }
 
 /* ── Tab bar ─────────────────────────────────────────────────────────────────
@@ -7923,7 +9101,10 @@ export default {
     display: flex;
     flex-wrap: wrap;
     gap: 0;                                  /* tabs butt directly together */
-    padding: 0 16px;
+    /* v4.13.58 — the inline padding moved to the wrapper, which clears the
+       navigation-toggle button for every tab at once. Keeping 16px here as
+       well would offset the first tab from the panel content below it. */
+    padding: 0;
     border-bottom: 1px solid var(--color-border);
     margin-bottom: 16px;
 }
@@ -8015,6 +9196,15 @@ export default {
     padding-top: 8px;
 }
 
+/* v4.13.58 — for a panel whose content used to sit inside an
+   `NcSettingsSection` and so inherited that component's 900px measure. The
+   License tab is the one: without this its key textarea, which is `width:
+   100%`, stretches the full width of a wide screen. Not on every panel,
+   because the Maintenance tab's grid is full-width on purpose. */
+.teamhub-admin-panel--measured {
+    max-width: 900px;
+}
+
 /* ── Group chips ─────────────────────────────────────────────────────────── */
 .admin-group-chips {
     display: flex;
@@ -8093,6 +9283,25 @@ export default {
     gap: 4px 24px;
     margin-top: 4px;
 }
+/* v4.20.0 — a checkbox with an (i) beside it and its hint below, as one grid
+   cell. The (i) is centred on the checkbox's first line, which is one
+   clickable area tall. */
+.admin-invite-types__row {
+    display: flex;
+    align-items: flex-start;
+}
+.admin-invite-types__info {
+    flex: 0 0 auto;
+    margin-block-start: calc((var(--default-clickable-area) - var(--th-icon-body)) / 2);
+}
+.admin-invite-types__hint {
+    margin: 0;
+    padding: var(--th-space-sm) var(--th-space-md);
+    border-radius: var(--th-radius-card);
+    background: var(--color-background-hover);
+    font-size: var(--th-font-meta);
+    color: var(--color-main-text);
+}
 
 /* ── Compact setting rows (v4.4.13) ──────────────────────────────────────
    Name + description on the left, control on the right. Replaces the
@@ -8125,7 +9334,12 @@ export default {
    settings page inherit the ~15 px base font, so setting a smaller size
    just to be compact made this tab read as demoted. Weight and colour
    still distinguish name from description. */
+/* v4.13.58 — inline-flex so the (i) beside the name sits on the name's own
+   centre line rather than on the text baseline, which left it a pixel or two
+   low against a 20px circle. */
 .admin-compact-row__name {
+    display: inline-flex;
+    align-items: center;
     font-weight: var(--th-font-weight-semibold);
 }
 .admin-compact-row__desc {
@@ -8140,6 +9354,41 @@ export default {
     width: 260px;
     max-width: 40%;
 }
+/* v4.13.5 — TeamHub's own OpenProject connection. A block rather than a
+   compact row: three fields, a generated redirect URI and a save button do
+   not fit the one-control-on-the-right grammar. Spacing from the 4px grid,
+   radius and colour from NC's tokens — no new px, no new hex. */
+.admin-op-conn {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px;
+    margin-block-end: 16px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius-container);
+    background-color: var(--color-background-hover);
+}
+.admin-op-conn__head {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.admin-op-conn__grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 12px;
+}
+.admin-op-conn__redirect {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.admin-op-conn__actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
 /* v4.8.31 — a row whose state is derived rather than set. Deliberately not a
    disabled switch: a greyed toggle invites an administrator to look for the
    permission that would let them flip it, when there is no such permission and
@@ -8150,6 +9399,64 @@ export default {
     align-self: center;
     white-space: nowrap;
 }
+/* v4.13.16 — the integrations register. A plain table: the register is read
+   down a column (which system, how many teams) and a card list would hide
+   exactly that comparison. Tokens only, no raw px. */
+.th-register {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: var(--th-space-sm);
+}
+.th-register th,
+.th-register td {
+    text-align: start;
+    padding: var(--th-space-sm);
+    border-bottom: 1px solid var(--color-border);
+    vertical-align: middle;
+}
+.th-register th {
+    font-weight: var(--th-font-weight-semibold);
+    color: var(--color-text-maxcontrast);
+    font-size: var(--th-font-meta);
+}
+.th-register__name {
+    font-weight: var(--th-font-weight-semibold);
+    margin-inline-end: var(--th-space-sm);
+}
+.th-register__meta {
+    color: var(--color-text-maxcontrast);
+    font-size: var(--th-font-meta);
+}
+.th-register__teams {
+    display: flex;
+    flex-direction: column;
+    gap: var(--th-space-xs);
+    margin: 0;
+    padding-inline-start: var(--th-space-lg);
+}
+.th-register__hosts {
+    display: flex;
+    flex-direction: column;
+    gap: var(--th-space-xs);
+    margin-top: var(--th-space-lg);
+    padding: 0;
+    list-style: none;
+}
+.th-register__hosts li {
+    display: flex;
+    gap: var(--th-space-sm);
+    align-items: baseline;
+}
+/* Visually hidden, still announced — the expand column has no visible header. */
+.th-register__sr {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+}
+
 /* Narrow panes: stack the control under the text rather than squeezing
    both into a column each. */
 @media (max-width: 700px) {
@@ -8205,100 +9512,6 @@ export default {
     cursor: pointer;
 }
 
-/* ── Integrations list ───────────────────────────────────────────────────── */
-.admin-integrations-loading,
-.admin-integrations-error,
-.admin-integrations-empty {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: var(--th-font-body);
-    color: var(--color-text-maxcontrast);
-    padding: 8px 0;
-}
-
-.admin-integrations-error { color: var(--color-text-error); }
-
-.admin-integrations-list {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    margin-top: 4px;
-}
-
-.admin-integration-row {
-    padding: var(--th-space-md) var(--th-space-lg);
-    border: 1px solid var(--color-border);
-    border-radius: var(--th-radius-card);
-    background: var(--color-main-background);
-}
-
-.admin-integration-row__body {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-}
-
-.admin-integration-row__header {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
-}
-
-/* App icon — inline before the title, same size as a small avatar */
-.admin-integration-row__icon {
-    width: 22px;
-    height: 22px;
-    object-fit: contain;
-    flex-shrink: 0;
-}
-
-.admin-integration-row__title {
-    font-size: var(--th-font-body);
-    font-weight: 600;
-}
-
-.admin-integration-row__appid {
-    font-size: var(--th-font-meta);
-    color: var(--color-text-maxcontrast);
-    font-family: monospace;
-}
-
-.admin-integration-row__desc {
-    font-size: var(--th-font-meta);
-    color: var(--color-text-maxcontrast);
-}
-
-.admin-integration-row__urls {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    font-size: var(--th-font-meta);
-    color: var(--color-text-maxcontrast);
-    word-break: break-all;
-}
-
-.admin-integration-row__badge {
-    display: inline-block;
-    font-size: var(--th-font-meta);
-    font-weight: 600;
-    border-radius: var(--border-radius-pill);
-    padding: 1px 8px;
-}
-
-/* v3.100.14: full-saturation category badges per SKILLS.md
-   (were 15% color-mix() soft tints). */
-.admin-integration-row__badge--widget {
-    background: var(--color-primary-element);
-    color: var(--color-primary-element-text);
-}
-
-.admin-integration-row__badge--menu_item,
-.admin-integration-row__badge--tab {
-    background: var(--color-success);
-    color: var(--color-success-text);
-}
 /* v4.6.2 — .admin-save-row and .admin-save-ok went with the shared Save row.
    .admin-save-err stays: it is still the error style for the integrity panel,
    the audit team/event lists and the license key field. */
@@ -8460,18 +9673,37 @@ export default {
 }
 
 /* ── Header (replaces NcSettingsSection title) ───────────────────── */
-.maint-header {
+/* v4.13.58 — renamed from `.maint-header`. It read as belonging to one tab,
+   which invited the next hand-built header to invent its own numbers; the
+   License tab needed one too, because its title now carries an (i) and
+   `NcSettingsSection`'s `name` prop has nowhere to put it. 20px/700 is what
+   that component's own `h2` renders at, so a section heading is the same
+   height on every tab whether the section is NC's or ours. */
+.admin-section-head {
     margin-bottom: 16px;
 }
 
-.maint-header__title {
+/* With something beside the title (the License tab's (i)). */
+.admin-section-head--inline {
+    display: flex;
+    align-items: center;
+    gap: var(--th-space-xs);
+}
+
+.admin-section-head__title {
     font-size: var(--th-font-heading-lg);
-    font-weight: 700;
+    font-weight: var(--th-font-weight-bold);
     margin: 0 0 4px;
     color: var(--color-main-text);
 }
 
-.maint-header__desc {
+/* No bottom margin in the inline row: the gap is horizontal there, and the
+   4px below the title would push it off the (i)'s centre line. */
+.admin-section-head--inline .admin-section-head__title {
+    margin-block-end: 0;
+}
+
+.admin-section-head__desc {
     font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
     margin: 0;
@@ -9109,6 +10341,18 @@ a.maint-op-link__name:focus-visible {
     display: flex;
     flex-direction: column;
     gap: var(--th-space-xs);
+}
+
+/* v4.13.58 — both options read as bold. Not ours: NcCheckboxRadioSwitch sets
+   `font-weight: var(--font-weight-element)` on its own root and NC's theme
+   resolves that token to 500, so the component's own `normal` fallback never
+   applies on a real server (the same trap as `li.action .action-text` in
+   `widget-tokens.css` and `.manage-settings-group` in `ManageTeamView.vue`).
+   The weight belongs to the row label in column one, not to the option being
+   picked. Set on the component root so it covers the label text without this
+   file needing to know the component's internal class names. */
+.admin-idp__checks :deep(.checkbox-radio-switch) {
+    font-weight: var(--th-font-weight-regular);
 }
 
 /* ── Membership integrity ─────────────────────────────────────────── */
@@ -10002,13 +11246,32 @@ a.maint-op-link__name:focus-visible {
     gap: 4px;
     flex: 0 0 auto;
 }
-.compliance-row__refresh-slot {
-    width: 44px;
-    height: 44px;
+/* v4.13.17 - the i triggers across the grid did not line up.
+   Each row ends in two controls: the info popover's trigger and either a
+   refresh button or an empty placeholder. The placeholder was a fixed 44px box
+   and the NcActions trigger was not, so its width followed the component's own
+   padding and every row put its i a few pixels somewhere else. One declared
+   size for both boxes fixes it, and `--th-compliance-slot` exists so the two
+   can never drift apart again - which is exactly how this broke. */
+.compliance-row__actions {
+    --th-compliance-slot: 44px;
+}
+.compliance-row__actions :deep(.action-item) {
+    flex: 0 0 var(--th-compliance-slot);
+    box-sizing: border-box;
+    width: var(--th-compliance-slot);
+    height: var(--th-compliance-slot);
     display: flex;
     align-items: center;
     justify-content: center;
-    flex: 0 0 44px;
+}
+.compliance-row__refresh-slot {
+    width: var(--th-compliance-slot, 44px);
+    height: var(--th-compliance-slot, 44px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 var(--th-compliance-slot, 44px);
 }
 .integrity-pill--warn {
     background: var(--color-warning);
@@ -10083,22 +11346,9 @@ a.maint-op-link__name:focus-visible {
     margin: 0;
     word-break: break-word;
 }
-.integrity-banner {
-    display: flex;
-    align-items: flex-start;
-    gap: 8px;
-    padding: 8px 12px;
-    border-radius: var(--th-radius-card, 10px);
-    font-size: var(--th-font-body);
-}
-.integrity-banner--info {
-    background: var(--color-info);
-    color: var(--color-info-text);
-}
-.integrity-banner--err {
-    background: var(--color-error);
-    color: var(--color-error-text);
-}
+/* v4.13.58 — `.integrity-banner` and its two modifiers were removed with the
+   last markup that used them: the three "needs a license" banners are
+   NcNoteCards now (see the note beside the Bulk team export one). */
 .integrity-list summary {
     cursor: pointer;
     padding: 8px 0;
@@ -10201,7 +11451,8 @@ a.maint-op-link__name:focus-visible {
     font-weight: 600;
 }
 .license-uuid,
-.license-key-row {
+.license-key-row,
+.license-report {
     margin: var(--th-space-lg) 0;
     padding: var(--th-space-md) var(--th-space-lg);
     border: 1px solid var(--color-border);
@@ -10209,7 +11460,8 @@ a.maint-op-link__name:focus-visible {
     background: var(--color-main-background);
 }
 .license-uuid__label,
-.license-key-row__label {
+.license-key-row__label,
+.license-report__label {
     display: block;
     font-weight: 600;
     margin-bottom: 8px;
@@ -10229,7 +11481,8 @@ a.maint-op-link__name:focus-visible {
     font-size: var(--th-font-meta);
     word-break: break-all;
 }
-.license-uuid__hint {
+.license-uuid__hint,
+.license-report__hint {
     margin: 8px 0 0;
     font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
@@ -10246,106 +11499,33 @@ a.maint-op-link__name:focus-visible {
 .license-key-row__actions {
     display: flex;
     align-items: center;
+    /* v4.13.58 — two buttons here now (Save license key, Request a quote), so
+       they wrap rather than squeeze on a narrow pane. */
+    flex-wrap: wrap;
     gap: 12px;
     margin-top: 8px;
 }
-.license-links {
-    display: flex;
-    gap: 16px;
-    margin-top: 12px;
-    font-size: var(--th-font-body);
-}
-.license-links a {
-    color: var(--color-primary-element);
-    text-decoration: none;
-}
-.license-links a:hover {
-    text-decoration: underline;
-}
-/* v3.100.2 — button styled to sit visually next to the "Buy" link but
-   read as an action. Disabled when a license is already installed. */
-.license-trial-button {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    color: var(--color-primary-element);
-    background: transparent;
-    border: 0;
-    padding: 0;
-    font: inherit;
-    cursor: pointer;
-}
-.license-trial-button:hover:not(:disabled) {
-    text-decoration: underline;
-}
-.license-trial-button:disabled {
-    color: var(--color-text-maxcontrast);
-    cursor: not-allowed;
-}
-/* mailto affordance: same visual weight as the anchor links in
-   .license-links so the three actions read as siblings, not primary +
-   secondary. */
-.license-trial-mailto {
-    color: var(--color-primary-element);
-    text-decoration: none;
-}
-.license-trial-mailto:hover { text-decoration: underline; }
-.license-trial-hint {
-    margin-top: 4px;
-    font-size: var(--th-font-meta);
-    color: var(--color-text-maxcontrast);
-}
+/* v4.13.58 — `.license-links`, `.license-trial-button`, `.license-trial-mailto`,
+   `.license-trial-hint` and the whole `.license-pitch` block went with the
+   markup that used them: the two bottom links and the licence pitch are gone,
+   and *Request a quote* is an NcButton in the key row now, which brings its own
+   styling. `.license-trial-button` had already outlived its template before
+   this — nothing had rendered it since v4.10.0. */
 
-/* v4.10.0 — the case for a licence, unlicensed instances only. A quiet card
-   (the same ground the info banner uses) so it reads as information beside
-   the status pill, not as an alert; the one primary button on the tab is the
-   quote request, which is the action we want from an unlicensed admin. */
-.license-pitch {
-    margin-top: var(--th-space-md);
-    padding: var(--th-space-md) var(--th-space-lg);
-    border: 1px solid var(--color-border);
-    border-radius: var(--th-radius-card);
-    background: var(--color-main-background);
-}
-.license-pitch__title {
-    margin: 0 0 var(--th-space-sm);
-    font-size: var(--th-font-heading);
-    font-weight: var(--th-font-weight-bold);
-}
-.license-pitch__list {
-    margin: 0;
+/* What the (i) beside the tab's title opens: four lines on what a licence
+   adds. A plain list on the page's own ground, not a card — it is reference an
+   administrator asked for, so it does not need a frame to be noticed. */
+.license-adds {
+    margin: 0 0 var(--th-space-md);
     padding-inline-start: var(--th-space-lg);
     font-size: var(--th-font-body);
 }
-.license-pitch__list li {
+.license-adds li {
     margin-bottom: var(--th-space-xs);
 }
-/* The label and its sentence sit on one line; the dash between them is an
-   aria-hidden span in the template — a layout glyph, not a word — so a
-   translator never has to place it. */
-.license-pitch__sep {
-    margin: 0 var(--th-space-xxs);
-    color: var(--color-text-maxcontrast);
-}
-.license-pitch__actions {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: var(--th-space-md);
-    margin-top: var(--th-space-md);
-}
-/* The plain link only. NcButton with `href` renders as an <a> too, and a bare
-   `a` selector here painted its label in the primary colour on the primary
-   fill — the button read as an empty pill (Justin, 2026-09-18). */
-.license-pitch__link {
-    color: var(--color-primary-element);
-    text-decoration: none;
-}
-.license-pitch__link:hover,
-.license-pitch__link:focus-visible {
-    text-decoration: underline;
-}
-.license-pitch__hint {
+
+/* The quote button's one sentence, under the key row's action pair. */
+.license-key-row__hint {
     margin: var(--th-space-xs) 0 0;
     font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
@@ -10354,6 +11534,28 @@ a.maint-op-link__name:focus-visible {
 /* Seat-overage banner. Sits directly under the status pill so it's the
    first thing an admin sees on the tab. Warn = orange tint; lock =
    red tint. Both keep enough contrast on dark theme via NC vars. */
+/* v4.13.30 — Member reporting. The box, its label and its hint reuse the
+   declarations above; only these two are its own. */
+.license-report__actions {
+    display: flex;
+    align-items: center;
+    gap: var(--th-space-sm);
+    flex-wrap: wrap;
+    margin-top: var(--th-space-md);
+}
+.license-report__payload {
+    margin: var(--th-space-md) 0 0;
+    padding: var(--th-space-md);
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius-small);
+    background: var(--color-background-hover);
+    color: var(--color-main-text);
+    font-family: monospace;
+    font-size: var(--th-font-meta);
+    white-space: pre-wrap;
+    word-break: break-all;
+    overflow-x: auto;
+}
 .license-seat-banner {
     display: flex;
     flex-direction: column;

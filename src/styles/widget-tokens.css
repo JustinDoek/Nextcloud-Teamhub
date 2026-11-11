@@ -186,6 +186,60 @@
        by side, narrow enough that a line of help text stays readable. */
     --th-page-width: calc(240 * var(--default-grid-baseline));
 
+    /* v4.13.26 — the height a blank-canvas widget's iframe gets on a surface
+       that cannot give it one. An iframe has no content to size to: where
+       nothing above it is definite it falls back to its intrinsic 150px,
+       which is what the tablet stack and the mobile canvas were handing the
+       embedded page. The desktop grid needs no value here — a grid row count
+       is already a height. A token rather than a scoped px because it is the
+       same decision on both of those surfaces and the embedded page lays
+       itself out against it. */
+    --th-canvas-frame-height: calc(96 * var(--default-grid-baseline));   /* 384px */
+
+    /* ── Team banner (v4.13.1) ──────────────────────────────────────────
+     * The wide picture between the tab bar and the team's content. The
+     * height is a token rather than a scoped px because the banner sits in
+     * a fixed-height column: every pixel here is a pixel the tab below it
+     * (an embedded Files or Talk iframe) does not get, so the value is a
+     * layout decision and belongs where it can be seen and changed once.
+     *
+     * v4.13.60 — Justin: the strip was about 50px short. The grid baseline
+     * is 4px and this token is a multiple of it, so 50 is not a value it
+     * can take: 12 baselines (48px) is the nearest step and 44 → 56 is the
+     * whole change. The compact one grows by the same 12, because the
+     * reason for the two values is the viewport, not the design — if one
+     * strip was short the other was shorter.
+     */
+    --th-banner-height:         calc(56 * var(--default-grid-baseline));   /* 224px */
+    --th-banner-height-compact: calc(40 * var(--default-grid-baseline));   /* 160px — narrow viewports */
+
+    /* The scrim and its ink are NOT theme colours and must not be swapped
+     * for `--color-*` tokens: they sit on top of a photograph the team
+     * uploaded, where neither the light nor the dark theme's background is
+     * what is behind the text. A fixed dark gradient with light ink is the
+     * only pair that stays legible over an arbitrary image in both themes —
+     * the same reasoning every photo-overlay caption uses. This is the
+     * documented exception to "colour from NC --color-* tokens only"
+     * (/ui-standards § Colour), and it is scoped to the banner overlay.
+     */
+    --th-banner-scrim-from: rgba(0, 0, 0, 0);
+    --th-banner-scrim-mid:  rgba(0, 0, 0, 0.35);
+    --th-banner-scrim-to:   rgba(0, 0, 0, 0.78);
+    --th-banner-ink:        #ffffff;
+
+    /* -- Compliment confetti (v4.13.2) -------------------------------------
+     * The five colours the party popup's falling pieces cycle through. They
+     * are aliases of NC's own saturated element colours, not a palette: the
+     * confetti follows the instance's theme, and a themed instance gets its
+     * own primary in the mix. Named here rather than inline because the
+     * pieces are generated in JS, which must not reach for a raw colour.
+     */
+    --th-party-piece-1: var(--color-primary-element);
+    --th-party-piece-2: var(--color-element-success);
+    --th-party-piece-3: var(--color-element-warning);
+    --th-party-piece-4: var(--color-element-info);
+    --th-party-piece-5: var(--color-element-error);
+
     /* Aliases used elsewhere in the codebase.
        v3.100.16: --th-widget-success-strong was defined but had no
        consumers, so it was removed alongside the underlying --th-color-*
@@ -374,4 +428,25 @@
 .modal-mask[role="dialog"] .modal-wrapper .modal-container > .modal-container__content {
     flex: 1 1 auto;
     min-height: 0;
+}
+
+/* ── NcActionText weight (v4.13.17) ──────────────────────────────────────────
+   Every line of every info popover rendered at 500, which reads as bold beside
+   400 body text. It is not ours: `@nextcloud/vue`'s NcActionText sets
+   `font-weight: var(--font-weight-element, normal)` and NC 35's own theme
+   (`apps/theming/lib/Themes/DefaultTheme.php`) defines that token as **500** --
+   so the component's own fallback of `normal` never applies on a real server.
+
+   `li.action .action-text` is (0,2,1) and the component's scoped
+   `.action-text[data-v-…]` is (0,2,0): an attribute selector counts as a class,
+   so a bare `.action-text` here would LOSE and the fix would silently do
+   nothing. The descendant selector is what wins, not the order of the files.
+
+   Global rather than scoped on purpose: the popover is rendered into <body> by
+   the popper, outside the component that opened it, so `:deep()` cannot reach
+   it. This file is loaded by `admin.js`, `main.js` and `personal.js` only --
+   TeamHub's own three pages -- so it cannot restyle another app's menus.
+   `.action-text__name` keeps its heading weight; nothing here uses that slot. */
+li.action .action-text {
+    font-weight: var(--font-weight-default, 400);
 }

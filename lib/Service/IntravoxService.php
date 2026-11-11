@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace OCA\TeamHub\Service;
 
 use OCA\TeamHub\AppInfo\Application;
+use OCA\TeamHub\Service\Intravox\IntravoxPageApi;
 use OCP\App\IAppManager;
 use OCP\ICacheFactory;
 use OCP\IUserSession;
@@ -13,17 +14,23 @@ use Psr\Log\LoggerInterface;
 /**
  * IntravoxService — create and delete IntraVox pages for TeamHub teams.
  *
- * Uses IntraVox's own PageService in-process via NC's DI container.
- * No HTTP calls — avoids the NC28+ loopback block entirely.
+ * Drives IntraVox in-process through NC's DI container. No HTTP calls — avoids
+ * the NC28+ loopback block entirely, and CLAUDE.md forbids calling back into
+ * the same instance in any case.
  *
- * Confirmed IntraVox PageService signatures (from PHP reflection on installed version):
- *   listPages(): array
- *   getPage(string $id): array
- *   createPage(array $data, ?string $parentPath = null): array
- *   deletePage(string $id): void   — $id is the slug, NOT uniqueId
- *   pageExistsByUniqueId(string $uniqueId): bool
- *   createPageFromTemplate(string $templateId, string $pageTitle, ?string $parentPath = null): array
- *   getPageTree(?string $currentPageId = null, ?string $language = null): array
+ * **Which IntraVox classes exist, and what they are called, lives in one place:
+ * `OCA\TeamHub\Service\Intravox\IntravoxPageApi`** (v4.13.55). It is reached
+ * through `pages()` below and is the only thing in TeamHub that names an
+ * `OCA\IntraVox\…` class. IntraVox 3.0.0 deleted the single `PageService`
+ * facade this service used to call directly and split the page engine into one
+ * service per concern, which broke every call site at once; collecting the
+ * names means the next reorganisation costs one file.
+ *
+ * The argument and return shapes IntraVox imposes are unchanged and are still
+ * documented at the call sites that rely on them: `createPage()` ignores
+ * `layout` and must be followed by `updatePage()` (DESIGN §2.38), every
+ * `updatePage()` carries `title`, and a page is identified by path rather than
+ * by title alone (DESIGN §2.41).
  */
 class IntravoxService {
 
@@ -44,13 +51,44 @@ class IntravoxService {
     }
 
     /**
+     * Bind to whichever generation of IntraVox this instance has, or null when
+     * it has none that we can reach.
+     *
+     * Not cached on this object: the binding is one `class_exists()` call, and
+     * a cached null would survive an administrator enabling the app for the
+     * rest of the request.
+     */
+    private function pages(): ?IntravoxPageApi {
+        return IntravoxPageApi::bind($this->container);
+    }
+
+    /**
      * Shared helper: read the admin-configured parentPath and derive the slug.
      */
     private function getPathConfig(string $teamName): array {
         $ncConfig   = $this->container->get(\OCP\IConfig::class);
         $parentPath = $ncConfig->getAppValue('teamhub', 'intravoxParentPath', 'en/teamhub');
-        $slug       = strtolower(trim(preg_replace('/[^a-zA-Z0-9]+/', '-', $teamName), '-'));
-        return ['parentPath' => $parentPath, 'slug' => $slug];
+        return ['parentPath' => $parentPath, 'slug' => $this->slugify($teamName)];
+    }
+
+    /**
+     * The one slug rule for this tree (v4.13.62).
+     *
+     * It was inline in `getPathConfig()` and governed team pages only, while
+     * the client had a rule of its own for sub-pages — same intent, different
+     * edges: the client's kept hyphens that were already in the title and fell
+     * back to the literal "page" for a title with nothing usable in it. Two
+     * rules over one tree is a bug waiting for a title they disagree about, so
+     * {@see createSubPage()} uses this and the client sends none.
+     *
+     * Deliberately ASCII-only, which is not a simplification: it is the rule
+     * every existing TeamHub page under IntraVox was created with, and widening
+     * it would make a team called "Zürich" resolve to a different slug than
+     * the page it already has. Returns '' when nothing is left, which callers
+     * reject rather than substitute.
+     */
+    private function slugify(string $text): string {
+        return strtolower(trim((string)preg_replace('/[^a-zA-Z0-9]+/', '-', $text), '-'));
     }
 
     /**
@@ -81,7 +119,11 @@ class IntravoxService {
             ['parentPath' => $parentPath, 'slug' => $slug] = $this->getPathConfig($teamName);
 
 
-            $pageService = $this->container->get(\OCA\IntraVox\Service\PageService::class);
+            $pageService = $this->pages();
+            if ($pageService === null) {
+                $this->logger->debug('[TeamHub][IntravoxService] IntraVox is not reachable on this instance');
+                return ['skipped' => true, 'detail' => 'IntraVox not installed'];
+            }
 
             $isAdvanced = $projectMode === 'advanced';
             $l = $isAdvanced ? $this->resolveTranslator($this->userSession->getUser()?->getUID() ?? '') : null;
@@ -180,7 +222,11 @@ class IntravoxService {
             ['parentPath' => $parentPath, 'slug' => $slug] = $this->getPathConfig($teamName);
             $expectedPath = rtrim($parentPath, '/') . '/' . $slug;
 
-            $pageService = $this->container->get(\OCA\IntraVox\Service\PageService::class);
+            $pageService = $this->pages();
+            if ($pageService === null) {
+                $this->logger->debug('[TeamHub][IntravoxService] IntraVox is not reachable on this instance');
+                return null;
+            }
             $pages = $pageService->listPages();
 
             $found = null;
@@ -277,7 +323,7 @@ class IntravoxService {
             ],
             [
                 'title'    => (string)$l->t('Result'),
-                'question' => (string)$l->t('What will the project team concretely deliver? It must be tangible and visible — something you can hand over when the project is done.'),
+                'question' => (string)$l->t('What will the project team concretely deliver? It must be tangible and visible: something you can hand over when the project is done.'),
             ],
             [
                 'title'    => (string)$l->t('Scope'),
@@ -285,7 +331,7 @@ class IntravoxService {
             ],
             [
                 'title'    => (string)$l->t('Effects'),
-                'question' => (string)$l->t('What consequences might this project have — intended (tied to the objective), unintended-negative (risks), and unintended-positive (unplanned benefits)?'),
+                'question' => (string)$l->t('What consequences might this project have: intended (tied to the objective), unintended-negative (risks), and unintended-positive (unplanned benefits)?'),
             ],
             [
                 'title'    => (string)$l->t('Users of the end result'),
@@ -293,11 +339,11 @@ class IntravoxService {
             ],
             [
                 'title'    => (string)$l->t('Constraints'),
-                'question' => (string)$l->t('What non-negotiable requirements has the sponsor set — quality, budget, or schedule?'),
+                'question' => (string)$l->t('What non-negotiable requirements has the sponsor set: quality, budget, or schedule?'),
             ],
             [
                 'title'    => (string)$l->t('Relationship to other projects and programmes'),
-                'question' => (string)$l->t('Does this project depend on, or need to coordinate with, other work — to avoid duplication or increase effectiveness?'),
+                'question' => (string)$l->t('Does this project depend on, or need to coordinate with, other work, to avoid duplication or increase effectiveness?'),
             ],
         ];
 
@@ -313,7 +359,7 @@ class IntravoxService {
                 ],
                 [
                     'type' => 'text', 'column' => 1, 'order' => 2, 'id' => 'widget-2',
-                    'content' => (string)$l->t('Answer the nine questions below to define this project. Each answer becomes part of the project\'s shared understanding — update them as the project evolves.'),
+                    'content' => (string)$l->t('Answer the nine questions below to define this project. Each answer becomes part of the project\'s shared understanding. Update them as the project evolves.'),
                 ],
             ],
         ];
@@ -365,6 +411,129 @@ class IntravoxService {
     }
 
     /**
+     * Create a page under this team's own IntraVox page (v4.13.62).
+     *
+     * ## The bug this exists to end
+     *
+     * A sub-page is created at `{parentPath}/{teamSlug}` — the team's own page,
+     * which the Intranet module creates when it is switched on. When that page
+     * is missing, IntraVox refuses the child with **"Permission denied: cannot
+     * create pages in this location"**: nothing was denied, the location was
+     * not there. Until 4.13.61 the browser POSTed straight to
+     * `/apps/intravox/api/pages` and passed that message through, so a team
+     * that had lost its page had an Intranet section that could only ever
+     * return it — *Create Intranet page* makes a child, and *Delete Intranet
+     * page*, which is what removes the team page, disables itself once there is
+     * nothing left to delete.
+     *
+     * So this creates the team page first when it is absent, through
+     * {@see createPage()} — the same path provisioning takes, so the page comes
+     * out identical to a provisioned one rather than hand-rolled here — and
+     * says in the result whether it had to.
+     *
+     * ## Why the id is derived here
+     *
+     * The client used to send its own slug of the title. Two slug rules for one
+     * tree is a bug waiting for a title the two disagree about, so the one in
+     * {@see getPathConfig()} governs both the team page and its children now.
+     * An empty slug (a title of nothing but punctuation, which the client's
+     * rule turned into the literal "page") is rejected rather than silently
+     * renamed: IntraVox keys a page by its id, and a second "page" under one
+     * parent is a collision the user cannot see coming.
+     *
+     * ## What a failure here means
+     *
+     * If creating the *team* page fails, the remaining explanation is the
+     * configured parent path: `intravoxParentPath` (Admin → TeamHub →
+     * Integrations, default `en/teamhub`) naming a location IntraVox does not
+     * have. That is an administrator's misconfiguration and IntraVox reports it
+     * with the same misleading sentence, so the error carries the path and says
+     * where it is set. It does *not* claim the path is missing — only that it
+     * is the thing to check — because nothing in IntraVox's surface here can
+     * resolve a path to a page and prove it.
+     *
+     * @param string $teamId   The team the page belongs to.
+     * @param string $teamName Its name, which the slug comes from.
+     * @param string $title    The new page's title, as typed.
+     * @return array{page_created: bool, page_id: ?string, team_page_created: bool}|array{error: string}
+     */
+    public function createSubPage(string $teamId, string $teamName, string $title): array {
+
+        if (!$this->appManager->isInstalled('intravox')) {
+            return ['error' => 'IntraVox is not installed on this instance'];
+        }
+
+        // Everything that can be judged from the arguments alone is judged
+        // before IntraVox is reached for. It keeps the service's own rules out
+        // of a branch that needs the app installed to exercise, which is the
+        // difference between four of these being covered by a unit test and
+        // none of them being.
+        $title = trim($title);
+        if ($title === '') {
+            return ['error' => 'A page needs a title'];
+        }
+        $teamSlug = $this->slugify($teamName);
+        if ($teamSlug === '') {
+            return ['error' => 'The team name has no usable page slug'];
+        }
+        $pageSlug = $this->slugify($title);
+        if ($pageSlug === '') {
+            return ['error' => 'This title has no usable page slug. Use at least one letter or number.'];
+        }
+
+        $pageService = $this->pages();
+        if ($pageService === null) {
+            $this->logger->debug('[TeamHub][IntravoxService] IntraVox is not reachable on this instance');
+            return ['error' => 'IntraVox is not reachable on this instance'];
+        }
+
+        ['parentPath' => $parentPath] = $this->getPathConfig($teamName);
+
+        // The parent before the child. getTeamPage() confirms by path rather
+        // than by title (DESIGN §2.41), so this is not fooled by another
+        // team's page that happens to share a title.
+        $teamPageCreated = false;
+        if ($this->getTeamPage($teamId, $teamName) === null) {
+            $made = $this->createPage($teamId, $teamName);
+            if (isset($made['error']) || !empty($made['skipped'])) {
+                $detail = $made['error'] ?? ($made['detail'] ?? 'unknown reason');
+                $this->logger->warning('[TeamHub][IntravoxService] createSubPage: the team page could not be created', [
+                    'teamId' => $teamId, 'parentPath' => $parentPath,
+                    'error'  => $detail, 'app' => Application::APP_ID,
+                ]);
+                return ['error' => sprintf(
+                    'This team has no intranet page yet and one could not be created under "%s". '
+                    . 'Check that this path exists in IntraVox; it is set as the intranet parent path '
+                    . 'in Admin → TeamHub → Integrations. (%s)',
+                    $parentPath . '/' . $teamSlug,
+                    $detail,
+                )];
+            }
+            $teamPageCreated = true;
+        }
+
+        try {
+            $result = $pageService->createPage(
+                ['id' => $pageSlug, 'title' => $title],
+                $parentPath . '/' . $teamSlug,
+            );
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][IntravoxService] createSubPage failed', [
+                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return ['error' => 'The page could not be created: ' . $e->getMessage()];
+        }
+
+        $this->invalidateSubPagesCache($teamId);
+
+        return [
+            'page_created'      => true,
+            'page_id'           => $result['id'] ?? $result['uniqueId'] ?? null,
+            'team_page_created' => $teamPageCreated,
+        ];
+    }
+
+    /**
      * Delete the IntraVox page associated with a team when the integration is disabled.
      *
      * Confirmed signature: deletePage(string $id): void
@@ -382,7 +551,11 @@ class IntravoxService {
         try {
             ['parentPath' => $parentPath, 'slug' => $slug] = $this->getPathConfig($teamName);
 
-            $pageService = $this->container->get(\OCA\IntraVox\Service\PageService::class);
+            $pageService = $this->pages();
+            if ($pageService === null) {
+                $this->logger->debug('[TeamHub][IntravoxService] IntraVox is not reachable on this instance');
+                return ['skipped' => true, 'detail' => 'IntraVox not installed'];
+            }
 
             $pages = $pageService->listPages();
 
@@ -467,7 +640,11 @@ class IntravoxService {
                 return [];
             }
 
-            $pageService = $this->container->get(\OCA\IntraVox\Service\PageService::class);
+            $pageService = $this->pages();
+            if ($pageService === null) {
+                $this->logger->debug('[TeamHub][IntravoxService] IntraVox is not reachable on this instance');
+                return [];
+            }
             $pages       = $pageService->listPages();
 
             // For each non-template page, check if team page is in its breadcrumb
@@ -479,7 +656,7 @@ class IntravoxService {
                 }
 
                 try {
-                    $crumbs = $pageService->getBreadcrumb($uid);
+                    $crumbs = $pageService->breadcrumb($uid);
                     if (!is_array($crumbs)) continue;
 
                     foreach ($crumbs as $crumb) {

@@ -48,8 +48,7 @@ import { generateUrl } from '@nextcloud/router'
 import { translate as t } from '@nextcloud/l10n'
 import { NcButton, NcEmptyContent } from '@nextcloud/vue'
 import EmailOutline from 'vue-material-design-icons/EmailOutline.vue'
-import { marked } from 'marked'
-import DOMPurify from 'dompurify'
+import { renderAnnouncement } from '../lib/announcementMarkdown.js'
 import { ICON_XL } from '../constants/uiTokens.js'
 
 // v4.4.17 — Canvas view for a single in-app announcement. Fetches the
@@ -59,26 +58,6 @@ import { ICON_XL } from '../constants/uiTokens.js'
 // itself does not sanitise, and rendering unsanitised HTML from any
 // source (even the app's own announcements/ folder) is exactly the kind
 // of pattern SKILLS.md § Security asks us to keep out.
-
-// Configure marked once: enable GitHub-flavoured shorthand + hard line breaks
-// so authors can format announcements the way they would a release note.
-marked.setOptions({ gfm: true, breaks: true })
-
-// Sanitiser config: allow only the tag set an announcement realistically
-// needs. Deliberately excludes <iframe>, <object>, <script>, <style>,
-// event handlers, and any URL scheme other than http(s) and mailto.
-const SANITIZE_CONFIG = {
-    ALLOWED_TAGS: [
-        'a', 'p', 'br', 'hr',
-        'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
-        'strong', 'em', 'code', 'pre',
-        'ul', 'ol', 'li',
-        'blockquote',
-        'table', 'thead', 'tbody', 'tr', 'th', 'td',
-    ],
-    ALLOWED_ATTR: ['href', 'title', 'target', 'rel'],
-    ALLOWED_URI_REGEXP: /^(?:https?|mailto):/i,
-}
 
 export default {
     name: 'AnnouncementView',
@@ -102,9 +81,10 @@ export default {
     },
     computed: {
         rendered() {
-            if (this.body === null) return ''
-            const html = marked.parse(this.body)
-            return DOMPurify.sanitize(html, SANITIZE_CONFIG)
+            // v4.13.56 — the pipeline moved to lib/announcementMarkdown.js so
+            // the forced popup for administrators renders through exactly this
+            // sanitiser rather than a second copy of it.
+            return renderAnnouncement(this.body)
         },
     },
     watch: {

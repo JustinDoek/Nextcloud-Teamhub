@@ -1,6 +1,6 @@
 <template>
     <div class="manage-section" data-section="sub-teams">
-        <h3>{{ t('teamhub', 'Sub-teams') }}</h3>
+        <h2>{{ t('teamhub', 'Sub-teams') }}</h2>
         <p class="manage-section-desc">
             {{ t('teamhub', 'A sub-team is a smaller group inside this team, with its own files and its own members. You pick who is in it from this team, and you can invite people from outside. Everything about a sub-team is managed from here.') }}
         </p>

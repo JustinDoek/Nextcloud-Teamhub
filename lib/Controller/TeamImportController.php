@@ -220,6 +220,26 @@ class TeamImportController extends Controller {
         }
     }
 
+    /**
+     * DELETE /api/v1/admin/import/teams
+     *
+     * Clears the history list: every run that is over, and their rows. A run
+     * that is `validated` or `running` is left alone by the service, so this
+     * cannot take work off another administrator's screen.
+     *
+     * No `#[NoCSRFRequired]` — it deletes, like `destroy()` above.
+     */
+    #[AuthorizedAdminSetting(settings: \OCA\TeamHub\Settings\AdminSettings::class)]
+    public function clearHistory(): JSONResponse {
+        try {
+            return new JSONResponse($this->importService->clearHistory());
+        } catch (\RuntimeException $e) {
+            return $this->runtimeResponse($e);
+        } catch (\Throwable $e) {
+            return $this->failure('clearHistory', 0, $e);
+        }
+    }
+
     // -------------------------------------------------------------------------
     // Error mapping
     // -------------------------------------------------------------------------

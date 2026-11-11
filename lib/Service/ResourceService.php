@@ -1123,7 +1123,9 @@ class ResourceService {
             };
         } catch (\Throwable $e) {
             $this->logger->error('[TeamHub][ResourceService] deleteSpecificResource failed', [
-                'teamId' => $teamId, 'app' => $app, 'resourceId' => $resourceId,
+                // 'app' is the logger's own channel key, so the resource's app has
+                // to travel under a different name or it is overwritten and lost.
+                'teamId' => $teamId, 'resourceApp' => $app, 'resourceId' => $resourceId,
                 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
             return ['success' => false, 'error' => $e->getMessage()];

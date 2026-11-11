@@ -180,6 +180,9 @@ class TeamOpenProjectLinkService {
                 'identifier' => $row->getProjectIdentifier(),
                 'name'       => $row->getProjectName(),
                 'url'        => $this->client->projectUrl($ref),
+                // v4.13.13 — the Pages widget's link out to the project's
+                // wiki. A link and nothing more: see `wikiUrl()`.
+                'wikiUrl'    => $this->client->wikiUrl($ref),
             ],
         ];
     }

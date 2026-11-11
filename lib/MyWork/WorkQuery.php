@@ -159,6 +159,57 @@ final class WorkQuery {
     }
 
     /**
+     * The same query with a narrower team set (v4.13.23).
+     *
+     * For `PackageWorkProvider`, which wraps an integration package's My Work
+     * provider and must only let it see the teams where its package is
+     * *effective* — available, registered, compatible, administrator-enabled
+     * and included in that team's template. Narrowing the query rather than
+     * filtering the results is what lets the delegate push the constraint into
+     * its own SQL, and means an external provider honouring the existing
+     * contract automatically stops contributing for a team whose template
+     * dropped the package, without knowing templates exist.
+     *
+     * Only ever narrows in practice, but nothing here enforces that: the
+     * authorisation boundary is `MyWorkService`'s re-filter against the
+     * viewer's resolved membership, which runs on the merged result whatever a
+     * provider was handed. `teamNames` is carried unchanged — a superset of
+     * names is harmless and dropping entries would only cost a row its team
+     * label.
+     *
+     * @param list<string> $teamIds
+     */
+    public function withTeamIds(array $teamIds): self {
+        return new self(
+            userId:                    $this->userId,
+            teamIds:                   $teamIds,
+            teamNames:                 $this->teamNames,
+            categories:                $this->categories,
+            providerIds:               $this->providerIds,
+            resourceTypes:             $this->resourceTypes,
+            priorities:                $this->priorities,
+            statuses:                  $this->statuses,
+            search:                    $this->search,
+            dueFrom:                   $this->dueFrom,
+            dueTo:                     $this->dueTo,
+            includeSnoozed:            $this->includeSnoozed,
+            includeCompleted:          $this->includeCompleted,
+            upcomingDays:              $this->upcomingDays,
+            actionRequiredDays:        $this->actionRequiredDays,
+            completedDays:             $this->completedDays,
+            now:                       $this->now,
+            limit:                     $this->limit,
+            offset:                    $this->offset,
+            perProviderCap:            $this->perProviderCap,
+            sortBy:                    $this->sortBy,
+            isInstanceAdmin:           $this->isInstanceAdmin,
+            teamFilterActive:          $this->teamFilterActive,
+            instanceScopedProviderIds: $this->instanceScopedProviderIds,
+            metadataFilters:           $this->metadataFilters,
+        );
+    }
+
+    /**
      * May this provider's items skip the membership filter for this viewer?
      *
      * See the class docblock. All three conditions must hold, and the first two

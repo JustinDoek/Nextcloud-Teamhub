@@ -2,7 +2,7 @@
     <section
         v-if="visible"
         class="th-compass"
-        :aria-label="t('teamhub', 'Project Compass — guided setup checklist')">
+        :aria-label="t('teamhub', 'Project Compass: guided setup checklist')">
 
         <!-- Loading state — first fetch only. Subsequent refetches reuse the
              last payload silently so the panel doesn't flicker on visibility
@@ -135,7 +135,7 @@
                             <NcButton
                                 v-if="item.markable"
                                 class="th-compass__item-unmark"
-                                :title="t('teamhub', 'Unmark — this item still needs attention')"
+                                :title="t('teamhub', 'Unmark: this item still needs attention')"
                                 :aria-label="t('teamhub', 'Unmark')"
                                 @click="toggleMark(item)"
                                 variant="tertiary">
@@ -298,7 +298,9 @@ export default {
         document.addEventListener('visibilitychange', this._onVis)
     },
 
-    beforeDestroy() {
+    // v4.20.0: was beforeDestroy(), which Vue 3 never calls, so this cleanup
+    // never ran and every listener here outlived the component.
+    beforeUnmount() {
         if (this._onFocus) {
             window.removeEventListener('focus', this._onFocus)
             this._onFocus = null

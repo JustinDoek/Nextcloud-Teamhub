@@ -137,6 +137,27 @@
                 </div>
             </div>
 
+            <!-- v4.13.13 — the version the project is in now, or the next
+                 one to start. OpenProject calls it a version; a team reads
+                 it as the sprint or release they are working in. -->
+            <div v-if="payload.version" class="th-op__version">
+                <TagOutline :size="ICON_BODY" aria-hidden="true" class="th-op__version-icon" />
+                <div class="th-op__version-body">
+                    <span class="th-op__version-label">
+                        {{ payload.version.upcoming ? t('teamhub', 'Next version') : t('teamhub', 'Current version') }}
+                    </span>
+                    <a
+                        v-if="payload.version.url"
+                        class="th-op__link"
+                        :href="payload.version.url"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        :title="opensInOpenProject">{{ payload.version.name }}</a>
+                    <span v-else>{{ payload.version.name }}</span>
+                    <span v-if="versionDates" class="th-op__version-dates">{{ versionDates }}</span>
+                </div>
+            </div>
+
             <!-- Recently completed -->
             <div v-if="payload.recentlyCompleted && payload.recentlyCompleted.length > 0" class="th-op__section">
                 <h3 class="th-op__section-title">{{ t('teamhub', 'Recently completed') }}</h3>
@@ -162,11 +183,6 @@
                  work package, Project files, Refresh) moved to the widget
                  header's action menu, which the grid owns; this component
                  reports the links it has through the `actions` event. -->
-            <div class="th-op__footer">
-                <span class="th-op__retrieved">
-                    {{ t('teamhub', 'Retrieved {time}', { time: formatDateTime(payload.retrievedAt * 1000) }) }}
-                </span>
-            </div>
         </template>
     </div>
 </template>
@@ -179,6 +195,7 @@ import axios from '@nextcloud/axios'
 import { NcButton, NcEmptyContent } from '@nextcloud/vue'
 import OpenInNew from 'vue-material-design-icons/OpenInNew.vue'
 import FlagOutline from 'vue-material-design-icons/FlagOutline.vue'
+import TagOutline from 'vue-material-design-icons/TagOutline.vue'
 // The broken-connection picture.
 import LanDisconnect from 'vue-material-design-icons/LanDisconnect.vue'
 // v4.9.7 — the attention rows' glyphs.
@@ -222,7 +239,7 @@ export default {
     name: 'OpenProjectOverviewWidget',
 
     components: {
-        NcButton, NcEmptyContent, OpenInNew, FlagOutline, LanDisconnect, AlertCircleOutline, CalendarClock, History,
+        NcButton, NcEmptyContent, OpenInNew, FlagOutline, TagOutline, LanDisconnect, AlertCircleOutline, CalendarClock, History,
     },
 
     /**
@@ -329,6 +346,32 @@ export default {
                 })
             }
             return rows
+        },
+
+        /**
+         * v4.13.13 — the version's run, in the reader's date format. Either
+         * bound may be missing: a version with no dates is open-ended in
+         * OpenProject, and one with only an end date is the usual shape of
+         * a release.
+         */
+        versionDates() {
+            const v = this.payload?.version
+            if (!v) return ''
+            const start = v.startDate ? this.formatIsoDate(v.startDate) : null
+            const end = v.endDate ? this.formatIsoDate(v.endDate) : null
+            if (start && end) {
+                // TRANSLATORS: the period an OpenProject version runs for, as in "3 March 2026 to 17 March 2026"
+                return t('teamhub', '{start} to {end}', { start, end })
+            }
+            if (end) {
+                // TRANSLATORS: an OpenProject version with only an end date — the date it is due
+                return t('teamhub', 'Until {date}', { date: end })
+            }
+            if (start) {
+                // TRANSLATORS: an OpenProject version with only a start date — the date it began
+                return t('teamhub', 'From {date}', { date: start })
+            }
+            return ''
         },
 
         /** What the header menu may offer right now (v4.9.5). */
@@ -440,12 +483,12 @@ export default {
         },
 
         countText(value) {
-            return value === null || value === undefined ? '—' : String(value)
+            return value === null || value === undefined ? 'Not set' : String(value)
         },
 
         countTitle(value) {
             return value === null || value === undefined
-                ? t('teamhub', 'Not available — OpenProject did not answer this count')
+                ? t('teamhub', 'Not available: OpenProject did not answer this count')
                 : ''
         },
     },
@@ -627,6 +670,36 @@ a.th-op__name:focus-visible {
     border-inline-start-color: var(--color-error);
 }
 
+/* v4.13.13 — the current version. The milestone block's shape on a
+   neutral border: a version is context, not a deadline. */
+.th-op__version {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--th-space-sm);
+    padding: var(--th-space-sm);
+    border-radius: var(--th-radius-control);
+    background: var(--color-background-hover);
+    border-inline-start: var(--th-accent-border) solid var(--color-border-dark);
+}
+
+.th-op__version-icon {
+    color: var(--color-text-maxcontrast);
+    flex-shrink: 0;
+}
+
+.th-op__version-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--th-space-xs);
+    min-width: 0;
+}
+
+.th-op__version-label,
+.th-op__version-dates {
+    font-size: var(--th-font-meta);
+    color: var(--color-text-maxcontrast);
+}
+
 /* v4.9.7 — the attention strip: the same block shape as the milestone,
    keyed on the primary colour because it is about the viewer, not the
    project; each row tones its own glyph and never relies on colour alone. */
@@ -743,16 +816,5 @@ a.th-op__name:focus-visible {
     outline: 2px solid var(--color-primary-element);
     outline-offset: 2px;
     border-radius: var(--th-radius-control);
-}
-
-.th-op__footer {
-    display: flex;
-    align-items: center;
-    margin-top: var(--th-space-xs);
-}
-
-.th-op__retrieved {
-    font-size: var(--th-font-micro);
-    color: var(--color-text-maxcontrast);
 }
 </style>

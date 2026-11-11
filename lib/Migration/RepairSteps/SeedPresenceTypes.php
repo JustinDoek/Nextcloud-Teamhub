@@ -92,6 +92,16 @@ class SeedPresenceTypes implements IRepairStep {
             'sort_order'         => 40,
         ],
         [
+            'slug'               => 'sick',
+            'label'              => 'Sick',
+            'icon'               => 'MedicalBag',
+            'color'              => '#7B1FA2',
+            'requires_location'  => 0,
+            'is_busy'            => 1,
+            'selectable_by_user' => 1,
+            'sort_order'         => 45,
+        ],
+        [
             'slug'               => 'non_working_day',
             'label'              => 'Non-working day',
             'icon'               => 'CalendarRemove',

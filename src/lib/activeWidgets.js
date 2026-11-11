@@ -24,6 +24,26 @@
  */
 
 /**
+ * Whether a capability draws its own card body — v4.13.24, shared v4.13.26.
+ *
+ * Keyed on the server's `cap_type`, not on the presence of a `url`: the two
+ * agree today, and a descriptor that gained a URL for some other reason must
+ * not silently start rendering as a frame.
+ *
+ * Shared because three surfaces ask it — the desktop grid, the tablet stack
+ * and the mobile canvas — and each one has to answer it the same way twice:
+ * once to pick the body component, once to give that body a height. The
+ * desktop grid and MobileWidgetView each carried their own copy of the test,
+ * which is the shape §2.199 and §2.200 were both about.
+ *
+ * @param {object} cap a capability descriptor from packageWidgets
+ * @return {boolean}
+ */
+export function isCanvasCapability(cap) {
+    return cap?.cap_type === 'widget_iframe'
+}
+
+/**
  * Whether the Project Health widget is active for this viewer.
  *
  * Advanced projects in Planning or Execution phase, where the viewer can see
@@ -49,6 +69,7 @@ export function isProjectHealthActive(ctx) {
  *
  * @param {object}  ctx                        gating facts, all from the store
  * @param {object}  ctx.resources              team resource bundle
+ * @param {object}  ctx.messagesConfig         { messages_enabled } (v4.13.35)
  * @param {object}  ctx.collectivesConfig      { collectives_enabled }
  * @param {boolean} ctx.decisionsModuleEnabled instance-wide Decisions switch
  * @param {object}  ctx.decisionsConfig        { decisions_enabled }
@@ -57,7 +78,8 @@ export function isProjectHealthActive(ctx) {
  * @param {object}  ctx.timeConfig             { can_view_time }
  * @param {object}  ctx.openProjectConfig      { eligible, linked } (v4.9.3)
  * @param {object}  ctx.serviceDeskConfig      { isDesk, isAdmin } (v4.10.27), { isServiceTeam, canBuild } (v4.10.34)
- * @param {Array}   ctx.teamWidgets            registered integration widgets
+ * @param {Array}   ctx.teamWidgets            registered integration widgets (legacy registry)
+ * @param {Array}   ctx.packageWidgets         shown widget capabilities (v4.13.23 packages)
  * @param {object}  ctx.dashboardConfig        { hidden_widgets }
  * @param {object}  [options]
  * @param {boolean} [options.applyHidden=true] subtract admin-hidden widgets
@@ -66,11 +88,34 @@ export function isProjectHealthActive(ctx) {
 export function computeActiveWidgetIds(ctx, { applyHidden = true } = {}) {
     const active = new Set()
 
+    // v4.13.35 — the message stream is gated on the team's Messages switch,
+    // and that gate belongs here.
+    //
+    // It did not live here until now, and TeamWidgetGrid's template carried a
+    // second one (`showMessagesWidget`) instead. For four releases that cost
+    // nothing, because the only thing reading this set was a filter over the
+    // same template. Then v4.13.33 made the set the input to the *packer* —
+    // and a team with Messages switched off got a nine-column, nine-row hole
+    // at the top of its home, because the packer reserved the stream's block
+    // for a card the template then refused to draw.
+    //
+    // This is the divergence in this file's own docblock, happening again: one
+    // surface deciding what to render and another deciding what space to
+    // reserve. `!== false` rather than a truthiness test, matching the
+    // template's gate exactly — the config is absent until the bundle lands,
+    // and absent means on.
+    if (ctx.messagesConfig?.messages_enabled !== false) {
+        active.add('msgstream')
+    }
+
     // Always active — no resource or permission gate.
-    active.add('msgstream')
     active.add('widget-teaminfo')
     active.add('widget-members')
     active.add('widget-activity')
+    if (ctx.teamType === 'department' && ctx.presenceModuleEnabled
+        && ctx.presenceConfig?.presence_enabled) {
+        active.add('widget-birthdays')
+    }
 
     if (ctx.resources?.calendar?.length > 0) {
         active.add('widget-calendar')
@@ -134,6 +179,26 @@ export function computeActiveWidgetIds(ctx, { applyHidden = true } = {}) {
     // services and the builder are on the Services tab (src/lib/teamTabs.js).
 
     ;(ctx.teamWidgets || []).forEach(w => active.add('widget-int-' + w.registry_id))
+
+    // v4.13.24 — integration-package widgets (v4.13.23). The id matches
+    // `getOrCreateIntegrationItem('cap-' + cap_id)` in TeamWidgetGrid, which
+    // prefixes `widget-int-`.
+    //
+    // Missing this was the whole of the "the widget renders but has fallen out
+    // of the dashboard" report. `visibleLayout` is `gridLayout` filtered by
+    // this set and it is what `<grid-layout :layout>` receives, so a card
+    // whose id never arrives here is rendered as a `<grid-item>` that the
+    // layout does not manage: it sits at its prop position, takes part in no
+    // collision or compaction, and every drag it emits is discarded because
+    // the parent cannot find it. Arrow-key moves mutated `gridLayout` and
+    // changed nothing on screen, and `runAutoFitPass()` bailed out early
+    // because the rendered node count no longer matched `visibleLayout`.
+    //
+    // Hidden capabilities are already dropped server-side
+    // (IntegrationPresentationService), so there is no second hide to apply
+    // here — unlike `dashboardConfig.hidden_widgets` below, which governs
+    // TeamHub's own widgets.
+    ;(ctx.packageWidgets || []).forEach(w => active.add('widget-int-cap-' + w.cap_id))
 
     // Team-wide owner/admin hidden widgets. Applied last so it overrides every
     // activation rule above. Positions stay in gridLayout, so a widget toggled

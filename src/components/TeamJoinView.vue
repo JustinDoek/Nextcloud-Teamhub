@@ -48,8 +48,19 @@
             <!-- Every outcome of pressing a button lands here, so a screen
                  reader hears the result without having to go looking for it. -->
             <div class="th-join__status" aria-live="polite">
+                <!-- v4.13.18 — checked before the closed case, because an
+                     invite-only team is exactly where an invitation is the
+                     normal way in: telling the one person who *was* invited
+                     that they cannot join on their own is the bug. -->
                 <NcNoteCard
-                    v-if="isClosed"
+                    v-if="isInvited"
+                    type="success"
+                    :heading="t('teamhub', 'You have been invited to this team')">
+                    <p>{{ t('teamhub', 'Accept the invitation to become a member of {team}.', { team: team.name }) }}</p>
+                </NcNoteCard>
+
+                <NcNoteCard
+                    v-else-if="isClosed"
                     type="info"
                     :heading="t('teamhub', 'This team is invite only')">
                     <p>{{ t('teamhub', 'You cannot join {team} on your own. Ask a member of the team to invite you.', { team: team.name }) }}</p>
@@ -70,7 +81,37 @@
                 </NcNoteCard>
             </div>
 
-            <div v-if="!isClosed && !isPending" class="th-join__actions">
+            <!-- v4.13.18 — an invitation is answered here whatever the team's
+                 join policy says, so this branch sits outside the
+                 !isClosed && !isPending test below rather than inside it. -->
+            <div v-if="isInvited" class="th-join__actions">
+                <NcButton
+                    variant="primary"
+                    :disabled="submitting"
+                    @click="acceptInvitation">
+                    <template #icon>
+                        <NcLoadingIcon v-if="submitting" :size="iconNav" />
+                        <Check v-else :size="iconNav" />
+                    </template>
+                    {{
+                        // TRANSLATORS: button label to accept an invitation to join a team
+                        t('teamhub', 'Accept')
+                    }}
+                </NcButton>
+
+                <NcButton
+                    variant="tertiary"
+                    :disabled="submitting"
+                    @click="declineInvitation">
+                    <template #icon><Close :size="iconNav" /></template>
+                    {{
+                        // TRANSLATORS: button label to refuse an invitation to join a team
+                        t('teamhub', 'Decline')
+                    }}
+                </NcButton>
+            </div>
+
+            <div v-else-if="!isClosed && !isPending" class="th-join__actions">
                 <!-- Already in the team — reachable from a stale preview, or
                      from a link followed straight after being invited. -->
                 <NcButton
@@ -113,6 +154,8 @@ import axios from '@nextcloud/axios'
 import { NcButton, NcEmptyContent, NcLoadingIcon, NcNoteCard } from '@nextcloud/vue'
 import AccountGroup    from 'vue-material-design-icons/AccountGroup.vue'
 import AccountQuestion from 'vue-material-design-icons/AccountQuestion.vue'
+import Check           from 'vue-material-design-icons/Check.vue'
+import Close           from 'vue-material-design-icons/Close.vue'
 import Magnify         from 'vue-material-design-icons/Magnify.vue'
 import OpenInApp       from 'vue-material-design-icons/OpenInApp.vue'
 import Plus            from 'vue-material-design-icons/Plus.vue'
@@ -148,6 +191,8 @@ export default {
         NcNoteCard,
         AccountGroup,
         AccountQuestion,
+        Check,
+        Close,
         Magnify,
         OpenInApp,
         Plus,
@@ -182,6 +227,15 @@ export default {
         },
         isPending() {
             return this.team?.membership === 'requesting'
+        },
+        /**
+         * v4.13.18 — the team invited this person and is waiting on them. Its
+         * own state since that version; see
+         * `TeamService::resolvePreviewMembership()` for what it used to be
+         * folded into and why that was wrong.
+         */
+        isInvited() {
+            return this.team?.membership === 'invited'
         },
     },
     watch: {
@@ -264,6 +318,70 @@ export default {
                 showError(this.needsApproval
                     ? t('teamhub', 'Failed to request access')
                     : t('teamhub', 'Failed to join team'))
+            } finally {
+                this.submitting = false
+            }
+        },
+
+        /**
+         * Accept the invitation.
+         *
+         * v4.13.18 — a separate endpoint from `submit()`'s, and deliberately:
+         * `/join` refuses an invite-only team, which is the team an invitation
+         * most often comes from. See `TeamInvitationService`.
+         *
+         * The outcome is read back for the same reason `submit()` reads it
+         * back — the invitation may have been withdrawn while this page sat
+         * open, and the server's answer is the one that counts.
+         */
+        async acceptInvitation() {
+            const teamName = this.team.name
+            this.submitting = true
+            try {
+                await axios.post(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${encodeURIComponent(this.teamId)}/invitation/accept`),
+                    {},
+                )
+                await this.loadPreview()
+
+                if (this.isMember) {
+                    showSuccess(t('teamhub', 'You have joined {team}', { team: teamName }))
+                    this.$emit('joined', this.teamId)
+                }
+            } catch (e) {
+                // not_invited: withdrawn, or already answered elsewhere —
+                // another tab, or the bell's own Accept. Re-reading redraws
+                // the page as whatever is now true instead of leaving a button
+                // that cannot work.
+                if (e.response?.data?.error === 'not_invited') {
+                    showError(t('teamhub', 'This invitation is no longer open.'))
+                    await this.loadPreview()
+                    return
+                }
+                showError(t('teamhub', 'Failed to accept the invitation'))
+            } finally {
+                this.submitting = false
+            }
+        },
+
+        /** Refuse the invitation; removes the pending membership row. */
+        async declineInvitation() {
+            const teamName = this.team.name
+            this.submitting = true
+            try {
+                await axios.post(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${encodeURIComponent(this.teamId)}/invitation/decline`),
+                    {},
+                )
+                showSuccess(t('teamhub', 'Invitation to {team} declined', { team: teamName }))
+                this.$emit('browse')
+            } catch (e) {
+                if (e.response?.data?.error === 'not_invited') {
+                    showError(t('teamhub', 'This invitation is no longer open.'))
+                    await this.loadPreview()
+                    return
+                }
+                showError(t('teamhub', 'Failed to decline the invitation'))
             } finally {
                 this.submitting = false
             }

@@ -4,14 +4,14 @@
         "fields": {
             "filename": "Basename of a .md file in this folder. No path separators. Must resolve to a real file in announcements/.",
             "role": "'admin' (only NC instance admins see it) | 'everyone' (all users on an unlicensed instance).",
-            "version": "Exact TeamHub version this announcement targets. Only shown when the running instance's version matches."
+            "version": "TeamHub version this announcement targets. A full version (4.20.0) matches only itself; a release line (4.20) matches every 4.20.x."
         }
     },
     "announcements": [
         {
-            "filename": "feedback.md",
-            "role": "everyone",
-            "version": "4.13.0"
+            "filename": "milestone.md",
+            "role": "admin",
+            "version": "4.20"
         }
     ]
 }

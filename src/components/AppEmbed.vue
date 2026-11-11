@@ -127,21 +127,43 @@
                     </template>
                     <span class="app-embed__bar-btn-label">{{ t('teamhub', 'Reload') }}</span>
                 </NcButton>
-                <a
+                <!-- v4.13.28 — an NcButton with `href`, not a raw <a>.
+                     Both controls are TeamHub's own and are now the same
+                     component, so they cannot drift apart again.
+
+                     The raw anchor was the only control in this bar whose
+                     icon sat *above* its label: `.app-embed__bar-btn` is
+                     `flex-direction: column`, and on an <a> the icon and the
+                     label are its own two children, so the rule applied. On
+                     an NcButton it never did — the root's single child is
+                     `.button-vue__wrapper` — so Reload and every action and
+                     toggle button here have always been inline. The anchor
+                     was the odd one out rather than the rule.
+
+                     `href` turns NcButton into an <a> (9.x), and it sets
+                     `rel="nofollow noreferrer noopener"` on it itself, so the
+                     hand-written rel is gone rather than forgotten.
+
+                     The visible label is the short verb phrase and the
+                     tooltip keeps the full one — the shortLabel/label split
+                     the action buttons above already use. "New tab" also
+                     sidesteps what kept this at the full phrase before: a
+                     bare "Open" collides with the decision-status "Open" in
+                     nl/de/fr/da, where it is the adjective
+                     "Offen"/"Ouvert"/"Åben". This never says "Open". -->
+                <NcButton
                     v-if="url"
                     class="app-embed__bar-btn"
                     :href="url"
                     target="_blank"
-                    rel="noopener noreferrer"
-                    :title="t('teamhub', 'Open in new tab')">
-                    <OpenInNew :size="ICON_BODY" class="app-embed__bar-btn-icon" />
-                    <!-- Kept as the full phrase rather than abbreviated to a single
-                         verb: 'Open' alone collides with the existing decision-status
-                         "Open" translation in nl/de/fr/da (which is the adjective
-                         "Offen"/"Ouvert"/"Åben"). Disambiguating costs more than the
-                         label width buys. -->
-                    <span class="app-embed__bar-btn-label">{{ t('teamhub', 'Open in new tab') }}</span>
-                </a>
+                    :aria-label="t('teamhub', 'Open in new tab')"
+                    :title="t('teamhub', 'Open in new tab')"
+                    variant="tertiary">
+                    <template #icon>
+                        <OpenInNew :size="ICON_BODY" class="app-embed__bar-btn-icon" />
+                    </template>
+                    <span class="app-embed__bar-btn-label">{{ t('teamhub', 'New tab') }}</span>
+                </NcButton>
             </div>
         </div>
 
@@ -221,6 +243,7 @@ import ChevronDown from 'vue-material-design-icons/ChevronDown.vue'
 import { attachCollabSidebar, RENDERED_FILE_SELECTOR } from '../lib/filesCollab.js'
 import logger from '../logger.js'
 import { attachInternalLinkInterceptor } from '../lib/internalLinks.js'
+import { EMBED_SURFACE_CSS } from '../lib/embedSurface.js'
 import { ICON_BODY, ICON_LARGE } from '../constants/uiTokens.js'
 
 /**
@@ -513,14 +536,14 @@ nav.app-navigation,
     margin: 0 !important;
 }
 
-html, body {
-    margin: 0 !important;
-    padding: 0 !important;
-    height: 100% !important;
-    background: var(--color-main-background) !important;
-    /* overflow: hidden on body would clip internal app scroll areas.
-       Instead we rely on the iframe's own overflow:hidden viewport. */
-}
+/* v4.13.27 — the html/body surface rules moved to src/lib/embedSurface.js and
+   are interpolated here unchanged. The blank-canvas widget needs exactly these
+   four lines and none of the chrome stripping around them, and a card that
+   shows the instance wallpaper where a tab does not is the bug that split
+   them. No overflow rule, for the reason it never had one: overflow: hidden on
+   body would clip the app's internal scroll areas, and the iframe is already a
+   bounded viewport. */
+${EMBED_SURFACE_CSS}
 
 /* Content wrapper fills the full iframe — old NC uses #content, NC 32 uses #content-vue.
    Use height/width rather than position:fixed so app-internal modals and

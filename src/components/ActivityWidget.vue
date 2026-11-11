@@ -28,7 +28,7 @@
                             v-if="item.user"
                             :user="item.user"
                             :display-name="item.displayName || item.user"
-                            :size="24"
+                            :size="AVATAR_MD"
                             :hide-status="true"
                             :disable-menu="true"
                             class="activity-widget__avatar" />
@@ -83,7 +83,7 @@ import { generateUrl } from '@nextcloud/router'
 import { handleInternalLinkClick } from '../lib/internalLinks.js'
 import axios from '@nextcloud/axios'
 import { NcLoadingIcon, NcAvatar, NcButton } from '@nextcloud/vue'
-import { ICON_INLINE } from '../constants/uiTokens.js'
+import { ICON_INLINE, AVATAR_MD } from '../constants/uiTokens.js'
 
 // Icons
 import AccountMultiple    from 'vue-material-design-icons/AccountMultiple.vue'
@@ -183,6 +183,7 @@ export default {
     data() {
         return {
             ICON_INLINE,
+            AVATAR_MD,
             activities: [],
             loading: false,
             error: null,

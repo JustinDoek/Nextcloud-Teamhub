@@ -1,11 +1,11 @@
 {
-    "n": "nextcloud/teamhub",
+    "name": "nextcloud/teamhub",
     "description": "Team collaboration hub with messaging and widgets for Nextcloud",
     "type": "project",
     "license": "AGPL-3.0-or-later",
     "authors": [
         {
-            "n": "TeamHub Developers"
+            "name": "TeamHub Developers"
         }
     ],
     "require": {
@@ -15,5 +15,15 @@
         "psr-4": {
             "OCA\\TeamHub\\": "lib/"
         }
+    },
+    "require-dev": {
+        "nextcloud/coding-standard": "^1.5",
+        "nextcloud/ocp": "^33.0 || ^34.0 || ^35.0",
+        "phpstan/phpstan": "^2.1"
+    },
+    "scripts": {
+        "cs:check": "php-cs-fixer fix --dry-run --diff --using-cache=no",
+        "cs:fix": "php-cs-fixer fix",
+        "analyse:php": "phpstan analyse --configuration=phpstan.neon --no-progress"
     }
 }

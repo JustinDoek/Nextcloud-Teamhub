@@ -28,11 +28,21 @@ use Psr\Log\LoggerInterface;
  *      count drops back under cap the marker is cleared and a later
  *      re-transition fires again.
  *
+ * 3. Member reporting overdue (v4.13.30, metered licences only)
+ *    - A metered licence reports its effective member count twice a month.
+ *      One notification per rung of the ladder — due (21 days of silence),
+ *      overdue (32) and locked (45) — because each rung is new information
+ *      and the last says Advanced features have stopped. A banded licence
+ *      and a trial never reach `locked`; a banded licence is never nagged
+ *      at all.
+ *
  * De-duplication per event:
  *   - Expiry:  marker = licenseId@paidUntil. Extending the license mints
  *              a new paidUntil, so the next approach fires its own single
  *              notification.
  *   - Seats:   marker = licenseId  (present while over, cleared when under).
+ *   - Report:  marker = licenseId@reportState (cleared once a report lands,
+ *              so a later lapse warns again from the bottom rung).
  *
  * Recipient set:
  *   Full NC admins only ('admin' group members). Delegated TeamHub
@@ -55,6 +65,12 @@ class LicenseExpiryNotificationJob extends TimedJob {
 
     /** appconfig key holding the licenseId we've flagged as over-seats. */
     private const CFG_OVER_SEATS_FLAG = 'license_over_seats_notified_for';
+
+    /**
+     * appconfig key holding the (licenseId@reportState) we last notified for
+     * on the member-reporting ladder (v4.13.30).
+     */
+    private const CFG_REPORT_NOTIFIED = 'license_report_notified_for';
 
     public function __construct(
         ITimeFactory                 $time,
@@ -82,6 +98,7 @@ class LicenseExpiryNotificationJob extends TimedJob {
 
             $this->checkExpiry($status);
             $this->checkSeatOverage($status);
+            $this->checkSeatReporting($status);
         } catch (\Throwable $e) {
             // Never let a notifier hiccup crash the background-job runner.
             $this->logger->error(
@@ -174,6 +191,79 @@ class LicenseExpiryNotificationJob extends TimedJob {
             self::CFG_OVER_SEATS_FLAG,
             $licenseId,
         );
+    }
+
+    /**
+     * The member-reporting ladder (v4.13.30, DESIGN §2.203).
+     *
+     * **This is the half of the ladder that is not in the admin panel, and
+     * with the lock at 45 days it is the half that matters.** An instance
+     * that cannot reach the licensing service is very often one whose
+     * administrator has no reason to open Admin → TeamHub → License, and the
+     * ladder gives them 24 days' notice from the first missed report. A
+     * banner nobody looks at is not a warning.
+     *
+     * One notification per rung, debounced on (licence, state): climbing
+     * due → overdue → locked notifies three times, because each rung is new
+     * information and the last one says features have stopped. Dropping back
+     * to `ok` — which one accepted report does — clears the marker, so a
+     * later lapse warns again.
+     */
+    private function checkSeatReporting(array $status): void {
+        $state     = (string)($status['reportState'] ?? 'not-required');
+        $licenseId = (string)($status['licenseId'] ?? '');
+        $flag      = $this->config->getAppValue(Application::APP_ID, self::CFG_REPORT_NOTIFIED, '');
+
+        // A banded licence reports nothing and is warned about nothing; an
+        // instance that has caught up has nothing outstanding. Both clear the
+        // marker so the next lapse is announced from the bottom rung again.
+        if ($state === 'not-required' || $state === 'ok') {
+            if ($flag !== '') {
+                $this->config->deleteAppValue(Application::APP_ID, self::CFG_REPORT_NOTIFIED);
+            }
+            return;
+        }
+
+        $marker = ($licenseId !== '' ? $licenseId : 'lic') . '@' . $state;
+        if ($flag === $marker) {
+            return;
+        }
+
+        $this->notifyReportAdmins(
+            $state,
+            (int)($status['reportOverdueDays'] ?? 0),
+            isset($status['reportLockAt']) ? (int)$status['reportLockAt'] : 0,
+            $licenseId,
+        );
+
+        // Recorded only after a successful notify, like checkExpiry(): a
+        // failure inside notifyReportAdmins() falls through the outer
+        // try/catch and is retried on the next tick with the marker unset.
+        $this->config->setAppValue(Application::APP_ID, self::CFG_REPORT_NOTIFIED, $marker);
+    }
+
+    private function notifyReportAdmins(string $state, int $overdueDays, int $lockAt, string $licenseId): void {
+        $adminGroup = $this->adminGroupOrLog();
+        if ($adminGroup === null) return;
+
+        // The state is in the object-id so each rung files as its own
+        // notification rather than re-firing the previous one (NC
+        // deduplicates on app + user + object + subject).
+        $objectId = ($licenseId !== '' ? $licenseId : 'lic') . '@report-' . $state;
+
+        foreach ($adminGroup->getUsers() as $admin) {
+            $notification = $this->notificationManager->createNotification();
+            $notification->setApp(Application::APP_ID)
+                ->setUser($admin->getUID())
+                ->setDateTime(new \DateTime('@' . time()))
+                ->setObject('license', $objectId)
+                ->setSubject('license_report_overdue', [
+                    'reportState'  => $state,
+                    'overdueDays'  => $overdueDays,
+                    'lockAt'       => $lockAt,
+                ]);
+            $this->notificationManager->notify($notification);
+        }
     }
 
     private function notifyExpiryAdmins(bool $isTrial, int $daysRemaining, int $paidUntil, string $licenseId): void {

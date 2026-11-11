@@ -62,6 +62,46 @@ class OpenProjectException extends \RuntimeException {
      * error or failure.
      */
     public const JOB_FAILED = 'job_failed';
+    /**
+     * v4.13.4 — the transport in force cannot send the HTTP method the
+     * action needs. In practice one case: **PATCH through the official
+     * `integration_openproject` app**, whose `rawRequest()` whitelists GET,
+     * POST, PUT and DELETE and answers anything else with "Bad HTTP
+     * method". OpenProject updates a work package with PATCH and only
+     * PATCH, so an instance on that transport can read and create but not
+     * edit.
+     *
+     * Not a failure of the request — the request is never sent. A surface
+     * that offers an edit asks `OpenProjectClient::supportsMethod()` first
+     * and hides the action; this code is the backstop for anything that
+     * did not, and for the administrator diagnostic that has to explain
+     * why the edit is missing.
+     */
+    public const METHOD_UNSUPPORTED = 'method_unsupported';
+    /**
+     * v4.13.5 — TeamHub's own OpenProject connection is configured with an
+     * authorization method it cannot yet perform. Today that means `oidc`,
+     * whose `user_oidc` token exchange is the next step of the arc; later
+     * it will also mean an OIDC install whose `user_oidc` is absent or too
+     * old.
+     *
+     * Distinct from `host_not_configured` on purpose: the administrator
+     * has configured something, it is simply not a method that works, and
+     * "no host is configured" would send them to look at the wrong field.
+     */
+    public const AUTH_METHOD_UNSUPPORTED = 'auth_method_unsupported';
+    /**
+     * v4.13.9 — somebody else changed this work package while this user
+     * was editing it. OpenProject answers a PATCH whose `lockVersion` is
+     * behind the stored one with 409, which is optimistic locking working
+     * as intended: the edit is refused rather than quietly overwriting
+     * theirs.
+     *
+     * Its own code because it is the one write failure that is **nobody's
+     * mistake** and has a specific remedy — reload and look at what
+     * changed — where `validation_failed` means the input was wrong.
+     */
+    public const EDIT_CONFLICT = 'edit_conflict';
 
     public function __construct(
         private string $errorCode,

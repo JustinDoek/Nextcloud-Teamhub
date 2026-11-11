@@ -34,6 +34,7 @@ class PresenceTeamController extends Controller {
         IRequest $request,
         private MemberService        $memberService,
         private PresenceTeamService  $teamPresence,
+        private \OCA\TeamHub\Service\ShiftsModuleService $shiftsModule,
         private LoggerInterface      $logger,
         private \OCP\IConfig                              $config,
         private \OCP\IUserSession                         $userSession,
@@ -256,7 +257,12 @@ class PresenceTeamController extends Controller {
     public function getConfig(string $teamId): JSONResponse {
         try {
             $this->memberService->requireMemberLevel($teamId);
-            return new JSONResponse($this->teamPresence->getConfig($teamId));
+            $config = $this->teamPresence->getConfig($teamId);
+            // v4.13.68 — whether Shifts may be offered at all, so Manage team
+            // can grey the switch with the reason instead of hiding it.
+            $config['shifts_offerable'] = $this->shiftsModule->isOfferable();
+            $config['shifts_reason']    = $this->shiftsModule->unavailableReason();
+            return new JSONResponse($config);
         } catch (\Throwable $e) {
             return $this->mapError($e, 'getConfig');
         }
@@ -264,7 +270,7 @@ class PresenceTeamController extends Controller {
 
     /**
      * PUT /api/v1/teams/{teamId}/presence/config
-     * Body: { presence_enabled?: bool|int, hide_reasons?: bool|int }
+     * Body: { presence_enabled?: bool|int, hide_reasons?: bool|int, shifts_enabled?: bool|int }
      * Only keys present in the body are written; missing keys are unchanged.
      *
      * SEC: team admin (level ≥ 8) required.
@@ -274,6 +280,7 @@ class PresenceTeamController extends Controller {
         string $teamId,
         ?int $presence_enabled = null,
         ?int $hide_reasons     = null,
+        ?int $shifts_enabled   = null,
     ): JSONResponse {
         try {
             $this->memberService->requireAdminLevel($teamId);
@@ -284,6 +291,19 @@ class PresenceTeamController extends Controller {
             }
             if ($hide_reasons !== null) {
                 $data['hide_reasons'] = $hide_reasons;
+            }
+            if ($shifts_enabled !== null) {
+                // A disabled switch is not a boundary: switching Shifts ON
+                // needs the licence here too (v4.13.68). Switching it OFF is
+                // always allowed, so an instance whose licence lapses can
+                // still tidy up.
+                if ($shifts_enabled === 1 && !$this->shiftsModule->isOfferable()) {
+                    return new JSONResponse(
+                        ['error' => 'Shifts needs a TeamHub licence'],
+                        Http::STATUS_FORBIDDEN,
+                    );
+                }
+                $data['shifts_enabled'] = $shifts_enabled;
             }
 
             if (count($data) === 0) {

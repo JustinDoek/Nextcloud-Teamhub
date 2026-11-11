@@ -352,6 +352,94 @@ class OpenProjectController extends Controller {
     }
 
     /**
+     * GET /api/v1/teams/{teamId}/openproject/work-packages/{workPackageId}/form
+     *
+     * OpenProject's **edit** form for one work package, as the current
+     * user (v4.13.9): the legal status transitions for its type and this
+     * viewer's role, the types and assignees, the current values, and the
+     * `lockVersion` the PATCH must carry.
+     *
+     * Member-gated here; OpenProject decides whether this viewer may edit
+     * (403 → `permission_denied`), and the row's own `canEdit` is what the
+     * surface uses to offer the action in the first place.
+     */
+    #[NoAdminRequired]
+    #[UserRateLimit(limit: 30, period: 60)]
+    public function workPackageEditForm(string $teamId, int $workPackageId): JSONResponse {
+        $gate = $this->openProjectModuleGate();
+        if ($gate !== null) {
+            return $gate;
+        }
+        try {
+            $this->memberService->requireMemberLevel($teamId);
+            $userId = $this->capabilities->requireReadable();
+            $this->links->requireLink($teamId);
+            return new JSONResponse($this->workPackages->editForm($userId, $workPackageId));
+        } catch (\Throwable $e) {
+            return $this->openProjectFailure($e, 'Failed to load the OpenProject edit form', ['teamId' => $teamId]);
+        }
+    }
+
+    /**
+     * PATCH /api/v1/teams/{teamId}/openproject/work-packages/{workPackageId}
+     *
+     * Change one work package in the linked project, as the current user
+     * (v4.13.9) — **the write DESIGN §2.124 and §2.126 recorded as
+     * impossible**, because it needs HTTP PATCH and the official
+     * integration app's request layer does not send one. On a connection
+     * that cannot, this answers 501 `method_unsupported` rather than
+     * failing obscurely.
+     *
+     * `lockVersion` is required and comes from the edit form. A stale one
+     * means somebody else wrote first: OpenProject answers 409 and this
+     * returns `edit_conflict` with its sentence, so the editor is told to
+     * reload rather than having their change silently win.
+     *
+     * Only the fields present in the body are changed. `assigneeId` and
+     * `dueDate` sent as null **clear** them, which is why the signature
+     * takes nullables rather than defaults.
+     */
+    #[NoAdminRequired]
+    #[UserRateLimit(limit: 30, period: 60)]
+    public function updateWorkPackage(
+        string $teamId,
+        int $workPackageId,
+        int $lockVersion = -1,
+        ?string $subject = null,
+        ?int $typeId = null,
+        ?int $statusId = null,
+        ?int $assigneeId = null,
+        ?string $dueDate = null,
+        ?int $percentageDone = null,
+        ?string $description = null,
+    ): JSONResponse {
+        $gate = $this->openProjectModuleGate();
+        if ($gate !== null) {
+            return $gate;
+        }
+        try {
+            $this->memberService->requireMemberLevel($teamId);
+            $userId = $this->capabilities->requireReadable();
+            $this->links->requireLink($teamId);
+
+            // Only what the client actually sent. `null` is a real value
+            // for assignee and due date (clear it), so presence in the
+            // request body is the test, not nullness of the parameter.
+            $body  = $this->request->getParams();
+            $input = ['lockVersion' => $lockVersion];
+            foreach (['subject', 'typeId', 'statusId', 'assigneeId', 'dueDate', 'percentageDone', 'description'] as $field) {
+                if (array_key_exists($field, $body)) {
+                    $input[$field] = ${$field};
+                }
+            }
+
+            return new JSONResponse($this->workPackages->update($userId, $teamId, $workPackageId, $input));
+        } catch (\Throwable $e) {
+            return $this->openProjectFailure($e, 'Failed to change the OpenProject work package', ['teamId' => $teamId]);
+        }
+    }
+
+    /**
      * GET /api/v1/teams/{teamId}/openproject/meetings?limit=10&refresh=1
      *
      * The linked project's upcoming OpenProject meetings, as the current

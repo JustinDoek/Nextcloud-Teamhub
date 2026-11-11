@@ -3,7 +3,6 @@ declare(strict_types=1);
 
 namespace OCA\TeamHub\BackgroundJob;
 
-use OCA\TeamHub\Service\PresenceCalendarService;
 use OCP\AppFramework\Utility\ITimeFactory;
 use OCP\BackgroundJob\QueuedJob;
 use Psr\Log\LoggerInterface;
@@ -29,27 +28,13 @@ class PresenceCalendarSyncJob extends QueuedJob {
 
     public function __construct(
         ITimeFactory                       $time,
-        private PresenceCalendarService    $calendarService,
         private LoggerInterface            $logger,
     ) {
         parent::__construct($time);
     }
 
     protected function run(mixed $argument): void {
-        $userId = $argument['userId'] ?? null;
-        if (!is_string($userId) || $userId === '') {
-            $this->logger->warning('[TeamHub][PresenceCalendarSyncJob] missing userId in argument');
-            return;
-        }
-
-        try {
-            $this->calendarService->syncAllSlotsForUser($userId);
-        } catch (\Throwable $e) {
-            // Non-fatal — calendar sync failures should never surface to the user.
-            $this->logger->warning(sprintf(
-                '[TeamHub][PresenceCalendarSyncJob] sync failed for %s: %s',
-                $userId, $e->getMessage()
-            ));
-        }
+        // The Presence → Calendar write integration was retired. Existing
+        // queued jobs must be harmless on upgrade: do NOT recreate events.
     }
 }

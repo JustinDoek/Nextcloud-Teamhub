@@ -296,7 +296,7 @@ class TeamGroupService {
 	 * preference row got corrupted should see their teams as a plain list,
 	 * not an app that refuses to render.
 	 *
-	 * @return array{groups: list<array{id: string, name: ?string, expanded: bool, builtin: bool}>, assignments: array<string, string>}
+	 * @return array{groups: list<array{id: string, name: ?string, expanded: bool, builtin: bool}>, assignments: array<string, string>, expandedTeams: array<string, bool>}
 	 */
 	private function read(string $uid): array {
 		$raw = $this->config->getUserValue($uid, Application::APP_ID, self::PREF_KEY, '');

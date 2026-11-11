@@ -4,6 +4,10 @@ declare(strict_types=1);
 namespace OCA\TeamHub\Controller;
 
 use OCA\TeamHub\AppInfo\Application;
+use OCA\TeamHub\Constants\DashboardWidgets;
+use OCA\TeamHub\Constants\LayoutSchema;
+use OCA\TeamHub\Service\MemberReviewService;
+use OCA\TeamHub\Service\AdminSettingsAuditService;
 use OCA\TeamHub\Service\ActivityService;
 use OCA\TeamHub\Service\CalendarService;
 use OCA\TeamHub\Service\CollectivesService;
@@ -25,6 +29,8 @@ use OCA\TeamHub\Service\ResourceDiscoveryService;
 use OCA\TeamHub\Service\ResourceService;
 use OCA\TeamHub\Service\TaskService;
 use OCA\TeamHub\Service\TeamExpiryService;
+use OCA\TeamHub\Service\TeamInvitationService;
+use OCA\TeamHub\Service\LayoutDefaultService;
 use OCA\TeamHub\Service\TeamService;
 use OCA\TeamHub\Service\TeamTypeService;
 use OCA\TeamHub\Service\TimelineService;
@@ -50,7 +56,17 @@ class TeamController extends Controller {
         string $appName,
         IRequest $request,
         private TeamService $teamService,
+        // v4.13.17 — the admin page's own settings in the audit log. A DI leaf
+        // (IConfig + session + AuditService).
+        private AdminSettingsAuditService $settingsAudit,
+        // v4.13.17 — membership recertification. A DI leaf over its mapper
+        // plus PolicyService, MemberService and AuditService.
+        private MemberReviewService $memberReview,
         private MemberService $memberService,
+        // v4.13.18 — accepting or refusing an invitation, through Circles'
+        // service layer rather than its frontend controller. See
+        // acceptInvitation().
+        private TeamInvitationService $teamInvitationService,
         // v4.10.7 — the one way to look a person up; see searchUsers().
         private PersonSearchService $personSearch,
         private ResourceService $resourceService,
@@ -96,6 +112,9 @@ class TeamController extends Controller {
         // makes an OpenProject team.
         private OpenProjectModuleService $openProjectModule,
         private IConfig $config,
+        // v4.13.34 — the team's own default home layout, set here beside the
+        // hidden-widgets list it belongs with (issue #109 phase 3).
+        private LayoutDefaultService $layoutDefaults,
         private \OCA\TeamHub\Service\RoomDiscoveryService $roomDiscovery,
         // v4.11.6 — the default issue process a new service team is seeded
         // with, from saveTeamType(). Beside TeamExpiryService for the same
@@ -221,6 +240,14 @@ class TeamController extends Controller {
             return new JSONResponse(['error' => 'You are not allowed to create teams'], Http::STATUS_FORBIDDEN);
         }
         try {
+            // A template defines the team's initial dashboard. Validate the
+            // key BEFORE creating anything, then persist it in this request.
+            // The wizard's later /type PUT still applies expiry and service
+            // setup, but no longer determines whether the first Home GET has
+            // a template to resolve.
+            if ($templateKey !== '') {
+                $this->teamTypeService->assertAllowedType($templateKey);
+            }
             $linkOpenProject = $templateKey === TeamOpenProjectLinkService::TEMPLATE || $openProjectId > 0;
             if ($linkOpenProject) {
                 // v4.9.16 — no OpenProject team without the OpenProject module.
@@ -237,6 +264,12 @@ class TeamController extends Controller {
             $teamId = (string)($team['id'] ?? '');
 
             if ($teamId !== '') {
+                // The OpenProject link path sets the type itself as part of
+                // linking. Every other templated team is typed immediately:
+                // a first dashboard read must not race the later wizard PUT.
+                if ($templateKey !== '' && !$linkOpenProject) {
+                    $this->teamTypeService->setType($teamId, $templateKey);
+                }
                 // Assignment writes the row and returns what it governs; the
                 // config bits are applied through TeamService, which owns that
                 // write and masks it to MANAGED_BITS.
@@ -424,7 +457,13 @@ class TeamController extends Controller {
     #[NoCSRFRequired]
     public function getAllEffectiveMembers(string $teamId): JSONResponse {
         try {
-            $data = $this->memberService->getAllEffectiveMembers($teamId);
+            // v4.14.16 — `true`: the people on other servers belong in this
+            // list. It is what the members widget and the @mention
+            // autocomplete read, and leaving a colleague out of the list a
+            // team sees of itself was the bug (DESIGN §2.257). The service
+            // callers of the same method keep the local-only default, because
+            // they decide approvers and shifts rather than draw a roster.
+            $data = $this->memberService->getAllEffectiveMembers($teamId, true);
             $talkAvailable = $this->memberService->isTalkAvailableForCurrentUser();
             $mailAvailable = $this->memberService->isMailAvailableForCurrentUser();
             return new JSONResponse([
@@ -496,6 +535,46 @@ class TeamController extends Controller {
      * Returns {direct: [...], groups: [...], circles: [...], effective_count: int}.
      * Requires admin or owner level (enforced in service).
      */
+    /**
+     * GET /api/v1/teams/{teamId}/members/review
+     *
+     * Where this team stands on membership recertification (v4.13.17, DESIGN
+     * §2.193): whether its classification asks for one, when it falls due, and
+     * who attested last. Team-admin gated in the service.
+     */
+    #[NoAdminRequired]
+    #[NoCSRFRequired]
+    public function memberReviewStatus(string $teamId): JSONResponse {
+        try {
+            $this->memberService->requireAdminLevel($teamId);
+
+            return new JSONResponse([
+                'status'  => $this->memberReview->status($teamId),
+                'history' => $this->memberReview->history($teamId, 10),
+            ]);
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Could not read the membership review.', ['teamId' => $teamId]);
+        }
+    }
+
+    /**
+     * POST /api/v1/teams/{teamId}/members/review
+     * Body: { note?: string }
+     *
+     * The attestation: this administrator has examined the member list and
+     * confirms it. The opening action lives where the subject is — the Members
+     * tab — per `/mywork-workflows`; the My Work row carries the same action
+     * for whoever works from the queue instead.
+     */
+    #[NoAdminRequired]
+    public function attestMemberReview(string $teamId, string $note = ''): JSONResponse {
+        try {
+            return new JSONResponse(['status' => $this->memberReview->attest($teamId, $note)]);
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Could not record the membership review.', ['teamId' => $teamId]);
+        }
+    }
+
     #[NoAdminRequired]
     #[NoCSRFRequired]
     public function getMembersForManage(string $teamId): JSONResponse {
@@ -647,8 +726,6 @@ class TeamController extends Controller {
 
     #[NoAdminRequired]
     #[NoCSRFRequired]
-    #[NoAdminRequired]
-    #[NoCSRFRequired]
     public function getIntravoxSubPages(string $teamId): JSONResponse {
         try {
             $this->memberService->requireMemberLevel($teamId);
@@ -656,7 +733,7 @@ class TeamController extends Controller {
             $pages  = $this->intravoxService->getSubPages($teamId, $team['name'] ?? '');
             return new JSONResponse($pages);
         } catch (\Exception $e) {
-            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+            return $this->clientErrorResponse($e);
         }
     }
 
@@ -669,7 +746,7 @@ class TeamController extends Controller {
             $page = $this->intravoxService->getTeamPage($teamId, $team['name'] ?? '');
             return new JSONResponse($page);
         } catch (\Exception $e) {
-            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+            return $this->clientErrorResponse($e);
         }
     }
 
@@ -690,6 +767,44 @@ class TeamController extends Controller {
             return new JSONResponse(['success' => true, 'result' => $result]);
         } catch (\Exception $e) {
             $this->logger->error('[TeamHub][TeamController] createIntravoxPage failed', [
+                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+        }
+    }
+
+    /**
+     * Create a page under this team's own intranet page (v4.13.62).
+     *
+     * Replaces the browser POSTing straight to `/apps/intravox/api/pages`,
+     * which bypassed `IntravoxPageApi` — the one place TeamHub names anything
+     * inside IntraVox — and left the client deriving IntraVox paths and slugs
+     * of its own. The service owns both now.
+     *
+     * `requireAdminLevel`, as its two siblings above and below: creating and
+     * deleting a team's own intranet page are already a team admin's. Justin,
+     * 2026-10-31, chose the same gate for a sub-page rather than the moderator
+     * level the buttons used to carry — so the Intranet actions in
+     * `TeamWidgetGrid` moved to `isTeamAdmin` in the same change, because an
+     * action a role may not take is **hidden** from it, not left to 403
+     * (CLAUDE.md). Before this, *Delete Intranet page* was shown to moderators
+     * and refused.
+     *
+     * No `#[NoCSRFRequired]`: this writes.
+     */
+    #[NoAdminRequired]
+    public function createIntravoxSubPage(string $teamId): JSONResponse {
+        try {
+            $this->memberService->requireAdminLevel($teamId);
+            $team   = $this->teamService->getTeam($teamId);
+            $title  = (string)($this->request->getParam('title') ?? '');
+            $result = $this->intravoxService->createSubPage($teamId, $team['name'] ?? '', $title);
+            if (isset($result['error'])) {
+                return new JSONResponse(['error' => $result['error']], Http::STATUS_BAD_REQUEST);
+            }
+            return new JSONResponse(['success' => true, 'result' => $result]);
+        } catch (\Exception $e) {
+            $this->logger->error('[TeamHub][TeamController] createIntravoxSubPage failed', [
                 'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
@@ -719,7 +834,7 @@ class TeamController extends Controller {
             $this->intravoxService->invalidateSubPagesCache($teamId);
             return new JSONResponse(['success' => true]);
         } catch (\Exception $e) {
-            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+            return $this->clientErrorResponse($e);
         }
     }
 
@@ -737,7 +852,7 @@ class TeamController extends Controller {
                 'collectives_installed' => $this->collectivesService->isInstalled(),
             ]);
         } catch (\Exception $e) {
-            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+            return $this->clientErrorResponse($e);
         }
     }
 
@@ -818,7 +933,7 @@ class TeamController extends Controller {
             }
             return new JSONResponse($this->collectivesService->getTeamCollective($teamId, $uid));
         } catch (\Exception $e) {
-            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+            return $this->clientErrorResponse($e);
         }
     }
 
@@ -833,7 +948,7 @@ class TeamController extends Controller {
             }
             return new JSONResponse($this->collectivesService->getSubPages($teamId, $uid));
         } catch (\Exception $e) {
-            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+            return $this->clientErrorResponse($e);
         }
     }
 
@@ -853,8 +968,12 @@ class TeamController extends Controller {
                 return new JSONResponse(['error' => 'Not authenticated'], Http::STATUS_UNAUTHORIZED);
             }
             return new JSONResponse($this->collectivesService->getPageTree($teamId, $uid));
-        } catch (Exception $e) {
-            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+        } catch (\Throwable $e) {
+            // Was `catch (Exception $e)` with no leading backslash, which named
+            // OCA\TeamHub\Controller\Exception, a class that does not exist, so
+            // nothing was ever caught and a non-member got a 500. The trait maps
+            // AccessDeniedException to 403 and logs anything unexpected.
+            return $this->exceptionResponse($e, 'Failed to load the Collectives page tree', ['teamId' => $teamId]);
         }
     }
 
@@ -865,7 +984,7 @@ class TeamController extends Controller {
             $this->collectivesService->invalidateCache($teamId);
             return new JSONResponse(['success' => true]);
         } catch (\Exception $e) {
-            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+            return $this->clientErrorResponse($e);
         }
     }
 
@@ -888,7 +1007,7 @@ class TeamController extends Controller {
             }
             return new JSONResponse($result);
         } catch (\Exception $e) {
-            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+            return $this->clientErrorResponse($e);
         }
     }
 
@@ -923,7 +1042,7 @@ class TeamController extends Controller {
             $this->messageService->markTeamSeen($teamId);
             return new JSONResponse(['success' => true]);
         } catch (\Exception $e) {
-            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+            return $this->clientErrorResponse($e);
         }
     }
 
@@ -1179,6 +1298,17 @@ class TeamController extends Controller {
         try {
             $this->memberService->requireAdminLevel($teamId);
 
+            // Department-only celebrations. Independent of birthday widget visibility.
+            $anniversaryRaw = $this->request->getParam('anniversary_enabled', null);
+            if ($anniversaryRaw !== null) {
+                if ($this->teamTypeService->getType($teamId) !== 'department'
+                    || !in_array($anniversaryRaw, [true, false, 1, 0, '1', '0'], true)) {
+                    return new JSONResponse(['error' => 'Invalid anniversary setting'], Http::STATUS_BAD_REQUEST);
+                }
+                $this->config->setAppValue(Application::APP_ID,
+                    'people_anniversary_enabled_' . $teamId, ($anniversaryRaw === true || $anniversaryRaw === 1 || $anniversaryRaw === '1') ? '1' : '0');
+            }
+
             $hiddenRaw = $this->request->getParam('hidden_widgets', null);
             if ($hiddenRaw !== null) {
                 // Accept a JSON-encoded string as well as a native array.
@@ -1206,6 +1336,46 @@ class TeamController extends Controller {
                 $this->config->setAppValue(Application::APP_ID, 'dashboard_tab_' . $teamId, $tab);
             }
 
+            // v4.13.34 — the team's own default home layout (issue #109 phase
+            // 3). Three shapes, because three things an admin does:
+            //
+            //   team_layout: [...]  + team_layout_mode  set or replace it
+            //   team_layout: null                       clear it
+            //   team_layout_mode alone                  change what it does
+            //
+            // `false` is the "not sent" marker rather than null, because null
+            // is itself one of the three meanings. Validation, the empty-layout
+            // refusal and the audit entry all live in LayoutDefaultService.
+            $layoutRaw = $this->request->getParam('team_layout', false);
+            $modeRaw   = $this->request->getParam('team_layout_mode', null);
+            $resetTeamLayout = $this->request->getParam('reset_team_layout', false) === true;
+
+            if ($resetTeamLayout) {
+                // Only an admin may publish a team-wide reset, and the server
+                // supplies the recipe: clients cannot invent another template.
+                $template = $this->layoutDefaults->forTemplate($this->teamTypeService->getType($teamId));
+                $previous = $this->layoutDefaults->forTeam($teamId);
+                $this->layoutDefaults->saveTeam(
+                    $teamId,
+                    $template['layout'] ?? LayoutSchema::DEFAULT_LAYOUT,
+                    $template['tabOrder'] ?? LayoutSchema::DEFAULT_TAB_ORDER,
+                    $previous['mode'] ?? 'apply_once',
+                );
+            } elseif ($layoutRaw === null || $layoutRaw === 'null') {
+                $this->layoutDefaults->clearTeam($teamId);
+            } elseif ($layoutRaw !== false) {
+                $this->layoutDefaults->saveTeam(
+                    $teamId,
+                    $layoutRaw,
+                    $this->request->getParam('team_tab_order'),
+                    is_string($modeRaw) && $modeRaw !== ''
+                        ? $modeRaw
+                        : ($this->layoutDefaults->forTeam($teamId)['mode'] ?? 'enforce'),
+                );
+            } elseif (is_string($modeRaw) && $modeRaw !== '') {
+                $this->layoutDefaults->setTeamMode($teamId, $modeRaw);
+            }
+
             return new JSONResponse($this->readDashboardConfig($teamId));
         } catch (\Throwable $e) {
             return $this->exceptionResponse($e, 'Failed to save dashboard config', [
@@ -1222,17 +1392,22 @@ class TeamController extends Controller {
      * @return array{hidden_widgets: string[], default_tab: string}
      */
     private function readDashboardConfig(string $teamId): array {
-        $hidden = json_decode(
-            $this->config->getAppValue(Application::APP_ID, 'dashboard_hidden_' . $teamId, '[]'),
-            true
+        // v4.13.34 — the team's own default home layout, if it has one. Only
+        // whether it is set and what mode it is in: the layout itself is
+        // several kilobytes and the Manage team screen has no grid to draw it
+        // in, so it says what is set and offers to replace or clear it. The
+        // layout reaches the people it is for through the layout bundle.
+        // v4.13.1 — see DashboardWidgets: `''` means no administrator has
+        // configured this team (so Team info starts hidden), `'[]'` means one
+        // chose to show every widget. v4.13.35 — the payload's shape lives in
+        // that class, because this reader and the layout bundle's feed one
+        // store value and had already drifted apart once.
+        return DashboardWidgets::configFor(
+            $this->config->getAppValue(Application::APP_ID, 'dashboard_hidden_' . $teamId, ''),
+            $this->config->getAppValue(Application::APP_ID, 'dashboard_tab_' . $teamId, 'msgstream'),
+            $this->layoutDefaults->forTeam($teamId),
+            $this->config->getAppValue(Application::APP_ID, 'people_anniversary_enabled_' . $teamId, '1') === '1',
         );
-        if (!is_array($hidden)) {
-            $hidden = [];
-        }
-        return [
-            'hidden_widgets' => array_values(array_map('strval', $hidden)),
-            'default_tab'    => $this->config->getAppValue(Application::APP_ID, 'dashboard_tab_' . $teamId, 'msgstream'),
-        ];
     }
 
     /**
@@ -1551,6 +1726,33 @@ class TeamController extends Controller {
     }
 
     /**
+     * The catch for endpoints whose services still throw a plain `\Exception`
+     * with a user-facing message (v4.20.0).
+     *
+     * Those endpoints used to answer every exception with 400 and its message,
+     * so a refused membership check (`AccessDeniedException` from
+     * `requireMemberLevel()` / `requireAdminLevel()`) came back as 400 rather
+     * than 403, and a missing team as 400 rather than 404. A typed exception
+     * now gets its own status from {@see ExceptionResponseTrait::exceptionResponse()}.
+     *
+     * A plain `\Exception` keeps the 400 and message it always had. Routing it
+     * through `exceptionResponse()` as well would turn every service sentence
+     * ("cannot remove the last admin" and the like) into a generic 500, which
+     * is the larger regression; moving those throws to `ValidationException`
+     * is the change that would let this helper go.
+     */
+    private function clientErrorResponse(\Exception $e): JSONResponse {
+        if ($e instanceof \OCA\TeamHub\Exception\AccessDeniedException
+            || $e instanceof \OCA\TeamHub\Exception\NotFoundException
+            || $e instanceof \OCA\TeamHub\Exception\AppNotAvailableException
+            || $e instanceof \OCA\TeamHub\Exception\ValidationException
+            || $e instanceof \InvalidArgumentException) {
+            return $this->exceptionResponse($e);
+        }
+        return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+    }
+
+    /**
      * POST /api/v1/teams/{teamId}/tasks
      *
      * Creates a VTODO task in the team calendar.
@@ -1820,7 +2022,7 @@ class TeamController extends Controller {
                 'title'    => $title,
             ], Http::STATUS_CREATED);
         } catch (\Exception $e) {
-            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+            return $this->clientErrorResponse($e);
         }
     }
 
@@ -1862,9 +2064,14 @@ class TeamController extends Controller {
      * The week is always Mon–Sun in the server's local timezone.
      *
      * All team members may call this endpoint.
+     *
+     * Its `#[NoAdminRequired]` and `#[NoCSRFRequired]` were stranded here,
+     * above the NEXT method's docblock, so they applied to
+     * getCalendarEventsInRange (which declares its own) and this routed
+     * endpoint had none at all -- meaning Nextcloud admitted only Nextcloud
+     * administrators to a members' endpoint. They now sit on the method they
+     * describe.
      */
-    #[NoAdminRequired]
-    #[NoCSRFRequired]
     /**
      * Every event instance overlapping an arbitrary window (v4.6.20).
      *
@@ -1922,6 +2129,8 @@ class TeamController extends Controller {
         }
     }
 
+    #[NoAdminRequired]
+    #[NoCSRFRequired]
     public function getCalendarEventsForWeek(string $teamId): JSONResponse {
         try {
             $this->memberService->requireMemberLevel($teamId);
@@ -2034,6 +2243,53 @@ class TeamController extends Controller {
         }
     }
 
+    /**
+     * Accept an invitation to a team.
+     *
+     * v4.13.18. Also the target of the invitation notification's Accept
+     * button, which the Nextcloud notifications app posts with
+     * `@nextcloud/axios` — so the CSRF token travels and this needs no
+     * `#[NoCSRFRequired]`. A desktop or mobile client sends no such token;
+     * for those the notification's body link opens the team page instead.
+     *
+     * No role gate here, and none is possible: the caller is not a member of
+     * this team yet. Holding a pending invitation is the authorisation, and
+     * `TeamInvitationService` is where that is checked.
+     */
+    #[NoAdminRequired]
+    public function acceptInvitation(string $teamId): JSONResponse {
+        try {
+            $this->teamInvitationService->accept($teamId);
+            return new JSONResponse(['success' => true]);
+        } catch (\Throwable $e) {
+            // not_invited is a refusal, not a malformed request: either the
+            // invitation was withdrawn, or somebody is asking about a team
+            // that never invited them. Both answer 403, and neither says
+            // which — a 404 here would confirm the team exists.
+            $code = $e->getMessage() === 'not_invited'
+                ? Http::STATUS_FORBIDDEN
+                : Http::STATUS_BAD_REQUEST;
+            return new JSONResponse(['error' => $e->getMessage()], $code);
+        }
+    }
+
+    /**
+     * Decline an invitation to a team. Same gate and same reasoning as
+     * acceptInvitation(); removes the pending row.
+     */
+    #[NoAdminRequired]
+    public function declineInvitation(string $teamId): JSONResponse {
+        try {
+            $this->teamInvitationService->decline($teamId);
+            return new JSONResponse(['success' => true]);
+        } catch (\Throwable $e) {
+            $code = $e->getMessage() === 'not_invited'
+                ? Http::STATUS_FORBIDDEN
+                : Http::STATUS_BAD_REQUEST;
+            return new JSONResponse(['error' => $e->getMessage()], $code);
+        }
+    }
+
     // -------------------------------------------------------------------------
     // Manage Team endpoints (admin/owner only, enforced in service layer)
     // -------------------------------------------------------------------------
@@ -2045,24 +2301,29 @@ class TeamController extends Controller {
             $this->teamService->updateTeamDescription($teamId, $description);
             return new JSONResponse(['success' => true]);
         } catch (\Exception $e) {
-            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+            return $this->clientErrorResponse($e);
         }
     }
 
     #[NoAdminRequired]
     public function removeMember(string $teamId, string $userId): JSONResponse {
         try {
-            // type=user (default), group, or circle — maps to Circles user_type
+            // type=user (default), group, circle or — v4.14.16 — federated,
+            // mapped to Circles' user_type. A federated target is removed
+            // through Circles rather than by a local delete, so that their own
+            // server hears about it (DESIGN §2.257); the service decides that,
+            // and all this does is carry which kind of row the admin clicked.
             $typeStr  = (string)($this->request->getParam('type', 'user'));
             $userType = match ($typeStr) {
-                'group'  => 2,
-                'circle' => 16,
-                default  => 1,
+                'group'     => 2,
+                'circle'    => 16,
+                'federated' => 4,
+                default     => 1,
             };
             $this->memberService->removeMember($teamId, $userId, $userType);
             return new JSONResponse(['success' => true]);
         } catch (\Exception $e) {
-            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+            return $this->clientErrorResponse($e);
         }
     }
 
@@ -2076,7 +2337,7 @@ class TeamController extends Controller {
             $members = $this->memberService->updateMemberLevel($teamId, $userId, (int)$body['level']);
             return new JSONResponse($members);
         } catch (\Exception $e) {
-            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+            return $this->clientErrorResponse($e);
         }
     }
 
@@ -2112,7 +2373,7 @@ class TeamController extends Controller {
             $this->memberService->approveRequest($teamId, $userId);
             return new JSONResponse(['success' => true]);
         } catch (\Exception $e) {
-            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+            return $this->clientErrorResponse($e);
         }
     }
 
@@ -2122,7 +2383,7 @@ class TeamController extends Controller {
             $this->memberService->rejectRequest($teamId, $userId);
             return new JSONResponse(['success' => true]);
         } catch (\Exception $e) {
-            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
+            return $this->clientErrorResponse($e);
         }
     }
 
@@ -2336,8 +2597,11 @@ class TeamController extends Controller {
     // NC admin required — no #[NoAdminRequired] attribute intentionally omitted
     #[NoCSRFRequired]
     public function intravoxDiagnostic(): JSONResponse {
-        // Admin-only diagnostic: uses PHP Reflection to list all public methods
-        // on IntraVox's PageService so we know exactly what to call.
+        // Admin-only diagnostic: reflects over whichever IntraVox services this
+        // instance actually binds to, so "what can we call here" is answerable
+        // from a browser rather than a shell. Rewritten in v4.13.55: it used to
+        // reflect over the single PageService facade, which IntraVox 3.0.0
+        // deleted, so on a 3.x install it reported nothing but an error.
         $currentUid = $this->userSession->getUser()?->getUID();
         if ($currentUid === null || !$this->groupManager->isAdmin($currentUid)) {
             return new JSONResponse(['error' => 'Admin required'], Http::STATUS_FORBIDDEN);
@@ -2347,22 +2611,36 @@ class TeamController extends Controller {
             if (!$info['installed']) {
                 return new JSONResponse($info);
             }
-            $pageService = $this->container->get(\OCA\IntraVox\Service\PageService::class);
-            $ref = new \ReflectionClass($pageService);
-            $methods = [];
-            foreach ($ref->getMethods(\ReflectionMethod::IS_PUBLIC) as $m) {
-                if ($m->getDeclaringClass()->getName() === $ref->getName()) {
-                    $params = [];
-                    foreach ($m->getParameters() as $p) {
-                        $type = $p->getType() ? $p->getType()->getName() : 'mixed';
-                        $params[] = $type . ' $' . $p->getName();
-                    }
-                    $methods[] = $m->getName() . '(' . implode(', ', $params) . ')';
-                }
+
+            $api = \OCA\TeamHub\Service\Intravox\IntravoxPageApi::bind($this->container);
+            if ($api === null) {
+                $info['bound'] = false;
+                $info['detail'] = 'IntraVox is installed but neither the pre-3.0 facade '
+                    . 'nor the 3.x page services could be loaded. The app is most likely disabled.';
+                return new JSONResponse($info);
             }
-            $info['methods'] = $methods;
-            $info['class'] = $ref->getName();
-            $info['file'] = $ref->getFileName();
+
+            $info['bound']      = true;
+            $info['generation'] = $api->generation();
+
+            // One reflection block per bound class, so a method that moved
+            // again is visible as a gap rather than as a silent failure at the
+            // next page create.
+            $info['services'] = [];
+            foreach ($api->boundClasses() as $role => $class) {
+                $entry = ['class' => ltrim($class, '\\')];
+                try {
+                    $instance = $this->container->get($entry['class']);
+                    $ref = new \ReflectionClass($instance);
+                    $entry['methods'] = $this->reflectPublicMethods($instance);
+                    $entry['file']    = $ref->getFileName();
+                } catch (\Throwable $e) {
+                    $entry['error'] = $e->getMessage();
+                }
+                $info['services'][$role] = $entry;
+            }
+
+            $pageService = $api;
 
             // Optional content-format probe (v3.88.x) — pass ?pageId=<id> to see the
             // raw shape IntraVox returns for an existing page's content, so TeamHub
@@ -2377,7 +2655,14 @@ class TeamController extends Controller {
                     $probe['getPage_error'] = $e->getMessage();
                 }
                 try {
-                    $probe['getCurrentPageContent'] = $pageService->getCurrentPageContent($pageId);
+                    // getCurrentPageContent() moved onto a service of its own in
+                    // IntraVox 3.0.0. Resolved here rather than on IntravoxPageApi
+                    // because nothing outside this probe reads page versions, and
+                    // the API surface should list what TeamHub actually uses.
+                    $contentSource = $api->generation() === 'legacy'
+                        ? $this->container->get(ltrim(\OCA\TeamHub\Service\Intravox\IntravoxPageApi::LEGACY_FACADE, '\\'))
+                        : $this->container->get('OCA\\IntraVox\\Service\\Version\\PageVersionDomainService');
+                    $probe['getCurrentPageContent'] = $contentSource->getCurrentPageContent($pageId);
                 } catch (\Throwable $e) {
                     $probe['getCurrentPageContent_error'] = $e->getMessage();
                 }
@@ -2631,7 +2916,14 @@ class TeamController extends Controller {
             if (!is_array($body)) {
                 $body = [];
             }
-            $this->teamService->saveAdminSettings($body);
+            // v4.13.17 — every key this save changes is audited, by diffing
+            // the app's config namespace around it rather than from inside the
+            // three hundred branches that write it. See
+            // AdminSettingsAuditService.
+            $this->settingsAudit->recordAround(
+                'admin.settings',
+                fn () => $this->teamService->saveAdminSettings($body),
+            );
             return new JSONResponse(['success' => true]);
         } catch (\Throwable $e) {
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);

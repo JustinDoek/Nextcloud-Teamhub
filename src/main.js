@@ -24,6 +24,7 @@ import axios from '@nextcloud/axios'
 import { translate as t, translatePlural as n } from '@nextcloud/l10n'
 import App from './App.vue'
 import store from './store/index.js'
+import { registerComplimentAction } from './lib/complimentMenuAction.js'
 
 // Shared widget design tokens (typography scale, colour assignments,
 // shared utility classes). Loaded once so every widget inherits.
@@ -46,5 +47,20 @@ app.config.globalProperties.n = n
 // [TeamHub][main] debug: remove at session end
 
 app.use(store)
-app.mount('#teamhub-app')
+const root = app.mount('#teamhub-app')
+
+// v4.13.2 — the Compliment entry in Nextcloud's contacts menu. Registered
+// here and nowhere else, so it appears on every avatar menu inside TeamHub
+// and on none outside it: the registry is one object on `window`, and the
+// Files sidebar does not run this bundle.
+//
+// The callback reaches the mounted root component rather than going through
+// the store, because what it opens is a dialog App.vue owns and there is no
+// state worth keeping for it — the composer is created when the entry is
+// clicked and cleared when it closes.
+registerComplimentAction((person) => {
+	if (root && typeof root.openComplimentComposer === 'function') {
+		root.openComplimentComposer(person)
+	}
+})
 

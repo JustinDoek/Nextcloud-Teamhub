@@ -16,6 +16,7 @@ use OCP\IDBConnection;
 use OCP\IUserSession;
 use Psr\Container\ContainerInterface;
 use Psr\Log\LoggerInterface;
+use OCP\L10N\IFactory;
 
 /**
  * Aggregates date-anchored events from Calendar, Decisions, Deck, Messages,
@@ -86,6 +87,11 @@ class TimelineService {
         private TeamAppResourceMapper $resourceMapper,
         private MilestoneMapper $milestoneMapper,
         private DecisionTaskMapper $decisionTaskMapper,
+        // A calendar event with no SUMMARY needs a translated fallback title.
+        // What stood there was a bare `t('teamhub', …)` -- the JavaScript
+        // idiom, which in PHP is an undefined function and therefore a fatal
+        // on any untitled event.
+        private IFactory $l10nFactory,
     ) {}
 
     // =========================================================================
@@ -375,7 +381,7 @@ class TimelineService {
                         'id'      => 'cal-' . (string)($vevent->UID ?? $row['uri']),
                         'source'  => 'calendar',
                         'type'    => 'event',
-                        'title'   => (string)($vevent->SUMMARY ?? t('teamhub', 'Untitled')),
+                        'title'   => (string)($vevent->SUMMARY ?? $this->l10nFactory->get('teamhub')->t('Untitled')),
                         'date'    => $startTime->format('c'),
                         'endDate' => $endTime?->format('c'),
                         'allDay'  => !$dtstart->hasTime(),

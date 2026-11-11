@@ -46,7 +46,7 @@
                  cannot drift from it. Same markup, same CSS, one definition. -->
             <div class="whats-happening__tabs" role="group" :aria-label="t('teamhub', 'Filter by source')">
                 <TogglePill
-                    v-for="tab in visibleTabs"
+                    v-for="tab in tabs"
                     :key="tab"
                     :label="feedTabLabel(tab)"
                     :count="sourceCounts[tab] || 0"
@@ -55,23 +55,21 @@
             </div>
 
             <!-- v4.9.7 — the OpenProject news source did not answer cleanly:
-                 the viewer is not connected, the token was refused, or some
-                 projects could not be read. One line; the rest of the feed
-                 stands. Shown only while the source is switched on and the
-                 tab could show its rows. -->
+                 some projects could not be read, or the source errored. One
+                 line; the rest of the feed stands. Shown only while the
+                 source is switched on and the tab could show its rows.
+                 2026-10-23 — a viewer who is not connected, or whose token
+                 was refused, gets no line here: connecting an account is a
+                 personal-settings errand, not news.
+                 v4.13.31 — news is a team message, so the Team tab is where
+                 the rows are and where the line belongs. -->
             <div
-                v-if="openProjectNotice && (activeTab === 'all' || activeTab === 'openproject')"
+                v-if="openProjectNotice && (activeTab === 'all' || activeTab === 'team')"
                 class="whats-happening__notice"
                 role="status"
                 aria-live="polite">
                 <BriefcaseOutline :size="ICON_BODY" aria-hidden="true" />
                 <span>{{ openProjectNotice.text }}</span>
-                <a
-                    v-if="openProjectNotice.action === 'connect'"
-                    class="whats-happening__notice-link"
-                    :href="personalSettingsUrl()">
-                    {{ t('teamhub', 'Open personal settings') }}
-                </a>
             </div>
 
             <div v-if="loading && !items.length" class="whats-happening__loading">
@@ -165,13 +163,11 @@ import FeedControlRail from './feed/FeedControlRail.vue'
 import TogglePill from './TogglePill.vue'
 import { ICON_BODY, ICON_HERO, ICON_LARGE } from '../constants/uiTokens.js'
 import { mentionsUser } from '../lib/mentions.js'
-import { personalSettingsUrl } from '../lib/openProject.js'
 import {
     FEED_TABS,
     FEED_TAB_ALL,
     FEED_TAB_DECISIONS,
     FEED_TAB_MENTIONS,
-    FEED_TAB_OPENPROJECT,
     FEED_TAB_PUBLIC,
     FEED_TAB_TALK,
     FEED_TAB_TEAM,
@@ -213,9 +209,13 @@ function defaultControls() {
         // v4.5.29 — its own Show row. Only open decisions are listed; the
         // server enforces that, this is just the switch.
         includeDecisions: true,
-        // v4.9.7 — OpenProject news: its Show switch and the projects to
-        // keep ([] = all). The server validates the list to a bounded shape.
-        includeOpenProject: true,
+        // v4.13.31 — `includeOpenProject` is gone with its switch, the way
+        // `includeSystem` went in 4.5.31. News is a team message, so the
+        // Team switch governs it; the server still accepts the parameter
+        // for an API caller that wants the messages without the live HTTP
+        // read, and a stored `false` is ignored because this list is what
+        // `pickControlKeys()` reads. What stays is which *projects* to keep
+        // ([] = all) — a facet like Teams, not a source of its own.
         projectIds: [],
         period: 'all',
         customFrom: 0,
@@ -279,12 +279,15 @@ export default {
          * do go to the server, because they change what the counts are counting.
          */
         visibleItems() {
+            // v4.9.9 — the live news card and the message mirrored from it
+            // are one item; whichever tab lists both, it appears once.
+            // v4.13.31 — before the tab filter rather than only on All: news
+            // rows land under Team now, so Team can hold the pair too.
+            const page = dedupeMirroredNews(this.items)
             if (this.activeTab === FEED_TAB_ALL) {
-                // v4.9.9 — the one tab that lists both the live news card
-                // and the message mirrored from it shows the item once.
-                return dedupeMirroredNews(this.items)
+                return page
             }
-            return this.items.filter((item) => {
+            return page.filter((item) => {
                 const kind = feedItemKind(item)
                 switch (this.activeTab) {
                 case FEED_TAB_TALK:
@@ -292,15 +295,16 @@ export default {
                 case FEED_TAB_PUBLIC:
                     return item.source === 'public'
                 case FEED_TAB_TEAM:
-                    return item.source === 'team'
+                    // v4.13.31 — an OpenProject news row is a team message.
+                    // It carries `source: 'openproject'` as its provenance,
+                    // which the card reads; the tab asks the other question.
+                    return item.source === 'team' || kind === 'openproject'
                 case FEED_TAB_DECISIONS:
                     // The server has already dropped every decision that is no
                     // longer open, so being a decision at all is enough here.
                     return kind === 'decision'
                 case FEED_TAB_MENTIONS:
                     return this.mentionsMe(item)
-                case FEED_TAB_OPENPROJECT:
-                    return kind === 'openproject'
                 default:
                     return true
                 }
@@ -312,28 +316,28 @@ export default {
          * the server reports it under `sources.openproject` on every load,
          * with `unavailable` when the integration app is absent. Until the
          * first load has answered, assume it does not, so the rail never
-         * flashes a switch that then disappears.
+         * flashes a control that then disappears.
+         *
+         * v4.13.31 — it gates the OpenProject projects picklist. The switch
+         * it also gated is gone: news is a team message now, and the Team
+         * switch cannot be hidden on an instance without OpenProject.
          */
         openProjectAvailable() {
             const state = this.sources?.openproject?.state
             return !!state && state !== 'unavailable'
         },
 
-        /** v4.9.7 — the notice above the list, or null. */
+        /**
+         * v4.9.7 — the notice above the list, or null.
+         *
+         * v4.13.31 — gated on the Team switch, which is what the news source
+         * follows now that it has no switch of its own.
+         */
         openProjectNotice() {
-            if (!this.controls.includeOpenProject) {
+            if (!this.controls.includeTeam) {
                 return null
             }
             return openProjectSourceNotice(this.sources?.openproject)
-        },
-
-        /**
-         * The tabs on screen: OpenProject only when the source exists here.
-         * A tab that always reads 0 because the integration is not installed
-         * is a question nobody asked.
-         */
-        visibleTabs() {
-            return this.tabs.filter((tab) => tab !== FEED_TAB_OPENPROJECT || this.openProjectAvailable)
         },
 
         groupedItems() {
@@ -355,7 +359,7 @@ export default {
         activeFilterCount() {
             const d = defaultControls()
             let count = 0
-            for (const key of ['includeTeam', 'includePublic', 'includeTalk', 'includeMentions', 'includeDecisions', 'includeOpenProject']) {
+            for (const key of ['includeTeam', 'includePublic', 'includeTalk', 'includeMentions', 'includeDecisions']) {
                 if (this.controls[key] !== d[key]) count++
             }
             if (this.controls.period !== 'all') count++
@@ -394,7 +398,7 @@ export default {
             if (this.activeFilterCount) {
                 return t('teamhub', 'Try widening the period, or clearing a team or type selection.')
             }
-            return t('teamhub', 'When your teams post messages — or when someone publishes a public message — it will appear here.')
+            return t('teamhub', 'When your teams post messages (or when someone publishes a public message) it will appear here.')
         },
     },
 
@@ -416,7 +420,6 @@ export default {
         t,
         n,
         feedTabLabel,
-        personalSettingsUrl,
 
         onKeydown(event) {
             if (event.key === 'Escape' && this.railOpen) {
@@ -554,7 +557,6 @@ export default {
                 includeTalk: this.controls.includeTalk ? 1 : 0,
                 includeMentions: this.controls.includeMentions ? 1 : 0,
                 includeDecisions: this.controls.includeDecisions ? 1 : 0,
-                includeOpenProject: this.controls.includeOpenProject ? 1 : 0,
                 limit: this.controls.perPage,
                 offset,
             }
@@ -619,11 +621,9 @@ export default {
             this.facets = { teams: data?.facets?.teams || [], projects: data?.facets?.projects || [] }
             // v4.9.7 — per-source health, for the notice and the rail switch.
             this.sources = data?.sources && typeof data.sources === 'object' ? data.sources : {}
-            // A remembered OpenProject tab on an instance without the source
-            // would show an empty list under a tab that is no longer drawn.
-            if (this.activeTab === FEED_TAB_OPENPROJECT && !this.openProjectAvailable) {
-                this.activeTab = FEED_TAB_ALL
-            }
+            // v4.13.31 — no OpenProject tab to fall back from. A browser that
+            // remembered one is handled in `hydrateFromStorage()`, which only
+            // restores a tab FEED_TABS still has.
         },
 
         reportError(e) {
@@ -893,17 +893,6 @@ export default {
     background: var(--color-background-hover);
     color: var(--color-main-text);
     font-size: var(--th-font-meta, 12px);
-}
-
-.whats-happening__notice-link {
-    color: var(--color-primary-element);
-    font-weight: var(--th-font-weight-semibold, 600);
-    text-decoration: underline;
-
-    &:focus-visible {
-        outline: 2px solid var(--color-primary-element);
-        outline-offset: 2px;
-    }
 }
 
 .whats-happening__footer {

@@ -13,6 +13,7 @@ use OCA\TeamHub\Db\ResourceLinkMapper;
 use OCA\TeamHub\Db\SubTeamMapper;
 use OCA\TeamHub\Db\TeamAppMapper;
 use OCA\TeamHub\Db\TeamAppPresenceMapper;
+use OCA\TeamHub\Db\TeamTemplateMapper;
 use OCA\TeamHub\Db\TeamTypeMapper;
 use OCP\App\IAppManager;
 use OCP\IUserManager;
@@ -46,6 +47,18 @@ use Psr\Log\LoggerInterface;
  */
 class TeamService {
 
+    /**
+     * Longest welcome message a Nextcloud administrator can store, in
+     * characters (v4.13.56).
+     *
+     * It is the subline of an empty state, read by every user of the instance
+     * on the screen they land on, and it renders as markdown. Four thousand
+     * characters is far more than that surface can usefully hold and still
+     * small enough that reading it on every welcome-page view costs nothing.
+     * The frontend's `maxlength` matches; this is the one that is enforced.
+     */
+    public const WELCOME_MESSAGE_MAX = 4000;
+
     /** @var \OCA\Circles\CirclesManager|null */
     private $circlesManager = null;
 
@@ -71,6 +84,11 @@ class TeamService {
         private PendingDeletionMapper $pendingMapper,
         private GroupFolderService   $groupFolderService,
         private TeamTypeMapper       $teamTypeMapper,
+        // v4.13.28 — the template's label and seeded-ness for the browse
+        // cards' badge. The mapper rather than TeamTypeService: the describe
+        // rule is knowledge of `teamhub_template` and lives there, and taking
+        // the service would pull MemberService's whole graph in behind it.
+        private TeamTemplateMapper   $teamTemplateMapper,
         // v4.8.4 — Track F2b. Read-only from here: PolicyService decides what a
         // team's profile governs, this service owns the writes that apply it.
         // Acyclic on purpose — PolicyService knows nothing about TeamService.
@@ -95,6 +113,16 @@ class TeamService {
         // renameTeam(). A DI leaf (container + logger) with a per-request
         // cache, which is why probing it per rename costs nothing.
         private DbIntrospectionService $dbIntrospection,
+        // v4.13.16 - whether Circles' own frontend is switched on, which
+        // decides whether its per-team avatar OCS route answers. A DI leaf
+        // (IConfig + session + group manager + app manager + AuditService);
+        // the read this class uses is the ungated one.
+        private TeamsFrontendService $teamsFrontend,
+        // v4.14.15 - teams another server owns, for getSidebarTeams() only.
+        // A DI leaf (IDBConnection + IConfig + IUserManager + logger). It is
+        // asked on the sidebar path and nowhere else: getUserTeams() is this
+        // app's authorisation boundary and a remote team must not widen it.
+        private FederatedTeamService $federatedTeams,
     ) {
     }
 
@@ -126,6 +154,17 @@ class TeamService {
      *
      * Fails closed: any error determining the version returns false, so we
      * never point the frontend at an endpoint that may not exist.
+     *
+     * v4.13.16 - it is also false while Circles' own frontend is switched off
+     * (DESIGN §2.190). The avatar routes live on Circles' `LocalController`,
+     * every method of which calls `setCurrentFederatedUser()` and therefore
+     * throws `FrontendException('frontend disabled')` when
+     * `circles`/`frontend_enabled` is `0`. The route exists and answers an
+     * error, which is exactly the case this flag was invented to keep the
+     * frontend away from: Manage team writes TeamHub's own app-data image
+     * instead. **Reading is unaffected** - `TeamImageService` serves the
+     * Circles avatar straight out of app data, so `image_url` keeps working on
+     * a switched-off instance and nothing on screen loses its picture.
      */
     private function isTeamsAvatarSupported(): bool {
         if ($this->teamsAvatarSupported !== null) {
@@ -136,7 +175,7 @@ class TeamService {
             if ($this->appManager->isInstalled('circles')) {
                 $version = $this->appManager->getAppVersion('circles');
                 $major = (int)explode('.', $version)[0];
-                $supported = $major >= 34;
+                $supported = $major >= 34 && $this->teamsFrontend->isEnabled();
             }
         } catch (\Throwable $e) {
             $supported = false;
@@ -536,11 +575,25 @@ class TeamService {
     public function getSidebarTeams(): array {
         $teams = $this->getUserTeams();
 
+        // v4.14.15 — teams another server owns, added here and nowhere else.
+        // Same placement and the same reason as a `listed` sub-team below: the
+        // sidebar is a surface, `getUserTeams()` is an authorisation boundary,
+        // and a team whose module data lives on somebody else's instance must
+        // not reach My Work, the Files-app actions or file reviews — a write
+        // there would land in local tables the owning instance never reads.
+        //
+        // After the local rows rather than merged into their alphabetical
+        // order: these rows carry a globe and a different set of actions, and
+        // keeping them together reads as the one list they are. Off by
+        // default; `sidebarRowsFor()` answers with nothing until an
+        // administrator switches teams from other servers on.
+        $remote = $this->remoteTeamRows();
+
         // v4.12.3 — no module, no sub-teams in the sidebar. Before the nesting
         // rather than after it: nesting and then unpicking would leave the
         // rows' order depending on a switch.
         if (!$this->subTeamModule->isAvailable()) {
-            return self::dropSubTeams($teams);
+            return array_merge(self::dropSubTeams($teams), $remote);
         }
 
         // Which teams could carry a `listed` child the viewer is not in? Only
@@ -587,7 +640,38 @@ class TeamService {
             }
         }
 
-        return self::nestSubTeams($teams, $listed);
+        return array_merge(self::nestSubTeams($teams, $listed), $remote);
+    }
+
+    /**
+     * The sidebar rows for teams this server does not own (v4.14.15,
+     * DESIGN §2.256).
+     *
+     * A thin wrapper so {@see getSidebarTeams()} needs neither the viewer nor
+     * the single-id resolution in its own body, and so a failure here can
+     * never cost the caller its local teams.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function remoteTeamRows(): array {
+        try {
+            if (!$this->federatedTeams->isEnabled()) {
+                return [];
+            }
+            $user = $this->userSession->getUser();
+            if (!$user) {
+                return [];
+            }
+            $db       = $this->container->get(\OCP\IDBConnection::class);
+            $uid      = $user->getUID();
+            $singleId = $this->memberService->resolveUserSingleId($uid, $db);
+            return $this->federatedTeams->sidebarRowsFor($uid, $singleId);
+        } catch (\Throwable $e) {
+            $this->logger->error('[TeamHub][TeamService] could not add teams from other servers to the sidebar', [
+                'exception' => $e, 'app' => Application::APP_ID,
+            ]);
+            return [];
+        }
     }
 
     /**
@@ -990,11 +1074,23 @@ class TeamService {
         $row = $res->fetch();
         $res->closeCursor();
 
-        // 'Requesting' is Circles' pending-join status; 'Invited' means the team
-        // has already reached out, so the join controls are equally beside the
-        // point. Both are reported as a request already in flight.
+        // 'Requesting' is Circles' pending-join status — the user has asked and
+        // a moderator has not answered.
+        //
+        // 'Invited' is the opposite direction and, since v4.13.18, its own
+        // answer. Until then both were reported as 'requesting', on the
+        // reasoning that the join controls were beside the point either way.
+        // That was true while there was nothing an invitee could press: it told
+        // somebody the team had invited that *their* request was waiting for
+        // approval, and offered them nothing. There is now an accept path that
+        // does not go through Circles' frontend controller
+        // (TeamInvitationService), so the two states are told apart and the
+        // invitee is offered the decision that is actually theirs.
         $status = (string)($row['status'] ?? '');
-        if (strcasecmp($status, 'Requesting') === 0 || strcasecmp($status, 'Invited') === 0) {
+        if (strcasecmp($status, 'Invited') === 0) {
+            return 'invited';
+        }
+        if (strcasecmp($status, 'Requesting') === 0) {
             return 'requesting';
         }
 
@@ -1720,6 +1816,46 @@ class TeamService {
                 ->remove($teamId, $user->getUID());
         } catch (\Throwable $e) { /* Not fatal */ }
 
+        // v4.13.17 — the membership recertification record. Deleted with the
+        // team, not kept: rows about a team nobody can name any more are a
+        // retention finding rather than evidence (MemberReviewMapper's
+        // docblock). The audit trail keeps `member.review_completed` for its
+        // own retention horizon, which is where the actor history lives.
+        //
+        // Through the container for the same reason the two services above
+        // are: MemberReviewService depends on MemberService, which depends on
+        // this class.
+        try {
+            $this->container->get(\OCA\TeamHub\Service\MemberReviewService::class)
+                ->forgetTeam($teamId);
+        } catch (\Throwable $e) { /* Not fatal */ }
+
+        // Issue #109: clean up personal grids and the published team layout
+        // after the circle has been destroyed, including cascading sub-teams.
+        // Independent best-effort steps: a failed grid cleanup must not leave
+        // the published default orphaned (or vice versa).
+        foreach ([
+            \OCA\TeamHub\Db\LayoutMapper::class => 'deleteByTeam',
+            \OCA\TeamHub\Service\LayoutDefaultService::class => 'forgetTeam',
+            // v4.13.74 — the team's roster week templates. They name that
+            // team's roles and are offered to nothing else, so they have no
+            // meaning once the team is gone (DESIGN §2.240). The shifts
+            // themselves are a separate question and are not touched here.
+            \OCA\TeamHub\Service\RosterTemplateService::class => 'forgetTeam',
+            // v4.14.8 — shifts members copied into their own calendars. The
+            // ones from today on come out, since nobody will work them; the
+            // past ones stay as the member's record (DESIGN §2.250).
+            \OCA\TeamHub\Service\RosterCalendarService::class => 'forgetTeam',
+        ] as $service => $method) {
+            try {
+                $this->container->get($service)->{$method}($teamId);
+            } catch (\Throwable $e) {
+                $this->logger->warning('[TeamHub][TeamService] dashboard layout cleanup failed', [
+                    'teamId' => $teamId, 'service' => $service, 'exception' => $e,
+                ]);
+            }
+        }
+
         // ── Step 5: Audit log ─────────────────────────────────────────────────
         // Logged AFTER successful destroy so a failed delete doesn't produce a
         // misleading "team.deleted" row.
@@ -1859,6 +1995,11 @@ class TeamService {
         // Capture old description for the audit diff. Best-effort — falls back to ''.
         $oldDescription = '';
         try {
+            // `$db` was never obtained in this method, so the read threw on
+            // every call and the catch below swallowed it: the audit diff has
+            // recorded an empty previous description ever since. Same idiom as
+            // the rest of this file.
+            $db = $this->container->get(\OCP\IDBConnection::class);
             $qbRead = $db->getQueryBuilder();
             $r = $qbRead->select('description', 'long_desc')
                 ->from('circles_circle')
@@ -2280,6 +2421,10 @@ class TeamService {
                     // BrowseTeamsView can render the template badge. Absent
                     // for legacy teams => frontend shows no template label.
                     'type'             => null,
+                    // v4.13.28 — the badge's text cannot be derived from the
+                    // key any more, now that an administrator can create and
+                    // rename a template. { key, label, isSeeded } or null.
+                    'template'         => null,
                 ];
             }
             $result->closeCursor();
@@ -2290,8 +2435,12 @@ class TeamService {
                 $typesByTeam = $this->teamTypeMapper->findTypesByTeams(
                     array_map(static fn($t) => (string)$t['id'], $teams)
                 );
+                // One pass over `teamhub_template` for every card, rather than
+                // a lookup per team for a label.
+                $templatesByTeam = $this->teamTemplateMapper->describeMany($typesByTeam);
                 foreach ($teams as &$t) {
-                    $t['type'] = $typesByTeam[$t['id']] ?? null;
+                    $t['type']     = $typesByTeam[$t['id']] ?? null;
+                    $t['template'] = $templatesByTeam[$t['id']] ?? null;
                 }
                 unset($t);
             }
@@ -2423,7 +2572,16 @@ class TeamService {
 
         return [
             'wizardDescription'      => $config->getAppValue(Application::APP_ID, 'wizardDescription', ''),
+            // v4.13.56 — '' means "use the line TeamHub ships", which the
+            // welcome page decides; the admin panel shows the shipped line as
+            // the field's placeholder so that is visible rather than implied.
+            'welcomeMessage'         => $config->getAppValue(Application::APP_ID, 'welcomeMessage', ''),
             'inviteTypes'            => $config->getAppValue(Application::APP_ID, 'inviteTypes', 'user,group'),
+            // v4.14.9 — teams owned by another Nextcloud server. Off by
+            // default: it governs what TeamHub shows for a synced copy and
+            // whether FederatedTeamCleanupJob may remove one, and an instance
+            // that does not federate should have neither (DESIGN §2.253).
+            'federatedTeamsEnabled'  => $config->getAppValue(Application::APP_ID, FederatedTeamCleanupService::CONFIG_KEY, '0') === '1',
             // v4.10.7 — the profile fields shown under a person's name in every
             // picker, in order (PersonSublineService). Resolved through the
             // service so the default and the validation live in one place.
@@ -2645,6 +2803,18 @@ class TeamService {
         if (isset($settings['wizardDescription'])) {
             $config->setAppValue(Application::APP_ID, 'wizardDescription', (string)$settings['wizardDescription']);
         }
+        // v4.13.56 — the welcome page's own subline, written by a Nextcloud
+        // administrator and shown to every user of this instance. Capped at
+        // WELCOME_MESSAGE_MAX bytes: it renders as markdown in a page's empty
+        // state, not as a document, and an unbounded config value is read on
+        // every welcome-page view by every user.
+        if (isset($settings['welcomeMessage'])) {
+            $config->setAppValue(
+                Application::APP_ID,
+                'welcomeMessage',
+                mb_substr(trim((string)$settings['welcomeMessage']), 0, self::WELCOME_MESSAGE_MAX),
+            );
+        }
         if (isset($settings['inviteTypes'])) {
             $allowed = ['user', 'group', 'email', 'federated', 'circle'];
             $types   = array_filter(
@@ -2655,6 +2825,13 @@ class TeamService {
                 $types = ['user'];
             }
             $config->setAppValue(Application::APP_ID, 'inviteTypes', implode(',', $types));
+        }
+        if (isset($settings['federatedTeamsEnabled'])) {
+            $config->setAppValue(
+                Application::APP_ID,
+                FederatedTeamCleanupService::CONFIG_KEY,
+                (string)(int)filter_var($settings['federatedTeamsEnabled'], FILTER_VALIDATE_BOOLEAN),
+            );
         }
         if (isset($settings['personSublineFields'])) {
             // v4.10.7 — an empty list is a valid choice (no subline);
@@ -2796,9 +2973,15 @@ class TeamService {
             $config->setAppValue(
                 Application::APP_ID,
                 IdpTeamService::SETTING_ON_GROUP_GONE,
+                // `GONE_KEEP_AND_REPORT` stood here and no longer exists: the
+                // value was retired, the reader's fallback moved to
+                // ARCHIVE_THEN_DELETE, and this writer kept naming the deleted
+                // constant -- a fatal the moment an admin saved an
+                // unrecognised value. Same shape as the v4.9.0 migration
+                // incident. It now matches `IdpTeamService::onGroupGone()`.
                 in_array($gone, IdpTeamService::GONE_MODES, true)
                     ? $gone
-                    : IdpTeamService::GONE_KEEP_AND_REPORT,
+                    : IdpTeamService::GONE_ARCHIVE_THEN_DELETE,
             );
         }
         if (array_key_exists('createTeamGroup', $settings)) {

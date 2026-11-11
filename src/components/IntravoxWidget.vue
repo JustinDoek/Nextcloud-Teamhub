@@ -52,6 +52,19 @@
                 </div>
             </div>
 
+            <!-- v4.13.13 — the linked OpenProject project's wiki. One row,
+                 opening OpenProject's own table of contents: its API v3
+                 exposes a wiki page only by id (`GET /api/v3/wiki_pages/
+                 {id}`) with no index and no project-scoped collection, so
+                 the pages themselves cannot be listed here. -->
+            <div v-if="openProjectWikiUrl" class="pages-widget__section">
+                <a :href="openProjectWikiUrl" target="_blank" rel="noopener noreferrer" class="pages-page-link pages-page-link--main">
+                    <BookOpenOutline :size="ICON_BODY" />
+                    <span class="pages-page-title">{{ t('teamhub', 'OpenProject wiki') }}</span>
+                    <OpenInNew :size="ICON_INLINE" class="pages-page-icon" />
+                </a>
+            </div>
+
             <!-- Admin-only hint when Wiki enabled but the fetch failed. Silent
                  for non-admins so members never see plumbing errors. -->
             <div v-if="collectivesError && canAct" class="pages-widget__empty">
@@ -119,10 +132,21 @@ export default {
         }
     },
     computed: {
-        ...mapState(['members', 'currentUser', 'intravoxParentPath', 'collectivesConfig']),
+        ...mapState(['members', 'currentUser', 'intravoxParentPath', 'collectivesConfig', 'openProjectConfig']),
         ...mapGetters(['currentTeam']),
         teamName() {
             return this.currentTeam?.name || ''
+        },
+
+        /**
+         * v4.13.13 — the linked project's wiki, or '' when this team has no
+         * OpenProject link (or the bundle predates the key). The link comes
+         * from the layout bundle, not from the Project info widget, so the
+         * row does not depend on that widget being on the grid.
+         */
+        openProjectWikiUrl() {
+            const c = this.openProjectConfig
+            return (c?.linked && c?.project?.wikiUrl) ? c.project.wikiUrl : ''
         },
     },
     mounted() {

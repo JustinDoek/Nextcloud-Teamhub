@@ -60,7 +60,7 @@
                         <span
                             v-if="d.milestoneLabel"
                             class="th-decisions-list__meta-item th-decisions-list__milestone"
-                            :title="d.milestoneDate ? t('teamhub', 'Milestone: {label} — {date}', { label: d.milestoneLabel, date: d.milestoneDate }) : t('teamhub', 'Milestone: {label}', { label: d.milestoneLabel })">
+                            :title="d.milestoneDate ? t('teamhub', 'Milestone: {label}, {date}', { label: d.milestoneLabel, date: d.milestoneDate }) : t('teamhub', 'Milestone: {label}', { label: d.milestoneLabel })">
                             <FlagOutlineIcon :size="ICON_INLINE" aria-hidden="true" />
                             <span class="th-decisions-list__milestone-label">{{ d.milestoneLabel }}</span>
                         </span>

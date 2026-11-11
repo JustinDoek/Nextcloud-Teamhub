@@ -19,22 +19,24 @@
 
             <div class="schedule-modal__row">
                 <div class="schedule-modal__field">
-                    <label class="schedule-modal__label">{{ t('teamhub', 'Date') }}</label>
+                    <label class="schedule-modal__label" for="teamhub-schedule-date">{{ t('teamhub', 'Date') }}</label>
                     <input
+                        id="teamhub-schedule-date"
                         v-model="form.date"
                         type="date"
                         class="schedule-modal__input"
                         :min="todayDate" />
                 </div>
                 <div class="schedule-modal__field">
-                    <label class="schedule-modal__label">{{ t('teamhub', 'Time') }}</label>
+                    <label class="schedule-modal__label" for="teamhub-schedule-time">{{ t('teamhub', 'Time') }}</label>
                     <input
+                        id="teamhub-schedule-time"
                         v-model="form.time"
                         type="time"
                         class="schedule-modal__input" />
                 </div>
                 <div class="schedule-modal__field">
-                    <label class="schedule-modal__label">{{ t('teamhub', 'Duration (min)') }}</label>
+                    <span class="schedule-modal__label">{{ t('teamhub', 'Duration (min)') }}</span>
                     <NcSelect
  v-model="form.duration"
  class="schedule-modal__input schedule-modal__select"
@@ -61,7 +63,7 @@
                     :rows="3" />
             </div>
 
-            <p v-if="errors.general" class="schedule-modal__error">{{ errors.general }}</p>
+            <p v-if="errors.general" class="schedule-modal__error" role="alert">{{ errors.general }}</p>
 
             <div class="schedule-modal__actions">
                 <NcButton variant="primary" :disabled="saving" @click="submit">

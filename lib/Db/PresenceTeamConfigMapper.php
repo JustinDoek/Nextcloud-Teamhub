@@ -10,7 +10,7 @@ use OCP\IDBConnection;
 /**
  * Mapper for teamhub_presence_team.
  *
- * One row per team. Absence of a row = all defaults (presence_enabled=0,
+ * One row per team. Absence of a row = all defaults (presence_enabled=1,
  * hide_reasons=0). The service layer creates rows on first write.
  */
 class PresenceTeamConfigMapper extends QBMapper {

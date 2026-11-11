@@ -89,7 +89,7 @@ class PresenceHolidayService {
      */
     public function previewHoliday(string $isoDate): array {
         $this->assertIsoDate($isoDate);
-        return ['affectedSlots' => $this->slotQuery->countByDate($isoDate)];
+        return ['affectedSlots' => 0]; // Holidays are non-destructive overlays.
     }
 
     // -------------------------------------------------------------------------
@@ -99,8 +99,9 @@ class PresenceHolidayService {
     /**
      * Create a holiday row and overwrite every existing slot on that date
      * with the holiday representation (presence_type=holiday, source='holiday',
-     * location_room_id=NULL). calendar_event_uid is preserved so B4 can
-     * re-point any existing VEVENT cleanly.
+     * location_room_id=NULL). calendar_event_uid is preserved because it is
+     * the only pointer to the VEVENT the pre-4.13.49 sync left behind
+     * (§2.246); nothing writes to a calendar any more.
      *
      * Rejects (409) if a holiday already exists for this date — the admin
      * UI should be calling update instead, but the constraint guards
@@ -125,8 +126,6 @@ class PresenceHolidayService {
             );
         }
 
-        $holidayTypeId = $this->resolveHolidayTypeId();
-
         // Insert the holiday row
         $h = new Holiday();
         $h->setHolidayDate($isoDate);
@@ -136,24 +135,16 @@ class PresenceHolidayService {
         /** @var Holiday $saved */
         $saved = $this->holidays->insert($h);
 
-        // Overwrite existing slots on this date with holiday values.
-        $affected = $this->slotQuery->applyHolidayOverwriteByDate(
-            $isoDate,
-            $holidayTypeId,
-            time()
-        );
-
-        // Also create holiday slots for active users who have no slot row yet
-        // on this date. This ensures the holiday appears in their calendar view
-        // even if the rolling-window cron hasn't run for this date yet.
-        $created = $this->createMissingHolidaySlots($isoDate, $holidayTypeId);
+        // Workplace assignments are never changed by a public holiday.
+        // Holiday is now a read-time overlay used by the planning view and
+        // meeting wizard; old slots remain intact and can reappear on removal.
+        $affected = 0;
+        $created = 0;
 
         $this->logger->info(sprintf(
-            '[TeamHub][PresenceHolidayService] addHoliday: %s "%s" — overwrote %d, created %d holiday slot(s)',
+            '[TeamHub][PresenceHolidayService] addHoliday: %s "%s" — overlay added (existing workplaces unchanged)',
             $isoDate,
-            $name,
-            $affected,
-            $created
+            $name
         ));
 
         return [
@@ -186,7 +177,8 @@ class PresenceHolidayService {
         // the slot table, not the holidays table) sees consistent state.
         $this->holidays->delete($h);
 
-        // Stub in B1, real in B2.
+        // Revert any legacy holiday slots from releases that destructively
+        // overwrote the user's workplace. New holidays never touch slots.
         $this->templateService->recomputeSlotsForDate($date);
 
         $this->logger->info(sprintf(

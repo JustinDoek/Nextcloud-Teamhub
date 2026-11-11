@@ -13,6 +13,7 @@ use OCA\TeamHub\Db\TeamRegistryMapper;
 use OCA\TeamHub\Exception\AccessDeniedException;
 use OCA\TeamHub\Service\AuditService;
 use OCA\TeamHub\Service\TalkService;
+use OCA\TeamHub\Util\CirclesMemberId;
 use OCP\Accounts\IAccountManager;
 use OCP\Accounts\PropertyDoesNotExistException;
 use OCP\App\IAppManager;
@@ -59,6 +60,36 @@ class MemberService {
     /** Pause between auto-confirm attempts, microseconds. */
     private const CONFIRM_RETRY_DELAY_US = 150000;
 
+    /**
+     * The `circles_member.user_type` of a person holding an account, local or
+     * federated: `TYPE_USER`, and only that.
+     *
+     * **There is no federated member type.** A colleague on another Nextcloud
+     * is `TYPE_USER` with a remote `instance`, which is what
+     * {@see CirclesMemberType} has said since v4.9.2 and what the rows on the
+     * test pair show: `JDoek@aaenhunze.nl` holds `user_type = 1`,
+     * `instance = dev.aaenh.nl`. Type **4 is TYPE_MAIL** — somebody invited by
+     * email address, who holds no account anywhere — so a list widened to
+     * `IN (1, 4)` does not gain federated members, it gains email invitees.
+     *
+     * Kept as a named constant beside the locality question below because the
+     * two are always asked together: *is this row a person with an account*,
+     * and *is that account here*.
+     */
+    private const ACCOUNT_MEMBER_TYPES = CirclesMemberType::PEOPLE_WITH_ACCOUNTS;
+
+    /**
+     * The `type` the remove endpoint carries for a member on another server.
+     *
+     * Not a `user_type` — their row is `TYPE_USER` like anybody else's. It is
+     * the frontend saying *this row showed a globe*, which tells the service
+     * to send the removal through Circles rather than delete it locally. The
+     * service re-establishes the fact from the row's `instance` before it acts
+     * on it, so a wrong or missing `type` costs correctness nothing: it can
+     * only make a federated removal fail, never make a local one federate.
+     */
+    private const REMOVE_FEDERATED = 4;
+
     public function __construct(
         private ResourceService      $resourceService,
         private TalkService          $talkService,
@@ -83,6 +114,11 @@ class MemberService {
         // is its parent's administrator, so the admin gate below needs the
         // parent link, and SubTeamService depends on this class.
         private SubTeamMapper        $subTeams,
+        // v4.13.18 — sends the invitation notification whose Accept actually
+        // works while §2.190's Teams-frontend switch is off. A DI leaf
+        // (container, IDBConnection, session, notifications, logger), so no
+        // cycle back into this class.
+        private TeamInvitationService $teamInvitations,
     ) {
     }
 
@@ -253,17 +289,31 @@ class MemberService {
         $effectiveCount = $this->getEffectiveMemberCount($teamId, $db);
 
         // ── Direct user members sorted by role level, limit 30 ────────────────
-        // user_type=1 → local NC user
+        // v4.14.16 — user_type 1 (a local account) **and 4** (somebody on
+        // another Nextcloud, DESIGN §2.31 and §2.257). Until this version this
+        // read was `= 1` while the effective count above comes from
+        // `circles_membership`, which counts everybody: a team with one
+        // federated member reported one member more than the names it drew,
+        // and the colleague on the other server was invisible in the widget
+        // and in the @mention list. The count was never wrong; the list was.
+        //
+        // `cached_name` comes along because the `users` join cannot match
+        // somebody who has no account here, and `instance` so the row can say
+        // where they live. Ordered by `m.cached_name` rather than
+        // `u.displayname`: Circles writes it for every member type, so one
+        // column sorts both halves of the list (ordering on a column that is
+        // NULL for every federated row put them all at one end).
         // Sorted by level DESC puts owners/admins first, then members alphabetically.
         $qb  = $db->getQueryBuilder();
-        $res = $qb->select('m.user_id', 'm.level', 'm.status', 'u.displayname')
+        $res = $qb->select('m.user_id', 'm.single_id', 'm.member_id', 'm.user_type', 'm.instance',
+                           'm.cached_name', 'm.level', 'm.status', 'm.joined', 'u.displayname')
             ->from('circles_member', 'm')
             ->leftJoin('m', 'users', 'u', 'm.user_id = u.uid')
             ->where($qb->expr()->eq('m.circle_id',  $qb->createNamedParameter($teamId)))
             ->andWhere($qb->expr()->eq('m.status',   $qb->createNamedParameter('Member')))
-            ->andWhere($qb->expr()->eq('m.user_type', $qb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+            ->andWhere($qb->expr()->in('m.user_type', $qb->createNamedParameter(self::ACCOUNT_MEMBER_TYPES, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT_ARRAY)))
             ->orderBy('m.level', 'DESC')
-            ->addOrderBy('u.displayname', 'ASC')
+            ->addOrderBy('m.cached_name', 'ASC')
             ->executeQuery();
 
         // First pass: collect rows (we need last-login sort below, applied in PHP
@@ -271,7 +321,8 @@ class MemberService {
         $allDirect = [];
         while ($row = $res->fetch()) {
             $userId      = (string)$row['user_id'];
-            $displayName = !empty($row['displayname']) ? $row['displayname'] : $userId;
+            $instance    = trim((string)($row['instance'] ?? ''));
+            $displayName = self::memberDisplayName($row, $userId, $instance);
             $level       = (int)$row['level'];
 
             $role = match (true) {
@@ -287,7 +338,16 @@ class MemberService {
                 'role'        => $role,
                 'level'       => $level,
                 'status'      => 'Member',
+                'joinedAt'    => self::joinedToEpoch($row['joined'] ?? null),
                 'lastLogin'   => 0, // filled in below
+                // v4.14.16 — where this person lives, and the two handles any
+                // write against them needs. Empty / false / '' on a local
+                // account, which is every row on an instance that does not
+                // federate.
+                'instance'    => $instance,
+                'isRemote'    => $instance !== '',
+                'singleId'    => (string)($row['single_id'] ?? ''),
+                'memberId'    => (string)($row['member_id'] ?? ''),
             ];
         }
         $res->closeCursor();
@@ -341,6 +401,11 @@ class MemberService {
                 'role'        => $m['role'],
                 'level'       => $m['level'],
                 'status'      => $m['status'],
+                'joinedAt'    => $m['joinedAt'],
+                // v4.14.16 — the widget draws a globe instead of an avatar for
+                // these, because there is no local account to draw one from.
+                'instance'    => $m['instance'],
+                'isRemote'    => $m['isRemote'],
             ],
             array_slice($allDirect, 0, 16)
         );
@@ -439,6 +504,198 @@ class MemberService {
     }
 
     /**
+     * How many of this team's direct members hold their account on another
+     * server (v4.14.16, DESIGN §2.257).
+     *
+     * `TYPE_USER` with a non-empty `instance`, which is what a federated
+     * member is; `DISTINCT user_id` because a person is one person however
+     * many rows a re-invite left behind. Any failure returns 0: a count that
+     * is one low is a smaller wrong than a members widget that will not load.
+     */
+    private function remoteMemberCount(string $teamId, \OCP\IDBConnection $db): int {
+        try {
+            $qb  = $db->getQueryBuilder();
+            $res = $qb->select($qb->createFunction('COUNT(DISTINCT m.user_id)'))
+                ->from('circles_member', 'm')
+                ->where($qb->expr()->eq('m.circle_id', $qb->createNamedParameter($teamId)))
+                ->andWhere($qb->expr()->in('m.user_type', $qb->createNamedParameter(self::ACCOUNT_MEMBER_TYPES, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT_ARRAY)))
+                ->andWhere($qb->expr()->neq('m.instance', $qb->createNamedParameter('')))
+                ->andWhere($qb->expr()->eq('m.status', $qb->createNamedParameter('Member')))
+                ->executeQuery();
+            $cnt = (int)$res->fetchOne();
+            $res->closeCursor();
+            return $cnt;
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][MemberService] could not count the members on other servers', [
+                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return 0;
+        }
+    }
+
+    /**
+     * This person's member row **when their account is on another server**, or
+     * null when it is not (v4.14.16, DESIGN §2.257).
+     *
+     * The gate both write paths branch on, and it asks the `instance` column,
+     * never the type: their row is `TYPE_USER` exactly like a local
+     * colleague's, and type 4 is `TYPE_MAIL`. Reading federation off the type
+     * is the mistake {@see CirclesMemberType} was written to end, and the one
+     * that made the first cut of this method find nothing at all.
+     *
+     * Returns Circles' own `member_id` with it, because that is the only
+     * handle Circles' `removeMember()` and `memberLevel()` accept, and
+     * `instance` for the log line: a federated membership change that is not
+     * attributable to a server is not much of a record.
+     *
+     * @return array{level: int, memberId: string, instance: string}|null
+     */
+    private function federatedMemberRow(\OCP\IDBConnection $db, string $teamId, string $userId): ?array {
+        if ($teamId === '' || $userId === '') {
+            return null;
+        }
+        $qb  = $db->getQueryBuilder();
+        $res = $qb->select('level', 'member_id', 'instance')
+            ->from('circles_member')
+            ->where($qb->expr()->eq('circle_id', $qb->createNamedParameter($teamId)))
+            ->andWhere($qb->expr()->eq('user_id', $qb->createNamedParameter($userId)))
+            ->andWhere($qb->expr()->in('user_type', $qb->createNamedParameter(self::ACCOUNT_MEMBER_TYPES, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT_ARRAY)))
+            ->andWhere($qb->expr()->neq('instance', $qb->createNamedParameter('')))
+            ->andWhere($qb->expr()->eq('status', $qb->createNamedParameter('Member')))
+            ->setMaxResults(1)
+            ->executeQuery();
+        $row = $res->fetch();
+        $res->closeCursor();
+        if ($row === false) {
+            return null;
+        }
+        return [
+            'level'    => (int)$row['level'],
+            'memberId' => (string)($row['member_id'] ?? ''),
+            'instance' => trim((string)($row['instance'] ?? '')),
+        ];
+    }
+
+    /**
+     * Ask Circles to remove a member, so the event reaches their instance
+     * (v4.14.16).
+     *
+     * The same idiom `inviteMembers()` uses for the other direction: Circles'
+     * own service, with the acting user set as the initiator immediately
+     * before the call. Immediately, and not once per request, because
+     * `FederatedUserService` is one object for the whole request and its
+     * current user is what every later Circles call resolves rights against;
+     * that is the fault DESIGN §2.252 traced to `TalkService::resolveCircle()`
+     * leaving it pointing at the last member it had synced.
+     */
+    private function circlesRemoveMember(string $memberId, \OCP\IUser $caller): void {
+        $this->requireCirclesMemberId($memberId);
+        try {
+            $circleMemberService  = $this->container->get(\OCA\Circles\Service\MemberService::class);
+            $federatedUserService = $this->container->get(\OCA\Circles\Service\FederatedUserService::class);
+            $federatedUserService->setLocalCurrentUser($caller);
+            $circleMemberService->removeMember($memberId);
+        } catch (\Throwable $e) {
+            $this->logger->error('[TeamHub][MemberService] Circles refused to remove a member on another server', [
+                'exception' => $e, 'app' => Application::APP_ID,
+            ]);
+            throw new \Exception('Nextcloud Teams could not remove this member: ' . $e->getMessage());
+        }
+    }
+
+    /** The same, for a level change. See {@see circlesRemoveMember()}. */
+    private function circlesSetMemberLevel(string $memberId, int $level, \OCP\IUser $caller): void {
+        $this->requireCirclesMemberId($memberId);
+        try {
+            $circleMemberService  = $this->container->get(\OCA\Circles\Service\MemberService::class);
+            $federatedUserService = $this->container->get(\OCA\Circles\Service\FederatedUserService::class);
+            $federatedUserService->setLocalCurrentUser($caller);
+            $circleMemberService->memberLevel($memberId, $level);
+        } catch (\Throwable $e) {
+            $this->logger->error('[TeamHub][MemberService] Circles refused to change the level of a member on another server', [
+                'level' => $level, 'exception' => $e, 'app' => Application::APP_ID,
+            ]);
+            throw new \Exception('Nextcloud Teams could not change the role of this member: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Refuse early when the row carries no usable `member_id` (v4.14.16).
+     *
+     * Circles looks a member up by this id and nothing else, so an empty or
+     * malformed one makes both calls above fail inside Circles with a message
+     * that says nothing about the real cause. The real cause is known and has
+     * a repair: TeamHub's own raw-SQL writers used to put a display name in
+     * this column, which is what stopped a team federating at all until
+     * v4.14.7 fixed the writers and added `repairInvalidMemberIds()` behind
+     * the integrity check (DESIGN §2.249). Point the administrator at it
+     * instead of at Circles.
+     */
+    private function requireCirclesMemberId(string $memberId): void {
+        if (strlen($memberId) < 14) {
+            throw new \Exception(
+                'This member row carries no valid Nextcloud Teams member id, so the change cannot be sent to the other server. '
+                . 'Run the member-id repair in Administration settings, TeamHub, Compliance.',
+            );
+        }
+    }
+
+    /**
+     * The name to show for one `circles_member` row (v4.14.16).
+     *
+     * A local account's name comes from Nextcloud, through the `users` join
+     * the caller already made; for somebody on another server there is no
+     * local account to ask, so Circles' own `cached_name` is the only name
+     * there is. The uid is the last resort, as it always was.
+     *
+     * Static and given the row rather than the uid: every list that had to
+     * learn this is a different query over the same two columns, and a second
+     * copy of the fallback order is how two lists start disagreeing about what
+     * somebody is called.
+     *
+     * @param array<string, mixed> $row  a circles_member row joined to `users`
+     * @param string $userId   the row's user_id, already cast
+     * @param string $instance the row's instance, '' for a local account
+     */
+    private static function memberDisplayName(array $row, string $userId, string $instance): string {
+        if ($instance === '' && !empty($row['displayname'])) {
+            return (string)$row['displayname'];
+        }
+        $cached = trim((string)($row['cached_name'] ?? ''));
+        if ($cached !== '') {
+            return $cached;
+        }
+        if (!empty($row['displayname'])) {
+            return (string)$row['displayname'];
+        }
+        return $userId;
+    }
+
+    /**
+     * `circles_member.joined` as epoch seconds, or 0 when there is none.
+     *
+     * The column is a DATETIME with no zone, which Nextcloud writes in UTC — so
+     * the ' UTC' suffix is not a guess, it is the stored convention made
+     * explicit, and leaving it off would shift every joined date by the
+     * server's offset. 0 rather than null for a missing value: the column is
+     * nullable, and rows written by older Circles versions or by paths that
+     * never set it legitimately have none. The frontend renders 0 as *Unknown*
+     * rather than as 1 January 1970.
+     */
+    public static function joinedToEpoch(mixed $joined): int {
+        if ($joined === null || $joined === '') {
+            return 0;
+        }
+        if (is_int($joined)) {
+            return $joined;
+        }
+
+        $ts = strtotime((string)$joined . ' UTC');
+
+        return $ts === false ? 0 : $ts;
+    }
+
+    /**
      * Get the full flat, deduplicated list of all effective members of a team
      * for the "Show all" modal. Includes users added directly AND users added
      * via groups or sub-teams.
@@ -451,11 +708,17 @@ class MemberService {
      *
      * @throws \Exception if user is not authenticated or not a member
      */
-    public function getAllEffectiveMembers(string $teamId): array {
+    public function getAllEffectiveMembers(string $teamId, bool $includeRemote = false): array {
 
         $this->requireMemberLevel($teamId);
 
-        $list = $this->resolveEffectiveMembers($teamId);
+        // v4.14.16 — `$includeRemote` is false for every service caller
+        // (decisions, file reviews, presence, the roster) and true from
+        // `TeamController::getAllEffectiveMembers()`, which is the members
+        // widget and the @mention list. Seeing a colleague and handing them a
+        // shift are not the same permission, and this is the line between
+        // them. See the resolver's docblock.
+        $list = $this->resolveEffectiveMembers($teamId, $includeRemote);
 
         // Step 4: enrich each row with email, phone, and live NC status.
         //
@@ -499,7 +762,33 @@ class MemberService {
      *
      * @return list<array{userId: string, displayName: string}>
      */
-    private function resolveEffectiveMembers(string $teamId): array {
+    /**
+     * Resolve team members for server-side People widgets. Includes members
+     * inherited from groups/nested teams, without exposing contact details or
+     * incurring the enrichment work of the Members widget.
+     *
+     * @return list<string> Nextcloud local user IDs (remote IDs do not resolve via IUserManager)
+     */
+    public function getEffectiveMemberIds(string $teamId): array {
+        $this->requireMemberLevel($teamId);
+        return array_values(array_unique(array_column($this->resolveEffectiveMembers($teamId), 'userId')));
+    }
+
+    /**
+     * @param string $teamId
+     * @param bool   $includeRemote v4.14.16 — also return the people whose
+     *        account lives on another Nextcloud (`user_type = 4`). **Default
+     *        false, and that default is the safety property**, not laziness:
+     *        this resolver is the roster behind decision approvers, shift
+     *        staffing, presence rows, file-review targets and the birthday
+     *        sweep, and every one of those assumes a local account it can
+     *        notify, look a profile up for, or put on a rota. Widening it for
+     *        all of them would make a colleague on another server eligible to
+     *        approve a decision and assignable to a shift, which is a product
+     *        decision nobody has taken (DESIGN §2.257). Callers that only
+     *        *show* people pass true.
+     */
+    private function resolveEffectiveMembers(string $teamId, bool $includeRemote = false): array {
 
         $db = $this->container->get(\OCP\IDBConnection::class);
 
@@ -571,6 +860,12 @@ class MemberService {
                 $list[] = [
                     'userId'      => $uid,
                     'displayName' => $displayName,
+                    // v4.14.16 — this branch resolves `user_type = 1` rows
+                    // only, so everybody it finds has an account here. The
+                    // keys are set all the same, so one list never has two
+                    // row shapes and no caller has to guess.
+                    'instance'    => '',
+                    'isRemote'    => false,
                 ];
             }
             $uRes->closeCursor();
@@ -580,14 +875,32 @@ class MemberService {
         // circles_member. In rare cases circles_membership may not contain
         // a direct member's row yet (very freshly added). This is a no-op
         // for the common case but prevents direct members ever being missed.
+        //
+        // v4.14.16 — and it is where **every federated member** enters this
+        // list (DESIGN §2.257). Step 1 above walks `circles_membership` and
+        // keeps only principals whose own circle is `source = 1`; whether a
+        // federated person's principal is stored that way on the receiving
+        // instance is not established, and this safety net makes the question
+        // moot: a federated member has a direct row by definition, because
+        // being invited is what put them in the team. If step 1 does carry
+        // them as well, `$seen` keeps them from appearing twice.
         $dQb  = $db->getQueryBuilder();
-        $dRes = $dQb->select('m.user_id', 'u.displayname')
+        $dQb->select('m.user_id', 'm.instance', 'm.cached_name', 'u.displayname')
             ->from('circles_member', 'm')
             ->leftJoin('m', 'users', 'u', 'm.user_id = u.uid')
             ->where($dQb->expr()->eq('m.circle_id',  $dQb->createNamedParameter($teamId)))
-            ->andWhere($dQb->expr()->eq('m.user_type', $dQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
-            ->andWhere($dQb->expr()->eq('m.status',    $dQb->createNamedParameter('Member')))
-            ->executeQuery();
+            ->andWhere($dQb->expr()->in('m.user_type', $dQb->createNamedParameter(self::ACCOUNT_MEMBER_TYPES, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT_ARRAY)))
+            ->andWhere($dQb->expr()->eq('m.status',    $dQb->createNamedParameter('Member')));
+
+        // The locality question, asked of the `instance` column and never of
+        // the type. Circles stores a member this server owns with `instance =
+        // ''` and a member on another server with that server's name; there is
+        // no member type that means "federated".
+        if (!$includeRemote) {
+            $dQb->andWhere($dQb->expr()->eq('m.instance', $dQb->createNamedParameter('')));
+        }
+
+        $dRes = $dQb->executeQuery();
 
         while ($r = $dRes->fetch()) {
             $uid = (string)$r['user_id'];
@@ -595,16 +908,26 @@ class MemberService {
                 continue;
             }
             $seen[$uid] = true;
+            $instance = trim((string)($r['instance'] ?? ''));
             // Same display-name resolution as the membership-cache branch
             // above — see comment there for why we go through IUserManager
-            // before falling back to the users-table column.
-            $resolvedName = $this->userManager->get($uid)?->getDisplayName();
+            // before falling back to the users-table column. A federated
+            // member has no local account for IUserManager to find, so the
+            // helper takes Circles' cached name for them.
+            $resolvedName = $instance === ''
+                ? $this->userManager->get($uid)?->getDisplayName()
+                : null;
             $displayName  = $resolvedName !== null && $resolvedName !== ''
                 ? $resolvedName
-                : (!empty($r['displayname']) ? $r['displayname'] : $uid);
+                : self::memberDisplayName($r, $uid, $instance);
             $list[] = [
                 'userId'      => $uid,
                 'displayName' => $displayName,
+                // v4.14.16 — carried so a caller can tell the two apart
+                // without asking again: the mail composer needs it (no local
+                // account, no email address) and the pickers draw a globe.
+                'instance'    => $instance,
+                'isRemote'    => $instance !== '',
             ];
         }
         $dRes->closeCursor();
@@ -636,7 +959,13 @@ class MemberService {
 
         $this->requireMemberLevel($teamId);
 
-        $members   = $this->resolveEffectiveMembers($teamId);
+        // v4.14.16 — with the people on other servers in the list. None of
+        // them yields an address (there is no local account to read one from),
+        // so they never become a recipient; they are counted, which is what
+        // makes "9 of 14 members have an email address" true on a team that
+        // has federated members rather than quietly dropping five people out
+        // of both numbers.
+        $members   = $this->resolveEffectiveMembers($teamId, true);
         $addresses = [];
 
         foreach ($members as $row) {
@@ -859,26 +1188,43 @@ class MemberService {
 
         // ── direct users (user_type=1) ─────────────────────────────────────────
         $dQb  = $db->getQueryBuilder();
-        $dRes = $dQb->select('m.user_id', 'm.level', 'm.status', 'u.displayname')
+        // v4.13.17 — `m.joined` is Circles' own column (a nullable DATETIME,
+        // added in Circles 22). It is what the Members tab shows and what a
+        // membership recertification is evidenced with (DESIGN §2.193): an
+        // access review whose roster does not say when each person arrived can
+        // only be confirmed, not reviewed.
+        // v4.14.16 — type 1 **and 4**, so a team admin sees the colleague on
+        // another server in the list they administer (DESIGN §2.257). Until
+        // this version the list was local-only while `effective_count` beside
+        // it counted everybody, so the tab said "14 members" over a list of
+        // nine with nothing to explain the five.
+        $dRes = $dQb->select('m.user_id', 'm.single_id', 'm.member_id', 'm.user_type', 'm.instance',
+                             'm.cached_name', 'm.level', 'm.status', 'm.joined', 'u.displayname')
             ->from('circles_member', 'm')
             ->leftJoin('m', 'users', 'u', 'm.user_id = u.uid')
             ->where($dQb->expr()->eq('m.circle_id',  $dQb->createNamedParameter($teamId)))
             ->andWhere($dQb->expr()->eq('m.status',   $dQb->createNamedParameter('Member')))
-            ->andWhere($dQb->expr()->eq('m.user_type', $dQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+            ->andWhere($dQb->expr()->in('m.user_type', $dQb->createNamedParameter(self::ACCOUNT_MEMBER_TYPES, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT_ARRAY)))
             ->orderBy('m.level', 'DESC')
             ->executeQuery();
 
         $direct = [];
         while ($row = $dRes->fetch()) {
-            $userId = (string)$row['user_id'];
-            $level  = (int)$row['level'];
+            $userId   = (string)$row['user_id'];
+            $level    = (int)$row['level'];
+            $instance = trim((string)($row['instance'] ?? ''));
             // Prefer IUserManager (LDAP + prefs-table user-set names) over the
             // users-table displayname column, which is often stale or NULL.
-            // Same resolution ladder as getEffectiveMembers() above.
-            $resolvedName = $this->userManager->get($userId)?->getDisplayName();
+            // Same resolution ladder as getEffectiveMembers() above. Skipped
+            // for somebody on another server: there is no local account, and
+            // asking for one would be a backend lookup per row that can only
+            // fail.
+            $resolvedName = $instance === ''
+                ? $this->userManager->get($userId)?->getDisplayName()
+                : null;
             $displayName  = $resolvedName !== null && $resolvedName !== ''
                 ? $resolvedName
-                : (!empty($row['displayname']) ? $row['displayname'] : $userId);
+                : self::memberDisplayName($row, $userId, $instance);
             $direct[] = [
                 'userId'      => $userId,
                 'displayName' => $displayName,
@@ -888,8 +1234,20 @@ class MemberService {
                     $level >= 4 => 'Moderator',
                     default     => 'Member',
                 },
-                'level'  => $level,
-                'status' => 'Member',
+                'level'    => $level,
+                'status'   => 'Member',
+                'joinedAt' => self::joinedToEpoch($row['joined'] ?? null),
+                // v4.14.16 — `userType` is what the two write endpoints need
+                // to pick their path, and `instance` is what the row shows.
+                // `memberId` is Circles' own handle for the row and the only
+                // way to ask Circles to change or remove it, which is how a
+                // federated member's level and removal have to travel so the
+                // other server hears about them.
+                'userType' => (int)($row['user_type'] ?? 1),
+                'instance' => $instance,
+                'isRemote' => $instance !== '',
+                'singleId' => (string)($row['single_id'] ?? ''),
+                'memberId' => (string)($row['member_id'] ?? ''),
             ];
         }
         $dRes->closeCursor();
@@ -1160,6 +1518,37 @@ class MemberService {
             throw new \Exception('Only the team owner can promote members to Admin');
         }
 
+        // v4.14.16 — somebody whose account lives on another server takes the
+        // other road entirely (DESIGN §2.257). The raw UPDATE below is a local
+        // write that raises no federated event, so applied to a `user_type = 4`
+        // row it would change the level here and leave their own server with
+        // the old one, permanently and with nothing to reconcile the two.
+        // Circles' `MemberLevel` **is** a federated event, and its verify()
+        // refuses only CFG_SINGLE and CFG_PERSONAL, neither of which a TeamHub
+        // team carries, so the proper road is open: ask Circles, let it
+        // broadcast. If Circles refuses, the refusal is the answer and nothing
+        // is written locally.
+        $remote = $this->federatedMemberRow($db, $teamId, $userId);
+        if ($remote !== null) {
+            // Justin, 2026-11-10: a member on another server stops at
+            // Moderator. Circles would allow Admin, and this is not about what
+            // Circles allows: an admin of a team can hand it to somebody else,
+            // change what it is connected to and remove the people in it, and
+            // that is not a right to give to an account this server does not
+            // hold, cannot disable and does not see the lifecycle of. The
+            // frontend leaves Admin out of the dropdown for these rows; this
+            // is the boundary, because the dropdown is not one.
+            if ($newLevel >= 8) {
+                throw new \Exception('A member on another server can be a moderator at most.');
+            }
+            $this->circlesSetMemberLevel($remote['memberId'], $newLevel, $caller);
+            $this->logger->info('[TeamHub][MemberService] updateMemberLevel: level of a member on another server changed through Circles', [
+                'teamId' => $teamId, 'instance' => $remote['instance'],
+                'level'  => $newLevel, 'app' => Application::APP_ID,
+            ]);
+            return $this->getTeamMembers($teamId);
+        }
+
         // A level lives on a direct circles_member row. Somebody who is only an
         // inherited member has none, so give them one before setting it. This is
         // not a second admission — they are already in the team — it is the
@@ -1172,11 +1561,19 @@ class MemberService {
         }
 
         // Write the new level directly to circles_member
+        //
+        // v4.14.16 — `user_type = 1` is new and not cosmetic: without it this
+        // statement matches every row with that user_id, which on a federated
+        // team is the local path *and* a type-4 row that must only ever be
+        // changed through Circles. The branch above means we cannot arrive
+        // here holding a federated member, and the filter means we cannot
+        // touch one by accident either.
         $qb = $db->getQueryBuilder();
         $qb->update('circles_member')
             ->set('level', $qb->createNamedParameter($newLevel, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
             ->where($qb->expr()->eq('circle_id', $qb->createNamedParameter($teamId)))
             ->andWhere($qb->expr()->eq('user_id', $qb->createNamedParameter($userId)))
+            ->andWhere($qb->expr()->eq('user_type', $qb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
             ->andWhere($qb->expr()->eq('status', $qb->createNamedParameter('Member')))
             ->executeStatement();
 
@@ -1374,6 +1771,35 @@ class MemberService {
                 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
             return null;
+        }
+    }
+
+    /**
+     * The team's display name from `circles_circle`, falling back to the id.
+     *
+     * v4.13.18. The same read `sendJoinRequestNotification()` does inline; it
+     * is a helper now because the invitation notification needs it too, and a
+     * notification that says "invited you to join J3fC7wtl…" is not a
+     * notification. Deliberately not `probeCircles()` — see
+     * `TeamInvitationService::memberStatus()` for why that cannot answer for a
+     * team the reader is not in yet.
+     */
+    private function fetchTeamName(\OCP\IDBConnection $db, string $teamId): string {
+        try {
+            $qb = $db->getQueryBuilder();
+            $result = $qb->select('name')
+                ->from('circles_circle')
+                ->where($qb->expr()->eq('unique_id', $qb->createNamedParameter($teamId)))
+                ->setMaxResults(1)
+                ->executeQuery();
+            $row = $result->fetch();
+            $result->closeCursor();
+            return $row ? (string)$row['name'] : $teamId;
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][MemberService] fetchTeamName failed', [
+                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return $teamId;
         }
     }
 
@@ -1743,7 +2169,42 @@ class MemberService {
 
         $db = $this->container->get(\OCP\IDBConnection::class);
 
-        if ($userType === 1) {
+        // v4.14.16 — a member on another server, removed through Circles so
+        // their own instance hears about it (DESIGN §2.257). The raw delete
+        // below is a local write that raises no federated event: applied to
+        // the row of somebody on another server it takes them out of the team
+        // here and leaves them a member there, still seeing the team, with
+        // nothing on either side to reconcile the two. That is the
+        // membership-level version of the stranded copy §2.254 is about.
+        //
+        // `MemberRemove::verify()` checks the initiator's level and that the
+        // target is not the owner, and **no config bit at all** (read from the
+        // Circles shipped on the test instance, 2026-11-10), so a TeamHub
+        // team's CFG_APP does not stand in the way. A refusal from Circles is
+        // the answer and nothing is deleted locally: there is no raw fallback
+        // here on purpose, because a silent local delete is the bug.
+        if ($userType === self::REMOVE_FEDERATED) {
+            $remote = $this->federatedMemberRow($db, $teamId, $targetId);
+            if ($remote === null) {
+                throw new \Exception('Member not found in this team');
+            }
+            if ($remote['level'] >= 9) {
+                throw new \Exception('Cannot remove the team owner');
+            }
+
+            $caller = $this->userSession->getUser();
+            if (!$caller) {
+                throw new \Exception('User not authenticated');
+            }
+
+            $this->circlesRemoveMember($remote['memberId'], $caller);
+
+            $this->logger->info('[TeamHub][MemberService] removeMember: member on another server removed through Circles', [
+                'teamId'   => $teamId,
+                'instance' => $remote['instance'],
+                'app'      => Application::APP_ID,
+            ]);
+        } elseif ($userType === 1) {
             // User rows: lookup by user_id (NC uid), verify not the owner
             $mQb  = $db->getQueryBuilder();
             $mRes = $mQb->select('level')
@@ -2265,6 +2726,25 @@ class MemberService {
                 $resent         = false;
 
                 try {
+                    // v4.13.76 — **re-assert who is asking, every iteration.**
+                    //
+                    // `FederatedUserService` is one object for the whole
+                    // request and its current user is the initiator Circles
+                    // resolves rights against. Anything this loop calls per
+                    // entry can change it: `TalkService::resolveCircle()` set
+                    // it to the member being synced and did not put it back,
+                    // so from the first invite onwards Circles was asked by
+                    // the person just invited, and a team admin inviting three
+                    // people had the second and third refused with
+                    // "Insufficient rights" (DESIGN §2.242).
+                    //
+                    // That leak is fixed where it was, in `TalkService`. This
+                    // line is here as well because the loop should not depend
+                    // on every helper it calls being well behaved: setting the
+                    // initiator immediately before the call that needs it is
+                    // one lookup, and it makes a future hijack cost nothing.
+                    $federatedUserService->setLocalCurrentUser($user);
+
                     $circleMemberService->addMember($teamId, $invitee);
                 } catch (\Throwable $addMemberEx) {
                     $msg = $addMemberEx->getMessage();
@@ -2492,9 +2972,43 @@ class MemberService {
                             'uid' => $memberId, 'teamId' => $teamId,
                             'status' => $status, 'app' => Application::APP_ID,
                         ]);
+
+                        // v4.13.18 — TeamHub's own invitation notification, so
+                        // the invitee has an Accept that works even while
+                        // §2.190's Teams-frontend switch is off. Circles sends
+                        // its own as well, and that one's buttons post to its
+                        // frontend controller; ours does not. See
+                        // TeamInvitationService.
+                        //
+                        // `fetchAnyMemberStatus()` and not `$status`:
+                        // `fetchMemberStatus()` filters on `status = 'Member'`,
+                        // so inside this branch `$status` is always null and
+                        // cannot tell an invitation from a join request or a
+                        // block. Only a pending invitation gets a notification.
+                        //
+                        // Skipped for an invite that changed nothing — a second
+                        // identical invite leaves one notification, not two.
+                        // A deliberate resend ($resent) does re-send, which is
+                        // the point of resending.
+                        if ($resent || !$alreadyInvited) {
+                            $realStatus = $this->fetchAnyMemberStatus($db, $teamId, $memberId);
+                            if ($realStatus === 'Invited') {
+                                $this->teamInvitations->notifyInvited(
+                                    $teamId,
+                                    $this->fetchTeamName($db, $teamId),
+                                    $memberId
+                                );
+                            }
+                        }
                     }
                 }
-            } catch (\Exception $e) {
+            } catch (\Throwable $e) {
+                // v4.13.74 — `\Throwable`, not `\Exception`. The point of a
+                // per-entry catch is that one bad entry costs that entry and
+                // nothing else; an `\Error` from Circles, Talk or the notifier
+                // walked straight out of the loop, so a batch of five could
+                // add the first and silently never attempt the rest. The
+                // caller was told 400 and the admin saw one new member.
                 $results[$memberId] = 'failed: ' . $e->getMessage();
                 $this->logger->warning('[TeamHub][MemberService] Could not invite member', [
                     'id'        => $memberId,
@@ -2656,7 +3170,9 @@ class MemberService {
             'single_id'  => $qb->createNamedParameter($singleId),
             'user_id'    => $qb->createNamedParameter($uid),
             'user_type'  => $qb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT),
-            'member_id'  => $qb->createNamedParameter($uid),
+            // v4.14.7 — a generated id, never the uid. This is the line the
+            // other three raw-SQL inserts copied; see CirclesMemberId.
+            'member_id'  => $qb->createNamedParameter(CirclesMemberId::generate()),
             'instance'   => $qb->createNamedParameter(''),
             'level'      => $qb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT),
             'status'     => $qb->createNamedParameter('Requesting'),
@@ -2942,6 +3458,26 @@ class MemberService {
                 ->executeQuery();
             $cnt = (int)$res->fetchOne();
             $res->closeCursor();
+
+            // v4.14.16 — plus the members whose account is on another server,
+            // who the query above cannot see and never could (DESIGN §2.257).
+            //
+            // It counts a person by joining `circles_membership.single_id` to
+            // the **principal circle** that single id names, and keeping the
+            // ones whose own owner row is a user. A federated member has a
+            // single id and a membership row here, but **no principal circle
+            // on this server**: it lives on theirs. Confirmed on claudius,
+            // where `ProjectOne` held two membership rows and only one of the
+            // two single ids had a `circles_circle` row at all. So the INNER
+            // JOIN dropped them, the team read "1 member" over a list of two,
+            // and this is the line that was wrong rather than the list.
+            //
+            // Counted from the team's own direct rows, which is where a
+            // federated membership always is: a group cannot carry one,
+            // because Nextcloud groups do not federate. No double counting
+            // for the same reason the query above cannot see them.
+            $cnt += $this->remoteMemberCount($teamId, $db);
+
             $this->logger->debug('[TeamHub][MemberService] getEffectiveMemberCount', [
                 'teamId' => $teamId, 'count' => $cnt, 'app' => Application::APP_ID,
             ]);

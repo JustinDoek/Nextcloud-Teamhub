@@ -6,7 +6,7 @@
 	     responsible. -->
 	<li
 		class="wf-row"
-		:class="{ 'wf-row--busy': busy, 'wf-row--action-required': actionRequired }"
+		:class="{ 'wf-row--busy': busy, 'wf-row--action-required': actionRequired, 'wf-row--compact': compact }"
 		:aria-busy="busy ? 'true' : 'false'">
 		<!-- v4.10.20 — decorative. The word is on the chip beside the title:
 		     workflow rows and aggregated rows share one list, and a glyph on
@@ -30,10 +30,13 @@
 				     same glyph MyWorkItemRow uses for a task that is one step
 				     of one. -->
 				<!-- v4.10.44 — a request a service team handles reads *Service*. -->
+				<!-- v4.13.60 — `wf-row__source` as well as the flag class: this
+				     chip is where the row came from, which the compact view
+				     keeps, and the status chip below it is not. -->
 				<NcChip
 					no-close
 					variant="tertiary"
-					class="wf-row__flag"
+					class="wf-row__flag wf-row__source"
 					:text="isService ? t('teamhub', 'Service') : t('teamhub', 'Workflow')">
 					<template #icon>
 						<LifebuoyIcon v-if="isService" :size="iconInline" />
@@ -43,17 +46,19 @@
 				<!-- v4.10.32 — the viewer's own work, from the server's
 				     `viewer.actionRequired` (was "You are responsible", on
 				     isResponsible: that also marked an unclaimed desk request
-				     on every member of the desk). -->
+				     on every member of the desk).
+				     v4.13.60 — the chip is gone (Justin: "That is double").
+				     `actionRequired` is the very expression that sorts a workflow
+				     into the Action required section (`workflowSections()` in
+				     constants/workflows.js), and both render paths put the row
+				     under that heading — the merged list by category, the
+				     standalone card by its `kind`. So the chip could only ever
+				     repeat the heading two lines above it, once per row, on
+				     every row in the section. The row keeps
+				     `wf-row--action-required`, which is a tint and not a second
+				     label. -->
 				<NcChip
-					v-if="actionRequired"
-					no-close
-					variant="primary"
-					class="wf-row__flag"
-					:text="t('teamhub', 'Action required')">
-					<template #icon><AccountCheckOutline :size="iconInline" /></template>
-				</NcChip>
-				<NcChip
-					v-else-if="workflow.status === 'waiting' || workflow.status === 'blocked'"
+					v-if="workflow.status === 'waiting' || workflow.status === 'blocked'"
 					no-close
 					variant="warning"
 					class="wf-row__flag"
@@ -145,7 +150,6 @@ import { translate as t, translatePlural as n } from '@nextcloud/l10n'
 import { NcButton, NcChip, NcActions, NcActionButton, NcActionSeparator, NcLoadingIcon, NcUserBubble } from '@nextcloud/vue'
 import SourceBranch from 'vue-material-design-icons/SourceBranch.vue'
 import LifebuoyIcon from 'vue-material-design-icons/Lifebuoy.vue'
-import AccountCheckOutline from 'vue-material-design-icons/AccountCheckOutline.vue'
 import InformationOutline from 'vue-material-design-icons/InformationOutline.vue'
 import Check from 'vue-material-design-icons/Check.vue'
 import Close from 'vue-material-design-icons/Close.vue'
@@ -187,13 +191,22 @@ export default {
 	name: 'WorkflowItemRow',
 	components: {
 		NcButton, NcChip, NcActions, NcActionButton, NcActionSeparator, NcLoadingIcon, NcUserBubble,
-		SourceBranch, LifebuoyIcon, AccountCheckOutline, InformationOutline, WorkflowStepLinks, WorkflowTaskMeta,
+		SourceBranch, LifebuoyIcon, InformationOutline, WorkflowStepLinks, WorkflowTaskMeta,
 	},
 	props: {
 		/** A workflow view from GET /api/v1/workflows. */
 		workflow: { type: Object, required: true },
 		/** True while an action on this workflow is in flight. */
 		busy: { type: Boolean, default: false },
+		/**
+		 * My Work's compact view (v4.13.60): one line — the subject, where
+		 * it came from, the action and the menu. A workflow row already
+		 * promotes its one action and keeps the rest in the menu, so what
+		 * this drops is the meta line: the step, the position in the whole,
+		 * who it is waiting on, when it was updated. Every one of those is
+		 * on the request's own page, which the subject opens.
+		 */
+		compact: { type: Boolean, default: false },
 	},
 	emits: ['open', 'action'],
 	computed: {
@@ -254,6 +267,31 @@ export default {
 
 .wf-row--busy {
 	opacity: 0.7;
+}
+
+/* ── The compact view (v4.13.60) ──────────────────────────────────────
+   One line, four things, the same as MyWorkItemRow's: the subject, the
+   chip that says where it came from, the one action and the menu. The
+   meta line and the step's links go; the status chip goes with them,
+   because the section it sits in is the status — the same reason the
+   Action required chip left this row altogether. */
+.wf-row--compact {
+	align-items: center;
+
+	.wf-row__meta,
+	.wf-row__links {
+		display: none;
+	}
+
+	.wf-row__flag:not(.wf-row__source) {
+		display: none;
+	}
+
+	/* Nothing wraps to a second line: a title long enough to need one is
+	   truncated instead, and its `title` attribute has the whole of it. */
+	.wf-row__head {
+		flex-wrap: nowrap;
+	}
 }
 
 .wf-row__glyph {

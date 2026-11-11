@@ -430,16 +430,16 @@ export default {
         commentPlaceholder() {
             const s = this.decisionStatus
             if (s === 'finalized') {
-                return t('teamhub', 'Discussion closed — awaiting approval')
+                return t('teamhub', 'Discussion closed: awaiting approval')
             }
             if (s === 'approved' || s === 'decided') {
-                return t('teamhub', 'Decision approved — comments are locked')
+                return t('teamhub', 'Decision approved: comments are locked')
             }
             if (s === 'denied') {
-                return t('teamhub', 'Decision denied — comments are locked')
+                return t('teamhub', 'Decision denied: comments are locked')
             }
             if (s === 'withdrawn') {
-                return t('teamhub', 'Decision withdrawn — comments are locked')
+                return t('teamhub', 'Decision withdrawn: comments are locked')
             }
             if (this.questionSolved) {
                 return t('teamhub', 'This question has been solved')

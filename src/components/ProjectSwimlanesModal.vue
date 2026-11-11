@@ -6,7 +6,7 @@
         @update:open="$emit('update:open', $event)">
         <div class="th-swimlanes">
             <p class="th-swimlanes__intro">
-                {{ t('teamhub', 'Add lanes to the Deck board as they become known. Each lane is a workstream — a milestone owns cards from the lanes above it, and Budget can allocate a share to each. New Advanced projects start with only the Project management lane; add the rest here as your plan takes shape.') }}
+                {{ t('teamhub', 'Add lanes to the Deck board as they become known. Each lane is a workstream. A milestone owns cards from the lanes above it, and Budget can allocate a share to each. New Advanced projects start with only the Project management lane; add the rest here as your plan takes shape.') }}
             </p>
 
             <div v-if="loadingList" class="th-swimlanes__loading">

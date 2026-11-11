@@ -124,6 +124,90 @@ class Notifier implements INotifier {
                 }
                 return $notification;
 
+            // v4.13.18 — TeamHub's own invitation notification, with its own
+            // Accept / Decline. Circles sends one of these too, but its
+            // actions post to `LocalController`, which answers
+            // `FrontendException('frontend disabled')` whenever an
+            // administrator has used §2.190's switch — so from the switch's
+            // first release until now, accepting an invitation on such an
+            // instance failed with a raw exception. These actions go to
+            // TeamHub routes, which reach Circles through its service layer.
+            // See TeamInvitationService.
+            case 'team_invitation': {
+                $params      = $notification->getSubjectParameters();
+                $l           = $this->l10nFactory->get('teamhub', $languageCode);
+                $inviterName = $params['inviter'] ?? $l->t('Someone');
+                $teamName    = $params['team']    ?? $l->t('a team');
+                $teamId      = $params['teamId']  ?? '';
+
+                $notification->setRichSubject(
+                    $l->t('{inviter} invited you to join {team}'),
+                    [
+                        'inviter' => [
+                            'type' => 'user',
+                            'id'   => $params['inviterId'] ?? $inviterName,
+                            'name' => $inviterName,
+                        ],
+                        'team' => [
+                            'type' => 'highlight',
+                            'id'   => $teamId,
+                            'name' => $teamName,
+                        ],
+                    ]
+                );
+                $notification->setParsedSubject(
+                    $l->t('%1$s invited you to join %2$s', [$inviterName, $teamName])
+                );
+                $notification->setIcon($this->urlGenerator->getAbsoluteURL(
+                    $this->urlGenerator->imagePath('teamhub', 'app.svg')
+                ));
+
+                // The body link is the fallback for anything that cannot post
+                // an action — a desktop or mobile client sends no CSRF token,
+                // and these are ordinary app routes rather than OCS ones. It
+                // opens the team's own page, where the same decision is
+                // offered. Deliberately a link and not a second pair of
+                // buttons: a button that fails is what this release is fixing.
+                $notification->setLink(
+                    $this->urlGenerator->linkToRouteAbsolute('teamhub.page.index')
+                    . '?team=' . urlencode((string)$teamId)
+                );
+
+                if ($teamId !== '') {
+                    // TRANSLATORS: button label on a notification, to accept an
+                    // invitation to join a team
+                    $accept = $notification->createAction();
+                    $accept->setLabel('accept')
+                        ->setParsedLabel($l->t('Accept'))
+                        ->setLink(
+                            $this->urlGenerator->linkToRouteAbsolute(
+                                'teamhub.team.acceptInvitation',
+                                ['teamId' => $teamId]
+                            ),
+                            'POST'
+                        )
+                        ->setPrimary(true);
+                    $notification->addAction($accept);
+
+                    // TRANSLATORS: button label on a notification, to refuse an
+                    // invitation to join a team
+                    $decline = $notification->createAction();
+                    $decline->setLabel('decline')
+                        ->setParsedLabel($l->t('Decline'))
+                        ->setLink(
+                            $this->urlGenerator->linkToRouteAbsolute(
+                                'teamhub.team.declineInvitation',
+                                ['teamId' => $teamId]
+                            ),
+                            'POST'
+                        )
+                        ->setPrimary(false);
+                    $notification->addAction($decline);
+                }
+
+                return $notification;
+            }
+
             case 'owner_assigned':
                 $params      = $notification->getSubjectParameters();
                 $adminName   = $params['adminName']  ?? ($params['adminUid'] ?? 'An administrator');
@@ -535,12 +619,12 @@ class Notifier implements INotifier {
 
                     $dueAt = (int)($params['dueAt'] ?? 0);
                     $notification->setParsedMessage($dueAt > 0
-                        ? $l->t('%1$s — due %2$s. It is in My Work → Tasks, where you can tick it off.', [
+                        ? $l->t('%1$s: due %2$s. It is in My Work → Tasks, where you can tick it off.', [
                             $taskTitle,
                             $this->l10nFactory->get('teamhub', $languageCode)
                                 ->l('date', new \DateTime('@' . $dueAt)),
                         ])
-                        : $l->t('%s — it is in My Work → Tasks, where you can tick it off.', [$taskTitle]));
+                        : $l->t('%s: it is in My Work → Tasks, where you can tick it off.', [$taskTitle]));
                 } else {
                     $notification->setRichSubject($l->t('{actor} completed a task you asked for'), [
                         'actor' => $actor, 'team' => $team,
@@ -590,8 +674,8 @@ class Notifier implements INotifier {
                     $notification->setParsedSubject($l->t('%s asked for a review of a decision', [$actorName]));
                     $notification->setParsedMessage($category !== ''
                         // TRANSLATORS: notification body — %1$s is the decision, %2$s its category
-                        ? $l->t('%1$s (%2$s). You are an approver for it — the review is in My Work.', [$question, $category])
-                        : $l->t('%s. You are an approver for it — the review is in My Work.', [$question]));
+                        ? $l->t('%1$s (%2$s). You are an approver for it. The review is in My Work.', [$question, $category])
+                        : $l->t('%s. You are an approver for it. The review is in My Work.', [$question]));
                 } elseif ($subjectK === 'decision_review_due') {
                     // TRANSLATORS: notification — a decision's review period has come round
                     $notification->setRichSubject($l->t('A decision is due for review'));
@@ -600,11 +684,11 @@ class Notifier implements INotifier {
                     $dueAt = (int)($params['dueAt'] ?? 0);
                     $notification->setParsedMessage($dueAt > 0
                         // TRANSLATORS: notification body — %1$s is the decision, %2$s the date the review falls due
-                        ? $l->t('%1$s — due %2$s. Keep it or archive it from My Work.', [
+                        ? $l->t('%1$s: due %2$s. Keep it or archive it from My Work.', [
                             $question,
                             $l->l('date', new \DateTime('@' . $dueAt)),
                         ])
-                        : $l->t('%s — keep it or archive it from My Work.', [$question]));
+                        : $l->t('%s: keep it or archive it from My Work.', [$question]));
                 } else {
                     $archived = (string)($params['outcome'] ?? '') === 'archived';
                     // TRANSLATORS: notification — an approver answered the review this person asked for
@@ -769,6 +853,68 @@ class Notifier implements INotifier {
                 }
                 return $notification;
 
+            case 'license_report_overdue':
+                // v4.13.30 — the member-reporting ladder (DESIGN §2.203).
+                // Fired by LicenseExpiryNotificationJob, once per rung.
+                //
+                // Unlike the two licence subjects above, this one goes
+                // through l10nFactory in the recipient's own language, per
+                // CLAUDE.md § PHP standards. Those two predate the rule and
+                // still emit English literals; a new surface should not copy
+                // that debt even while it sits next to it.
+                $params  = $notification->getSubjectParameters();
+                $state   = (string)($params['reportState'] ?? 'due');
+                $days    = (int)($params['overdueDays'] ?? 0);
+                $lockAt  = (int)($params['lockAt'] ?? 0);
+                $l       = $this->l10nFactory->get('teamhub', $languageCode);
+
+                // The three rungs say different things, and the escalation is
+                // the point: a nudge, then a date, then what has stopped.
+                if ($state === 'locked') {
+                    $rich  = $l->t('TeamHub Advanced features are locked: no member report sent');
+                    $body  = $l->n(
+                        'No member count has reached the licensing service for %n day, so this licence cannot be honoured. Existing Advanced teams still work read-only.',
+                        'No member count has reached the licensing service for %n days, so this licence cannot be honoured. Existing Advanced teams still work read-only.',
+                        $days,
+                    );
+                } elseif ($state === 'overdue') {
+                    $rich = $l->t('TeamHub member report overdue: action needed');
+                    $body = $lockAt > 0
+                        ? $l->t('No member count has reached the licensing service for %1$d days. If none arrives, Advanced features lock on %2$s.', [
+                            $days,
+                            $l->l('date', new \DateTime('@' . $lockAt)),
+                        ])
+                        : $l->n(
+                            'No member count has reached the licensing service for %n day.',
+                            'No member count has reached the licensing service for %n days.',
+                            $days,
+                        );
+                } else {
+                    $rich = $l->t('TeamHub member report not sent');
+                    $body = $l->n(
+                        'No member count has reached the licensing service for %n day. Check that this server can reach it, then send a report from the License tab.',
+                        'No member count has reached the licensing service for %n days. Check that this server can reach it, then send a report from the License tab.',
+                        $days,
+                    );
+                }
+
+                $notification->setRichSubject($rich, []);
+                $notification->setParsedSubject($rich);
+                $notification->setRichMessage($body, []);
+                $notification->setParsedMessage($body);
+                $notification->setIcon($this->urlGenerator->getAbsoluteURL(
+                    $this->urlGenerator->imagePath('teamhub', 'app.svg')
+                ));
+                try {
+                    $notification->setLink($this->urlGenerator->linkToRouteAbsolute(
+                        'settings.AdminSettings.index',
+                        ['section' => 'teamhub']
+                    ));
+                } catch (\Throwable $e) {
+                    $notification->setLink($this->urlGenerator->linkToRouteAbsolute('teamhub.page.index'));
+                }
+                return $notification;
+
             // v4.10.14 — WorkflowHub. One shape for the five subjects: the
             // workflow's title and the step's label come from the definition
             // in the recipient's language; the note or reason is the body;
@@ -785,9 +931,123 @@ class Notifier implements INotifier {
             case 'workflow_message':
                 return $this->prepareWorkflow($notification, $languageCode);
 
+            // v4.14.8 — the roster tells the person it is about
+            // (RosterNotificationService, DESIGN §2.250).
+            case 'roster_published':
+            case 'roster_withdrawn':
+            case 'roster_assigned':
+            case 'roster_unassigned':
+            case 'roster_shift_removed':
+            case 'roster_role_changed':
+            case 'roster_handover_taken':
+                return $this->prepareRoster($notification, $languageCode);
+
             default:
                 throw new UnknownNotificationException('Unknown subject');
         }
+    }
+
+    /**
+     * The seven roster notices. Every sentence is built here, in the
+     * recipient's language, from the facts the service recorded; dates are
+     * floating and formatted at noon so no timezone moves them a day
+     * (DESIGN §2.4, §2.236). The link opens the team on its Roster tab.
+     */
+    private function prepareRoster(INotification $notification, string $languageCode): INotification {
+        $params = $notification->getSubjectParameters();
+        $l      = $this->l10nFactory->get('teamhub', $languageCode);
+        $team   = (string)($params['teamName'] ?? '');
+        $teamId = (string)($params['teamId'] ?? '');
+        $actor  = (string)($params['actorName'] ?? '');
+        $shift  = is_array($params['shift'] ?? null) ? $params['shift'] : [];
+        $label  = (string)($shift['label'] ?? '');
+
+        $date = static function (string $iso) use ($l): string {
+            try {
+                return (string)$l->l('date', new \DateTime($iso . ' 12:00:00'));
+            } catch (\Throwable) {
+                return $iso;
+            }
+        };
+        $hours = static function (array $s) use ($l): string {
+            $start = (string)($s['start'] ?? '');
+            $end   = (string)($s['end'] ?? '');
+            return ($start !== '' && $end !== '') ? $l->t('%1$s to %2$s', [$start, $end]) : '';
+        };
+
+        $anchor = (string)($params['from'] ?? ($shift['date'] ?? ''));
+
+        switch ($notification->getSubject()) {
+            case 'roster_published': {
+                $notification->setParsedSubject($l->t('Your shifts for %1$s to %2$s in %3$s are published', [
+                    $date((string)($params['from'] ?? '')), $date((string)($params['to'] ?? '')), $team,
+                ]));
+                $lines  = [];
+                $listed = is_array($params['shifts'] ?? null) ? $params['shifts'] : [];
+                foreach ($listed as $s) {
+                    if (!is_array($s)) {
+                        continue;
+                    }
+                    // TRANSLATORS: one line of a week's shifts in a notification. %1$s date, %2$s role or shift name, %3$s the hours ("07:00 to 15:00")
+                    $lines[] = $l->t('%1$s: %2$s, %3$s', [$date((string)($s['date'] ?? '')), (string)($s['label'] ?? ''), $hours($s)]);
+                }
+                $more = (int)($params['count'] ?? 0) - count($lines);
+                if ($more > 0) {
+                    $lines[] = $l->n('And %n more shift on the roster.', 'And %n more shifts on the roster.', $more);
+                }
+                if ($lines !== []) {
+                    $notification->setParsedMessage(implode("\n", $lines));
+                }
+                break;
+            }
+            case 'roster_withdrawn':
+                $notification->setParsedSubject($l->t('The roster for %1$s to %2$s in %3$s is back in draft', [
+                    $date((string)($params['from'] ?? '')), $date((string)($params['to'] ?? '')), $team,
+                ]));
+                $notification->setParsedMessage($l->t('Your shifts in that week may still change. You will be told when it is published again.'));
+                break;
+            case 'roster_assigned':
+                $notification->setParsedSubject($l->t('%1$s put you on %2$s on %3$s in %4$s', [
+                    $actor, $label, $date((string)($shift['date'] ?? '')), $team,
+                ]));
+                // Nextcloud refuses an empty message, and a removed shift
+                // type has no hours to give.
+                if ($hours($shift) !== '') {
+                    $notification->setParsedMessage($hours($shift));
+                }
+                break;
+            case 'roster_unassigned':
+                $notification->setParsedSubject($l->t('%1$s took you off %2$s on %3$s in %4$s', [
+                    $actor, $label, $date((string)($shift['date'] ?? '')), $team,
+                ]));
+                break;
+            case 'roster_shift_removed':
+                $notification->setParsedSubject($l->t('%1$s on %2$s in %3$s was removed from the roster', [
+                    $label, $date((string)($shift['date'] ?? '')), $team,
+                ]));
+                break;
+            case 'roster_role_changed':
+                $notification->setParsedSubject($l->t('Your shift on %1$s in %2$s is now %3$s', [
+                    $date((string)($shift['date'] ?? '')), $team, $label,
+                ]));
+                $notification->setParsedMessage($l->t('It was %s.', [(string)($shift['oldLabel'] ?? '')]));
+                break;
+            case 'roster_handover_taken':
+                $notification->setParsedSubject($l->t('%1$s took over your %2$s shift on %3$s', [
+                    $actor, $label, $date((string)($shift['date'] ?? '')),
+                ]));
+                break;
+        }
+
+        $notification->setIcon($this->urlGenerator->getAbsoluteURL(
+            $this->urlGenerator->imagePath('teamhub', 'app.svg')
+        ));
+        $notification->setLink($this->urlGenerator->linkToRouteAbsolute('teamhub.page.index', array_filter([
+            'team'   => $teamId,
+            'roster' => $anchor,
+        ], static fn (string $v): bool => $v !== '')));
+
+        return $notification;
     }
 
     private function prepareWorkflow(INotification $notification, string $languageCode): INotification {

@@ -2,7 +2,7 @@
 	<section class="bp-section">
 		<h4 class="bp-section__title">{{ t('teamhub', 'OpenProject workspace') }}</h4>
 		<p class="bp-section__desc">
-			{{ t('teamhub', 'How a workspace of this kind is built around its OpenProject project. The apps and modules above decide what the team is connected to; this decides the project, the roles, the files and the dashboard. What is inside the OpenProject project — work-package types, milestones, phases — is the OpenProject template\'s.') }}
+			{{ t('teamhub', 'How a workspace of this kind is built around its OpenProject project. The apps and modules above decide what the team is connected to; this decides the project, the roles, the files and the dashboard. What is inside the OpenProject project (work-package types, milestones, phases) is the OpenProject template\'s.') }}
 		</p>
 
 		<div v-if="loading" class="bp-section__state"><NcLoadingIcon :size="ICON_NAV" /></div>

@@ -104,7 +104,7 @@
 
 			<template v-if="!isArchive">
 				<label class="th-cat-dialog__label">{{ t('teamhub', 'Approvers') }}</label>
-				<p class="th-cat-dialog__hint">{{ t('teamhub', 'Leave empty to default to the team owner.') }}</p>
+				<p class="th-cat-dialog__hint">{{ t('teamhub', 'Leave empty and the team admins are the approvers.') }}</p>
 				<NcSelect
 					v-model="form.approvers"
 					:options="memberOptions"
@@ -271,13 +271,18 @@ export default {
 					.map(uid => byId.get(uid) || { userId: uid, displayName: uid }),
 			}
 		} else {
-			// A new category starts with the team owner, matching what the
+			// A new category starts with the team's admins, matching what the
 			// server substitutes for an empty list — so the default the form
 			// shows is the default the server would apply anyway.
-			const owner = (this.members || []).find(m => Number(m.level) >= 9)
-			this.form.approvers = owner
-				? [{ userId: owner.userId, displayName: owner.displayName || owner.userId }]
-				: []
+			//
+			// v4.13.56 — was the single level-9 member, in step with
+			// `DecisionCategoryService::resolveApprovers()`, which changed at
+			// the same time (DESIGN §2.223). These two defaults have to move
+			// together: a form that prefills one person while the server would
+			// have used four is a silent narrowing of who can finalize.
+			this.form.approvers = (this.members || [])
+				.filter(m => Number(m.level) >= 8)
+				.map(m => ({ userId: m.userId, displayName: m.displayName || m.userId }))
 		}
 	},
 

@@ -3,7 +3,6 @@ declare(strict_types=1);
 
 namespace OCA\TeamHub\Service;
 
-use OCA\TeamHub\BackgroundJob\PresenceCalendarSyncJob;
 use OCA\TeamHub\Db\PresenceSlot;
 use OCA\TeamHub\Db\PresenceSlotMapper;
 use OCA\TeamHub\Db\PresenceTemplateMapper;
@@ -30,10 +29,11 @@ use Psr\Log\LoggerInterface;
  *   re-create — this ensures stale cells don't linger after a cell is cleared.
  *   source='override' and source='holiday' slots are always preserved.
  *
- * B4 addition: after slot writes, syncs VEVENTs to the user's default calendar
- * via PresenceCalendarService. On-save uses syncAllSlotsForUser() (one bulk
- * pass per user). Nightly cron uses syncSlot() per newly-created slot to avoid
- * touching already-correct events.
+ * Presence is NOT written into anybody's calendar (§2.215, v4.13.49; the
+ * writer itself was deleted in v4.14.3, §2.246). Availability is the
+ * calendar's answer, read through NextcloudAvailabilityService, and TeamHub
+ * does not put rows into a user's calendar that it cannot reliably clean up
+ * again. A slot write ends at teamhub_presence_slots.
  *
  * AM/PM boundary: hard-coded noon (§2.40 / §C). half_day=0 → Morning,
  * half_day=1 → Afternoon. day_of_week follows the template: 0=Mon … 6=Sun.
@@ -43,7 +43,6 @@ class PresenceMaterialisationService {
     public function __construct(
         private PresenceTemplateMapper  $templateMapper,
         private PresenceSlotMapper      $slotMapper,
-        private PresenceCalendarService $calendarService,
         private TimezoneService         $timezoneService,
         private IJobList                $jobList,
         private IDBConnection           $db,
@@ -80,10 +79,6 @@ class PresenceMaterialisationService {
             // moment cron runs.
             [$start, $end] = $this->rollingWindow($userId);
             $newSlots = $this->materialiseForUserInRange($userId, $start, $end, deleteStale: false);
-            if ($newSlots > 0) {
-                // Queue calendar sync for users who got new slots (B4).
-                $this->jobList->add(PresenceCalendarSyncJob::class, ['userId' => $userId]);
-            }
             $total += $newSlots;
         }
 
@@ -118,9 +113,6 @@ class PresenceMaterialisationService {
             $userId, $count, $start, $end
         ));
 
-        // Queue background calendar sync (B4). The job runs after the HTTP
-        // response is returned, so the user isn't waiting for CalDAV writes.
-        $this->jobList->add(PresenceCalendarSyncJob::class, ['userId' => $userId]);
     }
 
     // -------------------------------------------------------------------------
@@ -163,19 +155,18 @@ class PresenceMaterialisationService {
         $written = 0;
         $now     = time();
 
+        // Track individual halves, not whole dates. A user may take the
+        // morning off but still have a regular office afternoon; skipping the
+        // entire date when one override exists would erase that afternoon
+        // after a template save or the nightly materialisation job.
+        $existing = [];
         if (!$deleteStale) {
-            // Cron mode: find which dates already have at least one slot and skip them.
-            $existing = $this->slotMapper->findExistingDatesForUser($userId, $dates);
-            $existing = array_flip($existing);
-        } else {
-            $existing = [];
+            foreach ($this->slotMapper->findByUserAndRange($userId, $start, $end) as $slot) {
+                $existing[$slot->getSlotDate() . '_' . $slot->getHalfDay()] = true;
+            }
         }
 
         foreach ($dates as $isoDate) {
-            if (isset($existing[$isoDate])) {
-                continue; // Already materialised — skip.
-            }
-
             $dow = $this->isoDayOfWeek($isoDate);
 
             if (!isset($tmplByDay[$dow])) {
@@ -183,6 +174,9 @@ class PresenceMaterialisationService {
             }
 
             foreach ($tmplByDay[$dow] as $halfDay => $tmpl) {
+                if (isset($existing[$isoDate . '_' . $halfDay])) {
+                    continue; // Retain the explicit override for this half-day.
+                }
                 $slot = new PresenceSlot();
                 $slot->setUserId($userId);
                 $slot->setSlotDate($isoDate);

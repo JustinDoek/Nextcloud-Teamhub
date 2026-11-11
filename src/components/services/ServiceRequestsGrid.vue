@@ -375,7 +375,7 @@ export default {
 				return status
 			}
 			// TRANSLATORS: tooltip on a decision pill — the decision's question, then where that decision stands
-			return t('teamhub', '{question} — {status}', { question: decision.question, status })
+			return t('teamhub', '{question}, {status}', { question: decision.question, status })
 		},
 
 		/** The linked decisions this reader may open — drawn as links. */

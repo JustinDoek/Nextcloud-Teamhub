@@ -202,11 +202,12 @@ class OpenProjectWorkProvider implements IWorkProvider {
             return false;
         }
         if (!$this->client->isIntegrationEnabled()) {
-            $this->unavailableReason = $this->l->t('The OpenProject integration app is not installed or not enabled.');
+            // TRANSLATORS: why the OpenProject source is unavailable in My Work — no OpenProject server connection is set up
+            $this->unavailableReason = $this->l->t('No OpenProject connection is configured.');
             return false;
         }
         if ($this->client->getHost() === '') {
-            $this->unavailableReason = $this->l->t('No OpenProject host is configured in the integration app.');
+            $this->unavailableReason = $this->l->t('No OpenProject URL is configured.');
             return false;
         }
         $this->unavailableReason = null;
@@ -237,9 +238,11 @@ class OpenProjectWorkProvider implements IWorkProvider {
             // v4.9.16 — the module's state is its own row; the app row reads
             // the app's own state, not the module's.
             ['label' => 'TeamHub module', 'value' => $this->client->isModuleAvailable() ? 'licensed, enabled' : 'unlicensed or disabled'],
-            ['label' => 'Integration app', 'value' => $this->client->isIntegrationInstalled()
-                ? ($this->client->isIntegrationAppEnabled() ? 'installed, enabled' : 'installed, disabled')
-                : 'not installed'],
+            // v4.13.4 — which of the two routes answers, and what that
+            // route can do. An administrator reading "integration_app" here
+            // has the explanation for a missing edit action in one line.
+            ['label' => 'Transport', 'value' => $this->client->transportId()
+                . ($this->client->supportsMethod('PATCH') ? ' (reads and writes)' : ' (reads only — no PATCH)')],
             ['label' => 'Host', 'value' => $this->client->getHost() !== '' ? 'configured' : 'not configured'],
             ['label' => 'Auth method', 'value' => $this->client->getAuthMethod()],
             ['label' => 'Reads per project', 'value' => 'assigned+dated, assigned+recent, authored+unassigned, assigned+completed, milestones (+ types, statuses, priorities cached 15 min)'],

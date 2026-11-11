@@ -11,6 +11,7 @@ use OCA\TeamHub\Db\PresenceSlotQueryMapper;
 use OCA\TeamHub\Db\PresenceTemplateQueryMapper;
 use OCA\TeamHub\Db\Room;
 use OCA\TeamHub\Db\RoomMapper;
+use OCA\TeamHub\Exception\AccessDeniedException;
 use OCA\TeamHub\Exception\PresenceConflictException;
 use OCP\AppFramework\Db\DoesNotExistException;
 use Psr\Log\LoggerInterface;
@@ -44,6 +45,7 @@ class PresenceLocationService {
         private RoomMapper                  $rooms,
         private PresenceSlotQueryMapper     $slotQuery,
         private PresenceTemplateQueryMapper $tmplQuery,
+        private PresenceLocationSyncService $locationSync,
         private LoggerInterface             $logger,
     ) {}
 
@@ -68,6 +70,13 @@ class PresenceLocationService {
      * @return array<int, array<string, mixed>>
      */
     public function getBuildings(): array {
+        // v4.13.53 — buildings and floors come from a room backend where the
+        // instance has one. Lazily, on the read that is about to display them,
+        // rather than on a schedule: the catalogue is tiny, this is the only
+        // place the tree is assembled, and a sync that runs when somebody
+        // looks can never be stale when they look.
+        $this->locationSync->sync();
+
         $buildings = $this->buildings->findAll();
         $floors    = $this->floors->findAll();
         $rooms     = $this->rooms->findAll();
@@ -125,6 +134,7 @@ class PresenceLocationService {
         if ($b === null) {
             throw new DoesNotExistException("Building {$id} not found");
         }
+        $this->assertNotManaged($b->isManaged(), 'building');
 
         if (array_key_exists('name', $data)) {
             $b->setName($this->validateName($data['name'], 'building'));
@@ -151,6 +161,7 @@ class PresenceLocationService {
         if ($b === null) {
             throw new DoesNotExistException("Building {$id} not found");
         }
+        $this->assertNotManaged($b->isManaged(), 'building');
 
         $roomIds = $this->collectRoomIdsUnderBuilding($id);
         $this->assertRoomsUnreferenced($roomIds);
@@ -198,6 +209,7 @@ class PresenceLocationService {
         if ($f === null) {
             throw new DoesNotExistException("Floor {$id} not found");
         }
+        $this->assertNotManaged($f->isManaged(), 'floor');
 
         if (array_key_exists('name', $data)) {
             $f->setName($this->validateName($data['name'], 'floor'));
@@ -228,6 +240,7 @@ class PresenceLocationService {
         if ($f === null) {
             throw new DoesNotExistException("Floor {$id} not found");
         }
+        $this->assertNotManaged($f->isManaged(), 'floor');
 
         $rooms   = $this->rooms->findByFloor($id);
         $roomIds = array_map(fn(Room $r) => $r->getId(), $rooms);
@@ -385,6 +398,25 @@ class PresenceLocationService {
         return $i;
     }
 
+    /**
+     * Refuse to rename, re-sort or delete a row a room backend maintains
+     * (v4.13.53). The admin UI hides these controls for a managed row, per
+     * CLAUDE.md § Permissions — this is the boundary behind them, because
+     * "the frontend won't call this" is not one.
+     */
+    private function assertNotManaged(bool $isManaged, string $kind): void {
+        if (!$isManaged) {
+            return;
+        }
+        $this->logger->debug(sprintf(
+            '[TeamHub][PresenceLocationService] refused a write to a backend-managed %s',
+            $kind
+        ));
+        throw new AccessDeniedException(
+            'This ' . $kind . ' is maintained by a room backend and cannot be changed here'
+        );
+    }
+
     /** @return array<string, mixed> */
     private function serializeBuilding(Building $b): array {
         return [
@@ -393,6 +425,10 @@ class PresenceLocationService {
             'address'    => $b->getAddress(),
             'sort_order' => $b->getSortOrder(),
             'created_at' => $b->getCreatedAt(),
+            // null for a building typed in here, the backend identifier for
+            // one synced from a room backend. The UI reads this to badge the
+            // row and to drop its edit and delete controls.
+            'source'     => $b->isManaged() ? $b->getSource() : null,
         ];
     }
 
@@ -404,6 +440,7 @@ class PresenceLocationService {
             'name'        => $f->getName(),
             'sort_order'  => $f->getSortOrder(),
             'created_at'  => $f->getCreatedAt(),
+            'source'      => $f->isManaged() ? $f->getSource() : null,
         ];
     }
 

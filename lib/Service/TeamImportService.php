@@ -1235,6 +1235,32 @@ class TeamImportService {
         return $this->mapper->findRecentImports($limit);
     }
 
+    /**
+     * Clear the history list (v4.13.58).
+     *
+     * Only runs that are over go. A `running` run is in flight, so the mapper
+     * leaves it and this reports what it actually removed rather than what was
+     * asked for. An unconfirmed (`validated`) run is *not* protected: nothing
+     * in the panel can reopen one, so a preview somebody abandoned is history
+     * like any other row, and treating it as live work left a list of them with
+     * a permanently disabled *Clear list* button.
+     *
+     * The teams a cleared run created are untouched: the run row is bookkeeping
+     * about an operation, not the operation's result.
+     *
+     * @return array{removed: int}
+     */
+    public function clearHistory(): array {
+        $this->requireNcAdmin();
+
+        $removed = $this->mapper->deleteFinishedImports();
+        $this->logger->info('[TeamHub][TeamImportService] Import history cleared', [
+            'removed' => $removed, 'app' => Application::APP_ID,
+        ]);
+
+        return ['removed' => $removed];
+    }
+
     // -------------------------------------------------------------------------
     // Running
     // -------------------------------------------------------------------------
@@ -1722,9 +1748,13 @@ class TeamImportService {
         $presenceEnabledGlobally  = $this->config->getAppValue(Application::APP_ID, 'presence_module_enabled', '1') === '1';
         $decisionsEnabledGlobally = $this->config->getAppValue(Application::APP_ID, 'decisions_module_enabled', '1') === '1';
 
-        if (!empty($modules['presence']) && $presenceEnabledGlobally) {
-            $this->bestEffort($notes, 'presence module', function () use ($teamId) {
-                $this->presenceTeamService->saveConfig($teamId, ['presence_enabled' => 1]);
+        // People defaults to on for new teams. An imported template that
+        // explicitly omits it must be recorded as OFF, rather than inheriting
+        // the default-on state from a missing team-config row.
+        if ($presenceEnabledGlobally) {
+            $enabled = !empty($modules['presence']);
+            $this->bestEffort($notes, 'people module', function () use ($teamId, $enabled) {
+                $this->presenceTeamService->saveConfig($teamId, ['presence_enabled' => $enabled ? 1 : 0]);
             });
         }
 

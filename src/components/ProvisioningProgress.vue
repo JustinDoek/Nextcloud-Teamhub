@@ -53,6 +53,25 @@
                 <template #icon><PlayOutline :size="ICON_TOOLBAR" /></template>
                 {{ state?.status === 'failed' ? t('teamhub', 'Retry from the failed step') : t('teamhub', 'Continue now') }}
             </NcButton>
+            <!-- v4.13.30 - accept a workspace that finished with something to
+                 look at, so the team page stops saying so. Offered only on
+                 `attention`, never on `failed`: an attention note means the
+                 workspace is usable and something is worth a look, while a
+                 failed required step means it is not, and waving that away
+                 would turn a broken workspace into a silent one.
+
+                 It exists because a retry is not always a way out. A step
+                 re-runs against the request frozen when the operation
+                 started, so a note about an integration the template no
+                 longer carries comes back every time. -->
+            <NcButton
+                v-if="canAct && state?.status === 'attention'"
+                variant="secondary"
+                :disabled="busy"
+                @click="$emit('acknowledge')">
+                <template #icon><CheckIcon :size="ICON_TOOLBAR" /></template>
+                {{ t('teamhub', 'Accept and stop showing this') }}
+            </NcButton>
             <NcButton v-if="rollbackOffered" variant="tertiary" :disabled="busy" @click="$emit('rollback')">
                 <template #icon><DeleteOutline :size="ICON_TOOLBAR" /></template>
                 {{ t('teamhub', 'Remove what was created') }}
@@ -64,7 +83,7 @@
             <dl class="prov-progress__dl">
                 <dt>{{ t('teamhub', 'Operation') }}</dt><dd>#{{ state.id }} · {{ state.status }} · {{ state.mode }}</dd>
                 <dt>{{ t('teamhub', 'Started by') }}</dt><dd>{{ state.createdBy }}</dd>
-                <dt>{{ t('teamhub', 'Last heartbeat') }}</dt><dd>{{ state.heartbeatAt ? new Date(state.heartbeatAt * 1000).toLocaleString() : '—' }}</dd>
+                <dt>{{ t('teamhub', 'Last heartbeat') }}</dt><dd>{{ state.heartbeatAt ? new Date(state.heartbeatAt * 1000).toLocaleString() : 'Not set' }}</dd>
                 <dt v-if="state.errorCode">{{ t('teamhub', 'Error code') }}</dt><dd v-if="state.errorCode">{{ state.errorCode }}</dd>
             </dl>
             <ul class="prov-progress__diag-steps">
@@ -83,6 +102,7 @@ import { translate as t, translatePlural as n } from '@nextcloud/l10n'
 import { NcButton, NcLoadingIcon } from '@nextcloud/vue'
 import AlertCircle from 'vue-material-design-icons/AlertCircle.vue'
 import CheckCircle from 'vue-material-design-icons/CheckCircle.vue'
+import CheckIcon from 'vue-material-design-icons/Check.vue'
 import DeleteOutline from 'vue-material-design-icons/DeleteOutline.vue'
 import MinusCircleOutline from 'vue-material-design-icons/MinusCircleOutline.vue'
 import OpenInNew from 'vue-material-design-icons/OpenInNew.vue'
@@ -104,7 +124,7 @@ import { isActive, operationStatusLabel, progressRows, resourceLinks } from '../
 export default {
     name: 'ProvisioningProgress',
 
-    components: { AlertCircle, CheckCircle, DeleteOutline, MinusCircleOutline, NcButton, NcLoadingIcon, OpenInNew, PlayOutline, Refresh },
+    components: { AlertCircle, CheckCircle, CheckIcon, DeleteOutline, MinusCircleOutline, NcButton, NcLoadingIcon, OpenInNew, PlayOutline, Refresh },
 
     props: {
         /** The operation as GET /api/v1/provisioning/{id} returns it. */
@@ -117,7 +137,7 @@ export default {
         busy: { type: Boolean, default: false },
     },
 
-    emits: ['retry', 'continue', 'rollback'],
+    emits: ['retry', 'continue', 'rollback', 'acknowledge'],
 
     data() {
         return { ICON_BODY, ICON_INLINE, ICON_NAV, ICON_TOOLBAR }

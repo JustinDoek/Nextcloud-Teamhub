@@ -936,7 +936,7 @@
                             v-model="reviewReason"
                             class="th-dv__approval-textarea"
                             rows="3"
-                            :placeholder="t('teamhub', 'Say why the decision stands, why it is being reworded, or why it is being retired — this becomes part of the audit trail.')"
+                            :placeholder="t('teamhub', 'Say why the decision stands, why it is being reworded, or why it is being retired: this becomes part of the audit trail.')"
                             :disabled="completingReview"
                             :maxlength="reviewReasonMax"
                             :aria-describedby="`th-dv-review-counter-${selected.id}`"
@@ -1050,7 +1050,7 @@
                             v-model="approvalReason"
                             class="th-dv__approval-textarea"
                             rows="3"
-                            :placeholder="t('teamhub', 'Briefly explain the decision — this becomes part of the audit trail.')"
+                            :placeholder="t('teamhub', 'Briefly explain the decision: this becomes part of the audit trail.')"
                             :disabled="approving || denying"
                             :maxlength="approvalReasonMax"
                             :aria-describedby="`th-dv-approval-counter-${selected.id}`"
@@ -1488,7 +1488,7 @@
                     class="th-dv-dialog__field"
                     rows="3"
                     :label="t('teamhub', 'Why is it being archived?')"
-                    :placeholder="t('teamhub', 'Say why it no longer applies — this becomes part of the audit trail.')"
+                    :placeholder="t('teamhub', 'Say why it no longer applies: this becomes part of the audit trail.')"
                     :disabled="archiving"
                     :maxlength="reviewReasonMax"
                     :helper-text="`${archiveReason.length} / ${reviewReasonMax}`"
@@ -1516,7 +1516,7 @@
             @closing="closeReviewAccept">
             <div class="th-dv-dialog">
                 <p class="th-dv-dialog__intro">
-                    {{ t('teamhub', 'The decision stays in force and keeps its approval — only its wording changes. The previous wording is kept in the audit trail.') }}
+                    {{ t('teamhub', 'The decision stays in force and keeps its approval: only its wording changes. The previous wording is kept in the audit trail.') }}
                 </p>
                 <!-- v4.11.30 — says whose words are in the boxes. An
                      approver who opened this from *Edit wording* is looking
@@ -1544,7 +1544,7 @@
                     :maxlength="4000"
                     required />
                 <NcNoteCard v-if="!reviewAcceptChanged" type="info">
-                    {{ t('teamhub', 'Nothing has been changed yet. Accepting a review means altering the decision — edit the wording above, or deny the request instead.') }}
+                    {{ t('teamhub', 'Nothing has been changed yet. Accepting a review means altering the decision: edit the wording above, or deny the request instead.') }}
                 </NcNoteCard>
             </div>
         </NcDialog>
@@ -1575,7 +1575,7 @@
                     class="th-dv-dialog__field"
                     rows="4"
                     :label="t('teamhub', 'Why does this need reviewing?')"
-                    :placeholder="t('teamhub', 'Describe what changed — this becomes part of the audit trail.')"
+                    :placeholder="t('teamhub', 'Describe what changed: this becomes part of the audit trail.')"
                     :disabled="requestingReview"
                     :maxlength="reviewMotivationMax"
                     :helper-text="reviewMotivationHelper"
@@ -1646,7 +1646,7 @@
             @closing="closeMoveCategory">
             <div class="th-dv-dialog">
                 <p class="th-dv-dialog__intro">
-                    {{ t('teamhub', 'The decision moves to the category you pick, and its approvers take it over from there. The archive is not on this list — archiving a decision is a separate action.') }}
+                    {{ t('teamhub', 'The decision moves to the category you pick, and its approvers take it over from there. The archive is not on this list. Archiving a decision is a separate action.') }}
                 </p>
                 <NcNoteCard v-if="!moveCategoryOptions.length" type="info">
                     {{ t('teamhub', 'This team has no other category to move it to. A team admin can add one on the Decisions page.') }}
@@ -1936,7 +1936,7 @@ import { mapState, mapMutations }                from 'vuex'
 import { generateUrl }                           from '@nextcloud/router'
 import { decisionUrl, handleInternalLinkClick }  from '../lib/internalLinks.js'
 import { CATEGORY_ICONS, CATEGORY_ICON_MAP } from '../lib/decisionCategoryIcons.js'
-import { showError, showSuccess }                from '@nextcloud/dialogs'
+import { showError, showSuccess, showConfirmation } from '@nextcloud/dialogs'
 import {
 	NcActionButton, NcActionCheckbox, NcActionLink, NcActions, NcActionSeparator,
 	NcAvatar, NcButton, NcDialog, NcModal, NcEmptyContent, NcLoadingIcon, NcNoteCard,
@@ -3659,10 +3659,15 @@ export default {
             const reason   = this.reviewReason.trim()
             if (!decision || this.completingReview || !reason) return false
 
-            if (outcome === 'archived'
-                && !window.confirm(t('teamhub', 'Archive this decision? It moves to the team archive and becomes read-only. The record and its audit trail are kept.'))
-            ) {
-                return false
+            if (outcome === 'archived') {
+                const confirmed = await showConfirmation({
+                    name: t('teamhub', 'Archive this decision?'),
+                    text: t('teamhub', 'Archive this decision? It moves to the team archive and becomes read-only. The record and its audit trail are kept.'),
+                    labelConfirm: t('teamhub', 'Archive'),
+                    labelReject: t('teamhub', 'Cancel'),
+                    severity: 'warning',
+                })
+                if (!confirmed) return false
             }
 
             this.completingReview = true
@@ -4522,7 +4527,7 @@ export default {
                     if (el?.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
                 })
             } else {
-                showError(t('teamhub', 'That decision is not in the current list — clear filters to view it'))
+                showError(t('teamhub', 'That decision is not in the current list: clear filters to view it'))
             }
         },
 
@@ -4672,7 +4677,7 @@ export default {
                 parsed = null
             }
             if (!parsed || (parsed.protocol !== 'https:' && parsed.protocol !== 'http:')) {
-                showError(t('teamhub', 'That source link cannot be opened — only http and https addresses are allowed.'))
+                showError(t('teamhub', 'That source link cannot be opened: only http and https addresses are allowed.'))
                 return
             }
             // Best-effort label: hostname + path.
@@ -4700,13 +4705,6 @@ export default {
             this.viewerTextContent  = ''
             this.viewerRenderedHtml = ''
         },
-
-        /**
-         * v3.71.7 — generateUrl is imported as a top-level function; expose
-         * it as an instance method so the template can call generateUrl(…)
-         * directly (e.g. for the image preview src expression).
-         */
-        generateUrl,
 
         /**
          * v3.71.10 — fetch raw file content via our own download endpoint.

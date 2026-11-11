@@ -65,6 +65,45 @@ final class TeamApps {
      */
     public const TOGGLE_ONLY = ['intravox'];
 
+    /**
+     * The apps somebody else built — *integrations*, in the vocabulary decided
+     * on 2026-09-07. Everything a team can have that is not in this list is a
+     * TeamHub **module** (Decisions, Presence, Timeline, Messages, File
+     * reviews, Budget, Time), which is our own code and our own storage.
+     *
+     * v4.13.17 — this list exists for the integrations register (DESIGN
+     * §2.194): the question "where does this team's data go" is only about the
+     * apps that are not us. It is `CANONICAL` plus the two integrations that
+     * have no `teamhub_team_apps` row because they are configured per team
+     * elsewhere.
+     */
+    public const INTEGRATIONS = [
+        'talk', 'files', 'calendar', 'deck', 'collectives', 'intravox',
+        'openproject', 'roomvox',
+    ];
+
+    /**
+     * Integrations that send a team's data to **another host**.
+     *
+     * The distinction the register is for. Talk, Files, Calendar, Deck,
+     * Collectives and IntraVox are Nextcloud apps on this instance: the data
+     * does not leave the server, so they are a sharing question rather than a
+     * supplier question. OpenProject and RoomVox are separate systems with
+     * their own addresses and their own operators, and for ISO 27001 A.5.19
+     * that makes each of them a supplier relationship somebody has to own.
+     */
+    public const OFF_SERVER = ['openproject', 'roomvox'];
+
+    /** Is this app one somebody else built, rather than a TeamHub module? */
+    public static function isIntegration(string $appId): bool {
+        return in_array(self::canonical($appId), self::INTEGRATIONS, true);
+    }
+
+    /** Does this integration send team data to another host? */
+    public static function isOffServer(string $appId): bool {
+        return in_array(self::canonical($appId), self::OFF_SERVER, true);
+    }
+
     /** The registry origin meaning TeamHub provisioned this resource itself. */
     public const ORIGIN_CREATED = 'teamhub_create';
 

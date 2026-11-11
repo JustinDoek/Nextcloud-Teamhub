@@ -7,7 +7,18 @@
         @update:open="$emit('toggle-expanded', { teamId: team.id, expanded: $event })"
         @click="$emit('select', team.id)">
         <template #icon>
-            <AccountGroup :size="iconNav" />
+            <!-- v4.14.15 — a team another server owns reads as a globe, the
+                 same glyph family PersonRow and InviteMemberModal already use
+                 for a person from another instance. The row's name is the
+                 team's, so the icon's whole job is to say where it lives; the
+                 server's hostname rides along as the icon's own title, which
+                 vue-material-design-icons renders as an SVG <title> and so
+                 reaches a screen reader as well as a hover. -->
+            <Earth
+                v-if="isRemote"
+                :size="iconNav"
+                :title="remoteTitle" />
+            <AccountGroup v-else :size="iconNav" />
         </template>
         <template v-if="team.unread > 0 || unclaimed > 0" #counter>
             <!-- NcCounterBubble reads its number from the `count` prop, NOT
@@ -32,7 +43,23 @@
         <!-- Team actions — moved here from the Team-info widget so
              Team info can be hidden without losing Manage/Invite/
              Leave. Role-gated per team via team.level (0 = indirect,
-             1 = member, 4 = moderator, 8 = admin, 9 = owner). -->
+             1 = member, 4 = moderator, 8 = admin, 9 = owner).
+
+             v4.14.15 — on a team another server owns, four of them are
+             hidden rather than left to fail (CLAUDE.md § Permissions).
+             Manage team and Invite would write to TeamHub tables on *this*
+             instance for a team whose own tables live on the owner's; Leave
+             team deletes the circles_member row with raw SQL, which would
+             leave the two servers disagreeing about who is in the team; and
+             Email all members reads the local roster only, so on a team
+             whose people mostly live elsewhere it would address a handful of
+             them and look like the whole list.
+
+             Copy link stays: it points at this instance's own view of the
+             team, which is a real page for anybody here who is in it. So do
+             the two sidebar-group actions, which are the reader's own filing
+             and touch nothing on either server. -->
+
         <template #actions>
             <!-- v4.2.2: NcActionButton.closeAfterClick defaults
                  to FALSE in @nextcloud/vue 9, so the popover
@@ -40,7 +67,7 @@
                  runs. Explicit true on all four so the menu
                  collapses as soon as the user picks an action. -->
             <NcActionButton
-                v-if="(team.level || 0) >= 8"
+                v-if="(team.level || 0) >= 8 && !isRemote"
                 close-after-click
                 :aria-label="t('teamhub', 'Manage team')"
                 @click="$emit('manage', team.id)">
@@ -55,7 +82,7 @@
                 {{ t('teamhub', 'Copy link') }}
             </NcActionButton>
             <NcActionButton
-                v-if="(team.level || 0) >= 4"
+                v-if="(team.level || 0) >= 4 && !isRemote"
                 close-after-click
                 :aria-label="t('teamhub', 'Invite members')"
                 @click="$emit('invite', team.id)">
@@ -68,6 +95,7 @@
                  Members widget. Ungated like Copy link above,
                  rather than moderator-gated like Invite. -->
             <NcActionButton
+                v-if="!isRemote"
                 close-after-click
                 :aria-label="t('teamhub', 'Email all team members')"
                 @click="$emit('email-members', team.id)">
@@ -75,7 +103,7 @@
                 {{ t('teamhub', 'Email all members') }}
             </NcActionButton>
             <NcActionButton
-                v-if="(team.level || 0) >= 1 && (team.level || 0) < 9"
+                v-if="(team.level || 0) >= 1 && (team.level || 0) < 9 && !isRemote"
                 close-after-click
                 :aria-label="t('teamhub', 'Leave team')"
                 @click="$emit('leave', team.id)">
@@ -185,6 +213,7 @@ import { translate as t, translatePlural as n } from '@nextcloud/l10n'
 import AccountGroup from 'vue-material-design-icons/AccountGroup.vue'
 import AccountPlus from 'vue-material-design-icons/AccountPlus.vue'
 import CogOutline from 'vue-material-design-icons/CogOutline.vue'
+import Earth from 'vue-material-design-icons/Earth.vue'
 import EmailOutline from 'vue-material-design-icons/EmailOutline.vue'
 import FolderMoveOutline from 'vue-material-design-icons/FolderMoveOutline.vue'
 import FolderPlusOutline from 'vue-material-design-icons/FolderPlusOutline.vue'
@@ -211,7 +240,7 @@ export default {
     components: {
         NcAppNavigationItem, NcCounterBubble, NcActionButton,
         NcActionInput, NcActionSeparator,
-        AccountGroup, AccountPlus, CogOutline, EmailOutline, FolderMoveOutline,
+        AccountGroup, AccountPlus, CogOutline, Earth, EmailOutline, FolderMoveOutline,
         FolderPlusOutline, LinkVariant, LocationExit,
         SubTeamNavItem,
     },
@@ -267,6 +296,32 @@ export default {
 
         iconNav() {
             return ICON_NAV
+        },
+
+        /**
+         * v4.14.15 - is this a team another server owns? The server sets
+         * `is_remote` on the sidebar row and on nothing else, so a row
+         * without the field is a local team, which is every row on an
+         * instance that does not federate.
+         */
+        isRemote() {
+            return this.team.is_remote === true
+        },
+
+        /**
+         * The globe's accessible name and hover text. Names the server when
+         * the row carries one, which it does for every row the server built;
+         * the bare sentence is the fallback for a row that somehow has the
+         * flag without the hostname, so the icon is never unlabelled.
+         */
+        remoteTitle() {
+            const instance = this.team.remote_instance || ''
+            return instance
+                // TRANSLATORS: {instance} is the hostname of another Nextcloud
+                // server, for example dev.example.com. Shown on the globe icon
+                // beside a team that lives on that server rather than this one.
+                ? t('teamhub', 'Team on {instance}', { instance })
+                : t('teamhub', 'Team on another server')
         },
 
         /**

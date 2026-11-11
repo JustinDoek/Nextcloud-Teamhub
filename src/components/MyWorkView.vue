@@ -24,7 +24,14 @@
 		<!-- ── Header ───────────────────────────────────────────────────── -->
 		<header class="mywork__header">
 			<div class="mywork__header-text">
-				<h2 class="mywork__title">{{ t('teamhub', 'My Work') }}</h2>
+				<!-- v4.13.60 — the page's own <h1>, and the group headings below
+				     it <h2>. It was <h2> over <h3>, which made a valid outline
+				     with no <h1> in it at all: this page has no team banner, so
+				     nothing above it supplied one (TeamBanner carries the <h1>
+				     on a team page, where the team's name is the page). Lifting
+				     both by one closes that gap and keeps the sections exactly
+				     one level under the title. -->
+				<h1 class="mywork__title">{{ t('teamhub', 'My Work') }}</h1>
 				<span class="mywork__subtitle">
 					{{ t('teamhub', 'Everything that needs attention, across all teams') }}
 				</span>
@@ -66,10 +73,12 @@
 			<NcButton variant="tertiary" @click="refresh(true)">{{ t('teamhub', 'Try again') }}</NcButton>
 		</div>
 
-		<!-- v4.9.7 — a source that answered, but not cleanly: the viewer's
-		     account needs reconnecting, some projects could not be read, or
-		     the source was slow and the tail was skipped. One line per
-		     source and code; the rows that did arrive are real. -->
+		<!-- v4.9.7 — a source that answered, but not cleanly: some projects
+		     could not be read, or the source was slow and the tail was
+		     skipped. One line per source and code; the rows that did arrive
+		     are real. 2026-10-23 — a connection the source no longer accepts
+		     gets no line: reconnecting an account is a personal-settings
+		     errand, not a piece of work. -->
 		<div
 			v-for="warning in providerWarnings"
 			:key="warning.key"
@@ -80,10 +89,7 @@
 			<AlertCircleOutline v-if="warning.tone !== 'info'" :size="iconBody" aria-hidden="true" />
 			<InformationOutline v-else :size="iconBody" aria-hidden="true" />
 			<span>{{ warning.text }}</span>
-			<NcButton v-if="warning.action === 'reconnect'" variant="tertiary" @click="openPersonalSettings(warning.providerId)">
-				{{ t('teamhub', 'Open personal settings') }}
-			</NcButton>
-			<NcButton v-else variant="tertiary" @click="refresh(true)">{{ t('teamhub', 'Refresh') }}</NcButton>
+			<NcButton variant="tertiary" @click="refresh(true)">{{ t('teamhub', 'Refresh') }}</NcButton>
 		</div>
 
 		<div v-if="truncatedProviders.length" class="mywork__notice mywork__notice--info" role="status" aria-live="polite">
@@ -171,18 +177,44 @@
 		<!-- v4.11.9 — the pill of What's new and the service catalog: an
 		     optional icon, the name, the number. One shape for a filter
 		     wherever it appears (Justin, 2026-09-30). -->
-		<div v-if="typeFilters.length > 1" class="mywork__types" role="group" :aria-label="t('teamhub', 'Show only one type of work')">
-			<TogglePill
-				v-for="type in typeFilters"
-				:key="type.key"
-				:label="type.label"
-				:count="type.count"
-				:pressed="type.active"
-				@click="selectType(type.key)">
-				<template v-if="type.icon" #icon>
-					<component :is="type.icon" :size="iconInline" aria-hidden="true" />
-				</template>
-			</TogglePill>
+		<div class="mywork__toolbar">
+			<div v-if="typeFilters.length > 1" class="mywork__types" role="group" :aria-label="t('teamhub', 'Show only one type of work')">
+				<TogglePill
+					v-for="type in typeFilters"
+					:key="type.key"
+					:label="type.label"
+					:count="type.count"
+					:pressed="type.active"
+					@click="selectType(type.key)">
+					<template v-if="type.icon" #icon>
+						<component :is="type.icon" :size="iconInline" aria-hidden="true" />
+					</template>
+				</TogglePill>
+			</div>
+
+			<!-- ── The two views (v4.13.60, Justin) ─────────────────────────
+			     The same pill as the filter beside it, so the page has one
+			     shape for "pick one of these" wherever it appears. Compact is
+			     one line per item: the subject, where it came from, the one
+			     action worth a button and the menu — the team, the reason and
+			     the deadline are what it trades away, and all three are on
+			     the item once it is open.
+
+			     It is a `role="group"` of two `aria-pressed` buttons rather
+			     than a radiogroup, because that is what TogglePill is and
+			     what the filter next to it already announces as. -->
+			<div class="mywork__views" role="group" :aria-label="viewGroupLabel">
+				<TogglePill
+					v-for="option in viewOptions"
+					:key="option.key"
+					:label="option.label"
+					:pressed="view === option.key"
+					@click="view = option.key">
+					<template #icon>
+						<component :is="option.icon" :size="iconInline" aria-hidden="true" />
+					</template>
+				</TogglePill>
+			</div>
 		</div>
 
 		<!-- ── First load ───────────────────────────────────────────────── -->
@@ -248,13 +280,13 @@
 						class="mywork__group-icon"
 						aria-hidden="true" />
 
-					<h3 :id="'mywork-group-title-' + group.key" class="mywork__group-title">
+					<h2 :id="'mywork-group-title-' + group.key" class="mywork__group-title">
 						<span>{{ group.label }}</span>
 						<!-- v4.10.17 — one count per group, workflows included.
 						     Two headings each counting half the group is what
 						     this page is being reworked to stop doing. -->
 						<span class="mywork__group-count">{{ groupTotal(group) }}</span>
-					</h3>
+					</h2>
 
 					<!-- v4.10.17 — the Team / Reason / Deadline column captions
 					     that used to sit here are gone: they labelled three of
@@ -305,6 +337,7 @@
 						v-for="w in (group.workflows || [])"
 						:key="'wf-' + rowKey(w)"
 						:workflow="w"
+						:compact="compact"
 						:busy="workflows.busyId === w.id"
 						@open="openWorkflow"
 						@action="onWorkflowAction" />
@@ -313,6 +346,7 @@
 						:key="item.id"
 						:item="item"
 						:provider-names="providerNames"
+						:compact="compact"
 						:busy="busyItemId === item.id"
 						@open="openItem"
 						@open-team="openTeam"
@@ -501,7 +535,6 @@
 import { mapState, mapGetters } from 'vuex'
 import { translate as t, translatePlural as n } from '@nextcloud/l10n'
 import { shiftIsoDate, formatTime } from '../lib/localDate.js'
-import { personalSettingsUrl } from '../lib/openProject.js'
 import { generateUrl } from '@nextcloud/router'
 import { showError, showSuccess } from '@nextcloud/dialogs'
 import { getCurrentUser } from '@nextcloud/auth'
@@ -512,6 +545,9 @@ import Refresh from 'vue-material-design-icons/Refresh.vue'
 import ChevronLeft from 'vue-material-design-icons/ChevronLeft.vue'
 import ChevronRight from 'vue-material-design-icons/ChevronRight.vue'
 import ChevronDown from 'vue-material-design-icons/ChevronDown.vue'
+// v4.13.60 — the two views' glyphs: rows with a second line, rows without.
+import ViewListOutline from 'vue-material-design-icons/ViewListOutline.vue'
+import ViewHeadline from 'vue-material-design-icons/ViewHeadline.vue'
 import ClipboardCheckOutline from 'vue-material-design-icons/ClipboardCheckOutline.vue'
 import AlertCircleOutline from 'vue-material-design-icons/AlertCircleOutline.vue'
 import InformationOutline from 'vue-material-design-icons/InformationOutline.vue'
@@ -630,6 +666,7 @@ export default {
 		  NcTextArea, NcButton, NcLoadingIcon, NcEmptyContent, NcModal,
 		TogglePill,
 		Refresh, ChevronLeft, ChevronRight, ChevronDown, ClipboardCheckOutline,
+		ViewListOutline, ViewHeadline,
 		AlertCircleOutline, InformationOutline,
 		CalendarToday, CalendarClock, AccountClock, CheckCircleOutline,
 		ShieldAccountOutline, AccountPlusOutline,
@@ -646,6 +683,24 @@ export default {
 			WORKFLOW_SECTION,
 			loading: false,
 			busyItemId: null,
+			/**
+			 * Which of the two views the list is in: 'full' or 'compact'
+			 * (v4.13.60, Justin). Compact is one line per item — subject,
+			 * source, the one action worth a button, and the menu.
+			 *
+			 * **Component state, deliberately not a stored preference.** A
+			 * row-density setting lived in `/mywork/preferences` until
+			 * v4.10.18 took it out with the sort, the grouping and the
+			 * eleven-field filter panel, because a *stored* value left this
+			 * page in a shape its reader had never chosen and could not see
+			 * how to leave. What was wrong there was the storage, not the
+			 * density: the control is two pills on the page now, the pressed
+			 * one says which view you are in, and a reload is always the way
+			 * back. It does survive navigating around the app, because this
+			 * component stays mounted — the same reason the filter and the
+			 * scroll position do.
+			 */
+			view: 'full',
 			// v4.10.15 — the aggregated queue answered 403 with licenseGate:
 			// the workflow sections stay, the rest of the page is not rendered.
 			licenseGated: false,
@@ -779,14 +834,51 @@ export default {
 		filters() { return this.myWork.filters },
 		/**
 		 * v4.10.18 — fixed, not stored. My Work is one list grouped by what
-		 * the work needs from you, sorted by when it is due, at one density.
-		 * These were three saved preferences, and a saved `groupBy: project`
-		 * is what made the category headings invisible for a reader who had
-		 * once tried that grouping and never found the way back.
+		 * the work needs from you and sorted by when it is due. These were
+		 * saved preferences, and a saved `groupBy: project` is what made the
+		 * category headings invisible for a reader who had once tried that
+		 * grouping and never found the way back.
+		 *
+		 * The density was the third of them and came back in v4.13.60 — as a
+		 * control on the page rather than a stored value, which is the part
+		 * that went wrong here. See `view` in data().
 		 */
 		groupBy() { return 'category' },
 		sortBy() { return SORT.DEADLINE },
-		compact() { return false },
+		/** v4.13.60 — a real choice again; see `view` in data(). */
+		compact() { return this.view === 'compact' },
+
+		/**
+		 * The two views, as pills (v4.13.60). In the script rather than the
+		 * template because both labels are single words that need a
+		 * TRANSLATORS hint, and a hint in a template is a comment no
+		 * extractor reads (`/translations`).
+		 */
+		viewOptions() {
+			return [
+				{
+					key: 'full',
+					// TRANSLATORS: one of two views of the My Work list — every
+					// row shows its team, why it is here and when it is due
+					label: this.t('teamhub', 'Full'),
+					icon: 'ViewListOutline',
+				},
+				{
+					key: 'compact',
+					// TRANSLATORS: one of two views of the My Work list — one
+					// line per item, with only its subject, source and actions
+					label: this.t('teamhub', 'Compact'),
+					icon: 'ViewHeadline',
+				},
+			]
+		},
+
+		/** The pair's accessible name; the two pills are its options. */
+		viewGroupLabel() {
+			// TRANSLATORS: names a pair of buttons that choose how much of
+			// each row the My Work list shows
+			return this.t('teamhub', 'How much to show per item')
+		},
 		page() { return this.myWork.page },
 		collapsedGroups() { return this.myWork.collapsedGroups || [] },
 		payload() { return this.myWork.payload },
@@ -1493,17 +1585,6 @@ export default {
 
 		// ── Filters ──────────────────────────────────────────────────────
 
-		/**
-		 * v4.9.7 — where the source's account is (re)connected. OpenProject
-		 * has its own personal settings section; any other source lands on
-		 * the personal settings index.
-		 */
-		openPersonalSettings(providerId) {
-			window.location.href = providerId === 'openproject'
-				? personalSettingsUrl()
-				: generateUrl('/settings/user')
-		},
-
 		/** Commit several filter keys at once, then refetch once. */
 		applyFilterPatch(patch) {
 			this.$store.commit('SET_MYWORK_FILTERS', patch)
@@ -1968,12 +2049,32 @@ export default {
    to be here: the segmented density pair, six summary tiles with their
    accent rails, the saved-view chips, the source tab bar and the sort
    select. */
-.mywork__types {
+/* v4.13.60 — the one row of controls: what to show on the left, how much of
+   it to show on the right. `space-between` with the views last, so the two
+   view pills sit at the inline-end edge of the list they govern and do not
+   look like one more type filter. They wrap under the filters on a narrow
+   canvas rather than squeezing them. */
+.mywork__toolbar {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--th-space-sm, 8px);
+	margin-block: var(--th-space-md, 12px);
+}
+
+.mywork__types,
+.mywork__views {
 	display: flex;
 	flex-wrap: wrap;
 	align-items: center;
 	gap: var(--th-space-sm, 8px);
-	margin-block: var(--th-space-md, 12px);
+}
+
+/* Pushed to the end even when there is no filter group beside it, so the
+   pair does not move when a reader with one source opens the page. */
+.mywork__views {
+	margin-inline-start: auto;
 }
 
 /* ── Two-column layout ──────────────────────────────────────────────── */

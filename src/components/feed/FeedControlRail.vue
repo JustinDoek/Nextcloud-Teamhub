@@ -76,24 +76,20 @@
                 @update:model-value="patch('includeMentions', $event)">
                 {{ t('teamhub', 'Mentions') }}
             </NcCheckboxRadioSwitch>
-            <!-- v4.9.7 — OpenProject news, an include switch like its
-                 neighbours. Shown whenever the source can be asked at all
-                 (the rail does not know whether the viewer is connected; the
-                 feed says so in a notice when it matters). -->
-            <NcCheckboxRadioSwitch
-                v-if="openProjectAvailable"
-                :model-value="value.includeOpenProject"
-                type="switch"
-                @update:model-value="patch('includeOpenProject', $event)">
-                {{ t('teamhub', 'OpenProject news') }}
-            </NcCheckboxRadioSwitch>
+            <!-- v4.13.31 — the OpenProject news switch is gone. v4.9.7 gave
+                 news a Show row of its own; a news item is a team message
+                 (it is mirrored into the stream as one), so Team messages
+                 above is the switch that governs it. Two switches for one
+                 kind of row is the shape §4.5.29 removed from TYPES. -->
         </section>
 
         <!-- ── OPENPROJECT PROJECTS (v4.9.7) ─────────────────────────────
-             Only while the switch above is on and the results hold news
+             Only while team messages are shown and the results hold news
              from more than nothing: which projects. Nothing ticked means
-             everything, the same rule the Teams section follows. -->
-        <section v-if="openProjectAvailable && value.includeOpenProject && projects.length" class="feed-rail__section">
+             everything, the same rule the Teams section follows. This is a
+             facet over the rows on screen, like Teams — not a source of its
+             own, which is why it survived the v4.13.31 fold. -->
+        <section v-if="openProjectAvailable && value.includeTeam && projects.length" class="feed-rail__section">
             <h4 class="feed-rail__label">{{ t('teamhub', 'OpenProject projects') }}</h4>
             <ul class="feed-rail__picklist">
                 <li v-for="project in projects" :key="project.id">

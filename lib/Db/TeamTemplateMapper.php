@@ -48,6 +48,163 @@ class TeamTemplateMapper {
         return $out;
     }
 
+    /**
+     * v4.13.24 — insert a template an administrator created.
+     *
+     * Every Nextcloud administrator may make one. Until now the table only
+     * ever gained rows from the seed in `SeedTemplatesAndProfiles`, so the
+     * five shipped kinds of team were the only kinds there could be: an
+     * estate whose teams are "practice", "case" or "cohort" had to pick the
+     * nearest shipped label and live with it.
+     *
+     * `is_seeded` is 0, which is what keeps {@see delete()} available on it
+     * and warns nobody before editing it.
+     *
+     * The column set has no `created_by` / `created_at` pair — unlike
+     * `teamhub_policy_profile`, which does. Not worth a migration on a
+     * deployed table: `updated_by` / `updated_at` are set here and answer the
+     * same question for a row that has never been edited since.
+     *
+     * @param list<string> $apps
+     * @param list<string> $modules
+     */
+    public function insert(
+        string  $templateKey,
+        string  $label,
+        ?string $description,
+        array   $apps,
+        array   $modules,
+        bool    $expiryEnabled,
+        int     $expiryDefaultDays,
+        int     $preselectConfig,
+        int     $sortIndex,
+        ?string $defaultProfileKey,
+        string  $actor,
+        int     $now,
+    ): void {
+        $qb = $this->db->getQueryBuilder();
+        $qb->insert(self::TABLE)
+            ->values([
+                'template_key'        => $qb->createNamedParameter($templateKey),
+                'label'               => $qb->createNamedParameter($label),
+                'description'         => $qb->createNamedParameter($description),
+                'apps'                => $qb->createNamedParameter(implode(';', $apps)),
+                'modules'             => $qb->createNamedParameter(implode(';', $modules)),
+                // SMALLINT bound as PARAM_INT, never PARAM_BOOL — DESIGN §2.4.
+                'offer_expiry'        => $qb->createNamedParameter($expiryEnabled ? 1 : 0, IQueryBuilder::PARAM_INT),
+                'expiry_default_days' => $qb->createNamedParameter($expiryDefaultDays, IQueryBuilder::PARAM_INT),
+                'preselect_config'    => $qb->createNamedParameter($preselectConfig, IQueryBuilder::PARAM_INT),
+                'sort_index'          => $qb->createNamedParameter($sortIndex, IQueryBuilder::PARAM_INT),
+                'is_seeded'           => $qb->createNamedParameter(0, IQueryBuilder::PARAM_INT),
+                'updated_by'          => $qb->createNamedParameter($actor),
+                'updated_at'          => $qb->createNamedParameter($now, IQueryBuilder::PARAM_INT),
+            ]);
+        $qb->executeStatement();
+    }
+
+    /**
+     * v4.13.24 — delete a template.
+     *
+     * The caller decides whether this is allowed; see
+     * `PolicyService::deleteTemplate()`, which refuses a seeded row and the
+     * last remaining row, and clears the integration inclusions that point
+     * at the key.
+     *
+     * Teams already created from it are untouched. `teamhub_team_type.type`
+     * keeps the key, so those teams keep what they were created with — a
+     * template describes what a team is *made* with, not what it is.
+     */
+    public function delete(string $templateKey): void {
+        $qb = $this->db->getQueryBuilder();
+        $qb->delete(self::TABLE)
+            ->where($qb->expr()->eq('template_key', $qb->createNamedParameter($templateKey)));
+        $qb->executeStatement();
+    }
+
+    /** Whether a key is taken. Cheaper than {@see find()} for the uniqueness check. */
+    public function exists(string $templateKey): bool {
+        $qb = $this->db->getQueryBuilder();
+        $qb->select('template_key')
+            ->from(self::TABLE)
+            ->where($qb->expr()->eq('template_key', $qb->createNamedParameter($templateKey)))
+            ->setMaxResults(1);
+
+        $result = $qb->executeQuery();
+        $row    = $result->fetch();
+        $result->closeCursor();
+
+        return $row !== false;
+    }
+
+    /**
+     * A template key as a badge needs it: the key, the label as stored, and
+     * whether TeamHub seeded it (v4.13.28).
+     *
+     * Lives here rather than in a service because it is nothing but knowledge
+     * of this table, and because two layers need the same answer:
+     * `TeamTypeService` for the layout bundle and `TeamService::browseAllTeams()`
+     * for the team cards. A second copy of the rule is what put a four-arm
+     * `if` chain in two Vue components and left both of them missing `service`.
+     *
+     * **A key with no row still gets a descriptor**, built from the key with
+     * `isSeeded: false`. Teams outlive templates — v4.13.24 made that explicit
+     * when it allowed a template to be deleted while its teams keep everything
+     * they were created with — so a key with no row is an ordinary state, not
+     * a fault, and a badge that vanished because an administrator tidied up a
+     * template would be a worse answer than one reading the key.
+     *
+     * @return array{key: string, label: string, isSeeded: bool}
+     */
+    public function describe(string $templateKey): array {
+        $row = $this->describeMap()[$templateKey] ?? null;
+
+        return [
+            'key'      => $templateKey,
+            'label'    => $row !== null ? (string)$row['label'] : $templateKey,
+            'isSeeded' => $row !== null && (bool)$row['isSeeded'],
+        ];
+    }
+
+    /**
+     * {@see describe()} for many teams at once, reading the table once.
+     *
+     * @param array<string,string> $keysByTeam team id => template key
+     * @return array<string,array{key: string, label: string, isSeeded: bool}>
+     */
+    public function describeMany(array $keysByTeam): array {
+        $out = [];
+        foreach ($keysByTeam as $teamId => $key) {
+            if ((string)$key === '') {
+                continue;
+            }
+            $out[(string)$teamId] = $this->describe((string)$key);
+        }
+
+        return $out;
+    }
+
+    /**
+     * The table keyed by template key, read once per request.
+     *
+     * `describeMany()` is called with every team on a Browse Teams page, so
+     * the alternative is one `find()` per team for a label.
+     *
+     * @var array<string,array<string,mixed>>|null
+     */
+    private ?array $describeCache = null;
+
+    /** @return array<string,array<string,mixed>> */
+    private function describeMap(): array {
+        if ($this->describeCache === null) {
+            $this->describeCache = [];
+            foreach ($this->findAll() as $row) {
+                $this->describeCache[(string)($row['templateKey'] ?? '')] = $row;
+            }
+        }
+
+        return $this->describeCache;
+    }
+
     /** @return array<string,mixed>|null */
     public function find(string $templateKey): ?array {
         $qb = $this->db->getQueryBuilder();

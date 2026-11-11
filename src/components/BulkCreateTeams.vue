@@ -3,7 +3,7 @@
 
 		<div v-if="loading" class="btc__loading">
 			<NcLoadingIcon :size="iconToolbar" />
-			<span>{{ t('teamhub', 'Loading…') }}</span>
+			<span>{{ t('teamhub', 'Loading') }}</span>
 		</div>
 
 		<div class="btc__status" role="status" aria-live="polite">
@@ -87,20 +87,20 @@
 							<td>
 								<BulkUserCell
 									v-model="row.owner"
-									:placeholder="t('teamhub', 'Search a person…')" />
+									:placeholder="t('teamhub', 'Search a person')" />
 							</td>
 							<td>
 								<BulkUserCell
 									v-model="row.admins"
 									multiple
-									:placeholder="t('teamhub', 'Add people…')" />
+									:placeholder="t('teamhub', 'Add people')" />
 							</td>
 							<td>
 								<BulkUserCell
 									v-model="row.members"
 									multiple
 									allow-groups
-									:placeholder="t('teamhub', 'Add people or groups…')" />
+									:placeholder="t('teamhub', 'Add people or groups')" />
 							</td>
 							<td>
 								<label class="btc__sr" :for="'btc-exp-' + row.key">{{ t('teamhub', 'Expires') }}</label>
@@ -148,7 +148,7 @@
 						:disabled="checking || filledRows.length === 0"
 						@click="createTeams">
 						{{ checking
-							? t('teamhub', 'Checking…')
+							? t('teamhub', 'Checking')
 							: n('teamhub', 'Create %n team', 'Create %n teams', filledRows.length, { n: filledRows.length }) }}
 					</NcButton>
 				</div>
@@ -163,15 +163,9 @@
 			</p>
 
 			<div class="btc__summary">
-				<span class="btc__pill btc__pill--ok">
-					{{ n('teamhub', '%n row ready', '%n rows ready', summary.ready, { n: summary.ready }) }}
-				</span>
-				<span v-if="summary.skipped" class="btc__pill">
-					{{ n('teamhub', '%n skipped', '%n skipped', summary.skipped, { n: summary.skipped }) }}
-				</span>
-				<span v-if="summary.errors" class="btc__pill btc__pill--error">
-					{{ n('teamhub', '%n with an error', '%n with errors', summary.errors, { n: summary.errors }) }}
-				</span>
+				<NcChip no-close variant="success" :text="n('teamhub', '%n row ready', '%n rows ready', summary.ready, { n: summary.ready })" />
+				<NcChip v-if="summary.skipped" no-close variant="tertiary" :text="n('teamhub', '%n skipped', '%n skipped', summary.skipped, { n: summary.skipped })" />
+				<NcChip v-if="summary.errors" no-close variant="error" :text="n('teamhub', '%n with an error', '%n with errors', summary.errors, { n: summary.errors })" />
 			</div>
 
 			<div class="btc__scroll">
@@ -187,8 +181,8 @@
 					<tbody>
 						<tr v-for="r in previewRows" :key="r.row_num">
 							<td class="btc__col-num">{{ r.row_num }}</td>
-							<td>{{ r.name || '—' }}</td>
-							<td><span :class="['btc__pill', pillClass(r.status)]">{{ statusLabel(r.status) }}</span></td>
+							<td>{{ r.name || 'Not set' }}</td>
+							<td><NcChip no-close :variant="pillVariant(r.status)" :text="statusLabel(r.status)" /></td>
 							<td class="btc__detail">{{ r.message || '' }}</td>
 						</tr>
 					</tbody>
@@ -213,24 +207,18 @@
 		<!-- ── Running / done ─────────────────────────────────────────────── -->
 		<template v-else-if="stage === 'running' || stage === 'done'">
 			<h3 class="btc__h3">
-				{{ stage === 'done' ? t('teamhub', 'Finished') : t('teamhub', 'Creating teams…') }}
+				{{ stage === 'done' ? t('teamhub', 'Finished') : t('teamhub', 'Creating teams') }}
 			</h3>
 
 			<div class="btc__progress">
-				<progress class="btc__bar" :value="processed" :max="Math.max(totalToProcess, 1)" />
+				<NcProgressBar class="btc__bar" :value="progressPercent" />
 				<span>{{ t('teamhub', '{done} of {total}', { done: processed, total: totalToProcess }) }}</span>
 			</div>
 
 			<div class="btc__summary">
-				<span class="btc__pill btc__pill--ok">
-					{{ n('teamhub', '%n created', '%n created', summary.created, { n: summary.created }) }}
-				</span>
-				<span v-if="summary.failed" class="btc__pill btc__pill--error">
-					{{ n('teamhub', '%n failed', '%n failed', summary.failed, { n: summary.failed }) }}
-				</span>
-				<span v-if="summary.warnings" class="btc__pill btc__pill--warn">
-					{{ n('teamhub', '%n with a warning', '%n with warnings', summary.warnings, { n: summary.warnings }) }}
-				</span>
+				<NcChip no-close variant="success" :text="n('teamhub', '%n created', '%n created', summary.created, { n: summary.created })" />
+				<NcChip v-if="summary.failed" no-close variant="error" :text="n('teamhub', '%n failed', '%n failed', summary.failed, { n: summary.failed })" />
+				<NcChip v-if="summary.warnings" no-close variant="warning" :text="n('teamhub', '%n with a warning', '%n with warnings', summary.warnings, { n: summary.warnings })" />
 			</div>
 
 			<div class="btc__scroll">
@@ -246,8 +234,8 @@
 					<tbody>
 						<tr v-for="r in previewRows" :key="r.row_num">
 							<td class="btc__col-num">{{ r.row_num }}</td>
-							<td>{{ r.name || '—' }}</td>
-							<td><span :class="['btc__pill', pillClass(r.status)]">{{ statusLabel(r.status) }}</span></td>
+							<td>{{ r.name || 'Not set' }}</td>
+							<td><NcChip no-close :variant="pillVariant(r.status)" :text="statusLabel(r.status)" /></td>
 							<td class="btc__detail">{{ r.message || '' }}</td>
 						</tr>
 					</tbody>
@@ -272,7 +260,7 @@
 import { translate as t, translatePlural as n } from '@nextcloud/l10n'
 import { generateUrl } from '@nextcloud/router'
 import axios from '@nextcloud/axios'
-import { NcButton, NcLoadingIcon, NcTextField, NcSelect } from '@nextcloud/vue'
+import { NcButton, NcChip, NcLoadingIcon, NcProgressBar, NcTextField, NcSelect } from '@nextcloud/vue'
 import AlertCircleOutline from 'vue-material-design-icons/AlertCircleOutline.vue'
 import Close from 'vue-material-design-icons/Close.vue'
 import Plus from 'vue-material-design-icons/Plus.vue'
@@ -307,7 +295,7 @@ import BulkUserCell from './admin/BulkUserCell.vue'
  */
 export default {
 	name: 'BulkCreateTeams',
-	components: {   NcSelect, NcTextField, NcButton, NcLoadingIcon, AlertCircleOutline, Close, Plus, BulkUserCell },
+	components: { NcSelect, NcTextField, NcButton, NcChip, NcLoadingIcon, NcProgressBar, AlertCircleOutline, Close, Plus, BulkUserCell },
 
 	props: {
 		/** Template rows, already fetched by the parent — no second request. */
@@ -339,6 +327,10 @@ export default {
 	},
 
 	computed: {
+		/** NcProgressBar takes a percentage, not a value-and-max pair. */
+		progressPercent() {
+			return Math.round((this.processed / Math.max(this.totalToProcess, 1)) * 100)
+		},
 		/** v4.9.3 — every template but OpenProject; see the option's comment. */
 		bulkTemplates() {
 			return this.templates.filter(tpl => tpl.templateKey !== 'openproject')
@@ -478,10 +470,11 @@ export default {
 			}
 		},
 
-		pillClass(status) {
-			if (status === 'created' || status === 'ready') return 'btc__pill--ok'
-			if (status === 'failed') return 'btc__pill--error'
-			return ''
+		/** The NcChip variant for a row status; the chip still carries the word. */
+		pillVariant(status) {
+			if (status === 'created' || status === 'ready') return 'success'
+			if (status === 'failed') return 'error'
+			return 'tertiary'
 		},
 
 		/**
@@ -738,32 +731,6 @@ export default {
 	display: flex;
 	gap: 8px;
 	flex-wrap: wrap;
-}
-
-/* Every pill carries its own words; colour is never the only signal. */
-.btc__pill {
-	font-size: var(--th-font-micro);
-	font-weight: var(--th-font-weight-medium);
-	padding: 1px 8px;
-	border-radius: var(--th-radius-pill);
-	border: 1px solid var(--color-border-dark);
-	color: var(--color-text-maxcontrast);
-	white-space: nowrap;
-}
-
-.btc__pill--ok {
-	border-color: var(--color-text-success);
-	color: var(--color-text-success);
-}
-
-.btc__pill--error {
-	border-color: var(--color-text-error);
-	color: var(--color-text-error);
-}
-
-.btc__pill--warn {
-	border-color: var(--color-warning-text);
-	color: var(--color-warning-text);
 }
 
 .btc__progress {

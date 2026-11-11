@@ -465,7 +465,7 @@ export default {
 }
 
 .op-setup__label {
-    font-weight: var(--th-font-weight-semibold);
+    font-weight: var(--th-font-weight-regular);
 }
 
 .op-setup__optional {
@@ -520,6 +520,11 @@ export default {
     color: var(--color-main-text);
     text-align: start;
     cursor: pointer;
+    /* Nextcloud's server.css sets `font-weight: bold` on every
+       `button:not(.button-vue, …)`, so a raw-button carve-out hands 700 to
+       every child that does not set its own weight. Reset it here; the
+       name below picks its weight back up. */
+    font-weight: var(--th-font-weight-regular);
 }
 
 .op-setup__mode:hover {
@@ -549,8 +554,8 @@ export default {
 .op-setup__mode-name {
     display: inline-flex;
     align-items: center;
-    gap: var(--th-space-xxs);
-    font-weight: var(--th-font-weight-semibold);
+    gap: var(--th-space-xs);
+    font-weight: var(--th-font-weight-medium);
 }
 
 .op-setup__mode-desc {
@@ -612,6 +617,11 @@ export default {
     color: var(--color-main-text);
     text-align: start;
     cursor: pointer;
+    /* Nextcloud's server.css sets `font-weight: bold` on every
+       `button:not(.button-vue, …)`, so a raw-button carve-out hands 700 to
+       every child that does not set its own weight. Reset it here; the
+       name below picks its weight back up. */
+    font-weight: var(--th-font-weight-regular);
 }
 
 .op-setup__item:hover {

@@ -12,7 +12,12 @@ use OCP\AppFramework\Db\Entity;
  * half_day:  0=Morning, 1=Afternoon.
  * source:    'template' (auto-materialised) | 'override' (user-edited) | 'holiday' (admin-locked).
  *
- * calendar_event_uid is preserved on holiday overwrite for B4.
+ * calendar_event_uid holds the UID of a VEVENT written by the presence to
+ * calendar sync that ran before v4.13.49. Nothing writes it any more and
+ * nothing reads it, and it is kept rather than dropped because it is the only
+ * record of which event in which user's calendar belongs to which slot. The
+ * cleanup migration for those orphaned events (§2.246) cannot be written
+ * without it.
  *
  * @method int         getId()
  * @method void        setId(int $id)

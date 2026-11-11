@@ -3,7 +3,9 @@ declare(strict_types=1);
 
 namespace OCA\TeamHub\Db;
 
+use OCA\TeamHub\Util\AuditHash;
 use OCP\DB\QueryBuilder\IQueryBuilder;
+use OCP\IConfig;
 use OCP\IDBConnection;
 
 /**
@@ -24,13 +26,42 @@ use OCP\IDBConnection;
  *
  * No column mapping to an entity object — TeamHub's existing mappers use
  * raw arrays and direct QueryBuilder for simplicity, and we follow that.
+ *
+ * TAMPER EVIDENCE (v4.13.17, DESIGN §2.191)
+ * ========================================
+ * The contract above is a contract about *this code*. It says nothing about
+ * what a `psql` prompt can do, and an auditor asking for an append-only trail
+ * is asking about the latter. So every inserted row now carries `row_hash`, a
+ * keyed digest of its own content ({@see AuditHash}), and
+ * `AuditIntegrityService` anchors ranges of rows so that a deletion is
+ * provable too. Nothing here reads or re-writes an existing row to do it:
+ * hashing is local to the row being appended.
  */
 class AuditLogMapper {
 
     private IDBConnection $db;
 
-    public function __construct(IDBConnection $db) {
+    /**
+     * The row-digest key, resolved once per request. '' on an instance with no
+     * `secret` in config.php, in which case rows are written with a NULL
+     * `row_hash` — see AuditHash's docblock for why that is better than a
+     * digest keyed on nothing.
+     */
+    private ?string $hashKey = null;
+
+    public function __construct(
+        IDBConnection $db,
+        private IConfig $config,
+    ) {
         $this->db = $db;
+    }
+
+    private function hashKey(): string {
+        if ($this->hashKey === null) {
+            $this->hashKey = AuditHash::keyFrom($this->config);
+        }
+
+        return $this->hashKey;
     }
 
     // -------------------------------------------------------------------------
@@ -86,6 +117,19 @@ class AuditLogMapper {
             $metadataJson = ($encoded === false) ? null : $encoded;
         }
 
+        // The digest is over the JSON string that is about to be stored, not
+        // over the array it came from. See AuditHash::rowHash().
+        $rowHash = AuditHash::rowHash(
+            $this->hashKey(),
+            $teamId,
+            $eventType,
+            $actorUid,
+            $targetType,
+            $targetId,
+            $metadataJson,
+            $createdAt,
+        );
+
         $qb = $this->db->getQueryBuilder();
         $qb->insert('teamhub_audit_log')
             ->values([
@@ -96,6 +140,7 @@ class AuditLogMapper {
                 'target_id'   => $qb->createNamedParameter($targetId),
                 'metadata'    => $qb->createNamedParameter($metadataJson),
                 'created_at'  => $qb->createNamedParameter($createdAt, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT),
+                'row_hash'    => $qb->createNamedParameter($rowHash),
             ])
             ->executeStatement();
 
@@ -372,6 +417,71 @@ class AuditLogMapper {
                 $qb->createNamedParameter($boundaryTs, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)
             ));
         return (int)$qb->executeStatement();
+    }
+
+    // -------------------------------------------------------------------------
+    // Integrity reads (v4.13.17). Raw rows, not hydrated: the verifier hashes
+    // the stored bytes and must not see a decoded metadata array.
+    // -------------------------------------------------------------------------
+
+    /** The highest row id, or 0 on an empty table. */
+    public function maxId(): int {
+        $qb = $this->db->getQueryBuilder();
+        $qb->select($qb->func()->max('id'))->from('teamhub_audit_log');
+        $r = $qb->executeQuery();
+        $max = $r->fetchOne();
+        $r->closeCursor();
+
+        return (int)$max;
+    }
+
+    /** The lowest row id, or 0 on an empty table. */
+    public function minId(): int {
+        $qb = $this->db->getQueryBuilder();
+        $qb->select($qb->func()->min('id'))->from('teamhub_audit_log');
+        $r = $qb->executeQuery();
+        $min = $r->fetchOne();
+        $r->closeCursor();
+
+        return (int)$min;
+    }
+
+    /**
+     * Every row in an inclusive id range, in id order, with the columns the
+     * digest is computed from and nothing else.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function rowsForVerification(int $fromId, int $toId): array {
+        $qb = $this->db->getQueryBuilder();
+        $qb->select('id', 'team_id', 'event_type', 'actor_uid', 'target_type', 'target_id', 'metadata', 'created_at', 'row_hash')
+            ->from('teamhub_audit_log')
+            ->where($qb->expr()->gte('id', $qb->createNamedParameter($fromId, IQueryBuilder::PARAM_INT)))
+            ->andWhere($qb->expr()->lte('id', $qb->createNamedParameter($toId, IQueryBuilder::PARAM_INT)))
+            ->orderBy('id', 'ASC');
+
+        $result = $qb->executeQuery();
+        $rows = [];
+        while ($row = $result->fetch()) {
+            $rows[] = $row;
+        }
+        $result->closeCursor();
+
+        return $rows;
+    }
+
+    /** How many rows carry no digest at all — written before v4.13.17. */
+    public function countWithoutHash(): int {
+        $qb = $this->db->getQueryBuilder();
+        $qb->select($qb->func()->count('*'))
+            ->from('teamhub_audit_log')
+            ->where($qb->expr()->isNull('row_hash'));
+
+        $r = $qb->executeQuery();
+        $n = $r->fetchOne();
+        $r->closeCursor();
+
+        return (int)$n;
     }
 
     // -------------------------------------------------------------------------

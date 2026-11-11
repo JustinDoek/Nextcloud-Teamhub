@@ -22,7 +22,11 @@
             <h4 class="prov-review__title">{{ t('teamhub', 'Resources') }}</h4>
             <ul class="prov-review__list" :aria-label="t('teamhub', 'Resources')">
                 <li v-for="r in summary.resources" :key="r.id" class="prov-review__row">
-                    <span class="prov-review__badge" :class="'prov-review__badge--' + r.kind">{{ classificationLabel(r.kind) }}</span>
+                    <NcChip
+                        class="prov-review__badge"
+                        no-close
+                        :variant="badgeVariant(r.kind)"
+                        :text="classificationLabel(r.kind)" />
                     <span class="prov-review__row-body">
                         <span class="prov-review__row-name">{{ r.label }}</span>
                         <span v-if="r.note" class="prov-review__row-note">{{ r.note }}</span>
@@ -36,9 +40,11 @@
             <p v-if="!summary.members.length" class="prov-review__hint">{{ t('teamhub', 'Only you. You can invite people later.') }}</p>
             <ul v-else class="prov-review__list" :aria-label="t('teamhub', 'Members')">
                 <li v-for="m in summary.members" :key="m.type + ':' + m.id" class="prov-review__row">
-                    <span class="prov-review__badge" :class="m.omitted ? 'prov-review__badge--skipped' : 'prov-review__badge--new'">
-                        {{ m.omitted ? t('teamhub', 'Left out') : roleLabel(m.teamRole) }}
-                    </span>
+                    <NcChip
+                        class="prov-review__badge"
+                        no-close
+                        :variant="m.omitted ? 'tertiary' : 'success'"
+                        :text="m.omitted ? t('teamhub', 'Left out') : roleLabel(m.teamRole)" />
                     <span class="prov-review__row-body">
                         <span class="prov-review__row-name">{{ m.displayName }}</span>
                         <span class="prov-review__row-note">{{ m.note }}</span>
@@ -60,7 +66,7 @@
 
 <script>
 import { translate as t } from '@nextcloud/l10n'
-import { NcNoteCard } from '@nextcloud/vue'
+import { NcChip, NcNoteCard } from '@nextcloud/vue'
 import { classificationLabel, roleLabel } from '../lib/provisioning.js'
 
 /**
@@ -74,14 +80,37 @@ import { classificationLabel, roleLabel } from '../lib/provisioning.js'
 export default {
     name: 'ProvisioningReviewStep',
 
-    components: { NcNoteCard },
+    components: { NcChip, NcNoteCard },
 
     props: {
         /** { name, description, policyLabel, startDate, endDate, category, visibility, resources: [{id, label, kind, note}], members: [{id, type, displayName, teamRole, note, omitted}], ownerName, warnings: [] } */
         summary: { type: Object, required: true },
     },
 
-    methods: { t, classificationLabel, roleLabel },
+    methods: {
+        t,
+        classificationLabel,
+        roleLabel,
+
+        /**
+         * The NcChip variant for a resource classification. NcChip 9.8.0 has
+         * no `info` variant, so "existing, will be linked" takes `secondary`
+         * — NC's primary-light tint — rather than the info tint it carried
+         * when the badge was hand-rolled.
+         *
+         * @param {string} kind
+         * @return {string}
+         */
+        badgeVariant(kind) {
+            switch (kind) {
+            case 'new': return 'success'
+            case 'link': return 'secondary'
+            case 'unavailable':
+            case 'required-missing': return 'warning'
+            default: return 'tertiary'
+            }
+        },
+    },
 }
 </script>
 
@@ -144,33 +173,12 @@ export default {
     font-size: var(--th-font-meta);
 }
 
+/* Layout only — NcChip owns the fill, the ink, the radius and the type.
+   The width keeps the classification column aligned down the list. */
 .prov-review__badge {
     flex: 0 0 auto;
     min-width: 7rem;
-    padding: 0 var(--th-space-sm);
-    border-radius: var(--th-radius-chip);
-    background: var(--color-background-dark);
-    color: var(--color-main-text);
-    font-size: var(--th-font-micro);
-    font-weight: var(--th-font-weight-medium);
-    text-align: center;
-    line-height: var(--th-line-height-relaxed);
-}
-
-.prov-review__badge--new {
-    background: var(--color-success);
-    color: var(--color-success-text);
-}
-
-.prov-review__badge--link {
-    background: var(--color-info);
-    color: var(--color-info-text);
-}
-
-.prov-review__badge--unavailable,
-.prov-review__badge--required-missing {
-    background: var(--color-warning);
-    color: var(--color-warning-text);
+    justify-content: center;
 }
 
 .prov-review__row-body {

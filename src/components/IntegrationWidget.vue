@@ -204,6 +204,53 @@ export default {
         },
 
         /**
+         * v4.13.23 — this card serves both integration models.
+         *
+         * A legacy registration is addressed by `registry_id`; a package
+         * capability by its stable identity, app_id / integration_key /
+         * capability_key. The presence of `cap_id` is what tells them apart,
+         * and it is the capability rows that carry it.
+         *
+         * One component rather than two because the card itself — items,
+         * icons, the 3-dot action menu, the native action modal — is identical
+         * either way. Only the three URLs differ, and they are built here.
+         */
+        isPackageCapability() {
+            return !!this.integration.cap_id
+        },
+
+        /**
+         * The route prefix for this card's three endpoints.
+         *
+         * Each key is encoded: an app id and a capability key are validated on
+         * registration, but they travel through a URL path and a path segment
+         * is not the place to trust a pattern match made somewhere else.
+         */
+        apiBase() {
+            const team = encodeURIComponent(this.teamId)
+            if (!this.isPackageCapability) {
+                return `/apps/teamhub/api/v1/teams/${team}/integrations`
+            }
+            const appId = encodeURIComponent(this.integration.app_id)
+            const key = encodeURIComponent(this.integration.integration_key)
+            const cap = encodeURIComponent(this.integration.capability_key)
+            return `/apps/teamhub/api/v1/teams/${team}/integrations/packages/${appId}/${key}/${cap}`
+        },
+
+        /**
+         * The key this card reports its actions under.
+         *
+         * `TeamWidgetGrid` keys its per-widget action menus by it, so a
+         * package capability needs one that cannot collide with a
+         * registry id.
+         */
+        actionKey() {
+            return this.isPackageCapability
+                ? 'cap-' + this.integration.cap_id
+                : this.integration.registry_id
+        },
+
+        /**
          * Effective actions for the 3-dot menu in the card header.
          * Actions come from the widget's getWidgetData() response.
          * Each entry: { label, icon?, actionId?, url? }
@@ -229,9 +276,9 @@ export default {
             this.loading   = true
             this.loadError = false
             try {
-                const url = generateUrl(
-                    `/apps/teamhub/api/v1/teams/${this.teamId}/integrations/widget-data/${this.integration.registry_id}`
-                )
+                const url = generateUrl(this.isPackageCapability
+                    ? `${this.apiBase}/data`
+                    : `${this.apiBase}/widget-data/${this.integration.registry_id}`)
                 const { data } = await axios.get(url)
                 this.items          = Array.isArray(data.items) ? data.items : []
                 this.dynamicActions = Array.isArray(data.actions) ? data.actions : []
@@ -243,7 +290,7 @@ export default {
                 this.loading = false
                 // Emit effective actions so TeamView can update the card header menu reactively.
                 this.$emit('actions-loaded', {
-                    registryId: this.integration.registry_id,
+                    registryId: this.actionKey,
                     actions:    this.effectiveActions,
                 })
             }
@@ -303,9 +350,9 @@ export default {
             this.actionSubmitLabel = null
 
             try {
-                const url = generateUrl(
-                    `/apps/teamhub/api/v1/teams/${this.teamId}/integrations/action-form/${this.integration.registry_id}`
-                )
+                const url = generateUrl(this.isPackageCapability
+                    ? `${this.apiBase}/form`
+                    : `${this.apiBase}/action-form/${this.integration.registry_id}`)
                 const { data } = await axios.get(url, { params: { actionId: action.actionId } })
 
                 if (!data.fields || data.fields.length === 0) {
@@ -342,9 +389,9 @@ export default {
         async submitAction() {
             this.actionSubmitting = true
             try {
-                const url = generateUrl(
-                    `/apps/teamhub/api/v1/teams/${this.teamId}/integrations/action-submit/${this.integration.registry_id}`
-                )
+                const url = generateUrl(this.isPackageCapability
+                    ? `${this.apiBase}/submit`
+                    : `${this.apiBase}/action-submit/${this.integration.registry_id}`)
                 const { data } = await axios.post(url, {
                     actionId: this.activeActionId,
                     fields:   this.actionFieldValues,

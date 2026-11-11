@@ -84,6 +84,37 @@ class TeamTypeMapper {
     }
 
     /**
+     * How many teams carry each template key — v4.13.24.
+     *
+     * One grouped query rather than a `findTeamsByType()` per template: the
+     * Policy panel wants the figure for every row at once, and five or fifty
+     * round trips for a number shown beside a Delete button is not a trade
+     * worth making. No `LIMIT` for the same reason `findTeamsByType()` has
+     * none — a truncated count is a wrong count.
+     *
+     * A key with no teams is simply absent from the result, so the caller
+     * reads it as 0 rather than having to distinguish "none" from "unknown".
+     *
+     * @return array<string,int> template key => team count
+     */
+    public function countByType(): array {
+        $qb = $this->db->getQueryBuilder();
+        $qb->select('type')
+            ->selectAlias($qb->func()->count('team_id'), 'team_count')
+            ->from('teamhub_team_type')
+            ->groupBy('type');
+
+        $result = $qb->executeQuery();
+        $out    = [];
+        while ($row = $result->fetch()) {
+            $out[(string)$row['type']] = (int)$row['team_count'];
+        }
+        $result->closeCursor();
+
+        return $out;
+    }
+
+    /**
      * Insert-or-update. team_id is PK so we do a DELETE-then-INSERT rather
      * than a portable upsert (NC apps target both MariaDB and Postgres; a
      * REPLACE INTO isn't portable and ON CONFLICT syntax differs between

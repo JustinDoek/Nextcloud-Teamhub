@@ -34,7 +34,7 @@
 			<section class="mywork-admin__section">
 				<h3 class="mywork-admin__heading">{{ t('teamhub', 'Sources') }}</h3>
 				<p class="mywork-admin__hint">
-					{{ t('teamhub', 'A source that is turned off, or whose app is missing, is skipped entirely. A source that fails at request time never blocks the others — members see the results that did arrive plus a notice.') }}
+					{{ t('teamhub', 'A source that is turned off, or whose app is missing, is skipped entirely. A source that fails at request time never blocks the others. Members see the results that did arrive plus a notice.') }}
 				</p>
 
 				<div v-if="!providers.length" class="mywork-admin__empty">

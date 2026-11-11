@@ -5,6 +5,8 @@ namespace OCA\TeamHub\Service;
 
 use OCA\TeamHub\AppInfo\Application;
 use OCA\TeamHub\Constants\CirclesConfig;
+use OCA\TeamHub\Service\TeamRegistryService;
+use OCA\TeamHub\Util\CirclesMemberId;
 use OCP\IDBConnection;
 use OCP\IL10N;
 use OCP\IUserManager;
@@ -59,6 +61,9 @@ class MaintenanceService {
         // interfaces, so this adds a leaf edge and no cycle; `npm run check:di`
         // is what proves that rather than this comment.
         private PolicyService      $policyService,
+        // v4.13.17 — the audit chain's cheap summary for the Compliance tab.
+        // A DI leaf over the two audit mappers plus IConfig.
+        private AuditIntegrityService $auditIntegrity,
     ) {}
 
     // -------------------------------------------------------------------------
@@ -604,7 +609,11 @@ class MaintenanceService {
                 'single_id' => $insertQb->createNamedParameter($singleId),
                 'user_id'   => $insertQb->createNamedParameter($adminUid),
                 'user_type' => $insertQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT),
-                'member_id' => $insertQb->createNamedParameter($adminUid),
+                // v4.14.7 — a generated id, never the uid. Circles refuses
+                // anything under 14 characters on its own writes, and a short
+                // one here only surfaces when the team federates
+                // (CirclesMemberId, DESIGN §2.249).
+                'member_id' => $insertQb->createNamedParameter(CirclesMemberId::generate()),
                 'instance'  => $insertQb->createNamedParameter(''),
                 'level'     => $insertQb->createNamedParameter(9, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT),
                 'status'    => $insertQb->createNamedParameter('Member'),
@@ -626,11 +635,67 @@ class MaintenanceService {
             $adminRowInserted = true;
         }
 
-        // ── Step 5: Destroy via CircleService ─────────────────────────────────
+        // Step 4b: who loses this team besides us (v4.14.9)
+        //
+        // Read before anything is deleted, because step 6 would take the rows
+        // with it. Used only to say, in the log, which instances were left
+        // holding a copy when the federated path did not run — see step 6.
+        $remoteInstances = [];
+        try {
+            $riQb  = $this->db->getQueryBuilder();
+            $riRes = $riQb->selectDistinct('instance')
+                ->from('circles_member')
+                ->where($riQb->expr()->eq('circle_id', $riQb->createNamedParameter($teamId)))
+                ->andWhere($riQb->expr()->neq('instance', $riQb->createNamedParameter('')))
+                ->executeQuery();
+            while ($riRow = $riRes->fetch()) {
+                $remoteInstances[] = (string)$riRow['instance'];
+            }
+            $riRes->closeCursor();
+        } catch (\Throwable $e) {
+            // Best effort: this only enriches a log line.
+        }
+
+        // Step 5: Destroy via CircleService
+        //
+        // v4.14.9 — **release TeamHub's own lock first.** These are the same
+        // two lines `TeamService::deleteTeam()` has carried since v4.10.6, and
+        // their absence here is why step 6 was never a fallback but the normal
+        // path: `CircleDestroy::verify()` refuses a circle carrying `CFG_APP`
+        // with status 120 ("Team is managed from an other app"), every team
+        // TeamHub creates carries that bit, and the `catch` below threw the
+        // reason away. So an orphaned TeamHub team was always deleted by raw
+        // SQL.
+        //
+        // That matters well past tidiness. Circles' destroy is a federated
+        // event: it clears the memberships, updates the population of any
+        // parent circle, and — the part nothing else can do — broadcasts
+        // `CircleDestroy` to every instance holding a copy, which is what
+        // makes a federated member's instance drop the team. A raw delete
+        // strands those copies permanently, and a stranded copy answers 409
+        // "Could not verify Team" on every action its users take, because the
+        // owner no longer has the circle (DESIGN §2.254).
         $destroySucceeded = false;
+        $destroyError     = null;
         try {
             $appManager = $this->container->get(\OCP\App\IAppManager::class);
             if ($appManager->isInstalled('circles')) {
+                // Resolved from the container rather than the constructor:
+                // this is the only place the service needs the registry, and
+                // the registry is the single writer of the lock bit (see
+                // CirclesConfig). An orphan need not be a registered team and
+                // its circle may already be half gone, so a failure here must
+                // not stop the destroy — it only means the bit was not ours.
+                try {
+                    $this->container->get(TeamRegistryService::class)->unlock($teamId);
+                } catch (\Throwable $e) {
+                    $this->logger->debug('[TeamHub][MaintenanceService] deleteOrphanedTeam: could not release the app lock', [
+                        'teamId' => $teamId,
+                        'error'  => $e->getMessage(),
+                        'app'    => Application::APP_ID,
+                    ]);
+                }
+
                 $circleService        = $this->container->get(\OCA\Circles\Service\CircleService::class);
                 $federatedUserService = $this->container->get(\OCA\Circles\Service\FederatedUserService::class);
                 $federatedUserService->setLocalCurrentUser($adminUser);
@@ -638,6 +703,30 @@ class MaintenanceService {
                 $destroySucceeded = true;
             }
         } catch (\Throwable $e) {
+            // v4.14.9 — was a bare `catch (\Throwable $e) {}`. Why the
+            // federated path failed is the only thing that explains a remote
+            // instance still showing the team, so it is recorded now.
+            $destroyError = $e->getMessage();
+        }
+
+        if (!$destroySucceeded) {
+            $this->logger->warning('[TeamHub][MaintenanceService] deleteOrphanedTeam: federated destroy did not run, deleting rows directly', [
+                'teamId'          => $teamId,
+                'error'           => $destroyError,
+                'remoteInstances' => $remoteInstances,
+                'app'             => Application::APP_ID,
+            ]);
+            if ($remoteInstances !== []) {
+                // No federated event was raised, so these instances keep a
+                // copy of a team that no longer exists here, and nothing on
+                // their side ever re-checks it. Named so an administrator
+                // chasing a 409 on the other end has somewhere to start.
+                $this->logger->warning('[TeamHub][MaintenanceService] deleteOrphanedTeam: remote copies were not notified and will not expire', [
+                    'teamId'    => $teamId,
+                    'instances' => $remoteInstances,
+                    'app'       => Application::APP_ID,
+                ]);
+            }
         }
 
         // ── Step 6: Raw DB fallback if CircleService::destroy failed ──────────
@@ -666,7 +755,7 @@ class MaintenanceService {
      *
      * Strategy (pure DB — no Circles API calls that can fail):
      *
-     * 1. Downgrade any existing owner rows for this circle to level 4 (moderator)
+     * 1. Downgrade any existing owner rows for this circle to level 1 (member)
      *    so there is never more than one owner.
      * 2. Check whether the target user already has a member row in circles_member.
      *    - YES → UPDATE level=9, status=Member on that row.
@@ -681,6 +770,19 @@ class MaintenanceService {
      * stale one) and cannot create a consistent membership object.
      *
      * v4.6.6 — `$removePreviousOwner` makes step 1 a DELETE instead of a demote.
+     *
+     * v4.13.56 — the demote target is **level 1 (member)**, was level 4
+     * (moderator). Justin's call, and it is the honest end of a hand-over now
+     * that nothing inside a team names an owner (DESIGN §2.223): the person
+     * handing the team over is giving up the team, and leaving them a
+     * moderator left them with rights they did not ask to keep. The screen
+     * that drives this said "demoted to admin" while the code wrote level 4,
+     * so no reading of the old behaviour was the documented one.
+     *
+     * Every caller gets the new level, including the Maintenance tab: an
+     * administrator reassigning a team there is making the same statement
+     * about the outgoing owner, and two different demote levels for one verb
+     * is the kind of split nobody remembers exists.
      *
      * The demote is right for the Maintenance tab, where an admin is repairing
      * one team and the outgoing owner is a real member who should stay. It is
@@ -765,8 +867,9 @@ class MaintenanceService {
         $singleId = $this->resolveSingleIdOrFail($userId);
 
         // ── Step 1: Clear the current owner ──────────────────────────────────
-        // Default: demote to moderator (level 4) so there is never more than
-        // one owner and the outgoing owner keeps their place on the team.
+        // Default: demote to member (level 1, v4.13.56) so there is never more
+        // than one owner and the outgoing owner keeps their place on the team
+        // without keeping any rights over it.
         // v4.6.6, $removePreviousOwner: delete the row instead — see the note
         // on this method for why the bulk importer needs that.
         //
@@ -783,7 +886,7 @@ class MaintenanceService {
         } else {
             $demoteQb = $this->db->getQueryBuilder();
             $demoteQb->update('circles_member')
-                ->set('level', $demoteQb->createNamedParameter(4, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
+                ->set('level', $demoteQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
                 ->where($demoteQb->expr()->eq('circle_id', $demoteQb->createNamedParameter($teamId)))
                 ->andWhere($demoteQb->expr()->eq('level',   $demoteQb->createNamedParameter(9, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
                 ->andWhere($demoteQb->expr()->neq('user_id', $demoteQb->createNamedParameter($userId)))
@@ -844,7 +947,9 @@ class MaintenanceService {
             // Use the same pattern as MemberService::requestJoinTeam() which is confirmed working:
             //   - joined is DATETIME, not INT — must use date() format
             //   - instance must be '' (not NULL) for local users
-            //   - member_id = userId for local users
+            //   - member_id is a GENERATED 31-char id, never the uid
+            //     (v4.14.7 — the old "member_id = userId" convention is what
+            //     DESIGN §2.249 is about)
             //   - optional columns (display_name, cached_name, note, contact_id, contact_meta)
             //     are probed via getTableColumns() and included only if the column exists.
             // single_id comes from step 0 — the user's real Circles identity.
@@ -856,7 +961,9 @@ class MaintenanceService {
                 'single_id'  => $insertQb->createNamedParameter($singleId),
                 'user_id'    => $insertQb->createNamedParameter($userId),
                 'user_type'  => $insertQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT),
-                'member_id'  => $insertQb->createNamedParameter($userId),
+                // v4.14.7 — see CirclesMemberId. This line read `$userId`, and
+                // it is the one that made a repaired team unable to federate.
+                'member_id'  => $insertQb->createNamedParameter(CirclesMemberId::generate()),
                 'instance'   => $insertQb->createNamedParameter(''),
                 'level'      => $insertQb->createNamedParameter(9, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT),
                 'status'     => $insertQb->createNamedParameter('Member'),
@@ -1514,6 +1621,86 @@ class MaintenanceService {
         }
         $dnRes->closeCursor();
 
+        // -- Step F: member rows whose member_id Circles would refuse --------
+        //
+        // v4.14.7, DESIGN 2.249. `circles_member.member_id` is the row's own
+        // identity and Circles rejects anything under 14 characters on every
+        // write (`CoreRequestBuilder::confirmValidId()`). Four TeamHub paths
+        // used to insert the bare uid instead, or no value at all, which the
+        // raw-SQL insert let through.
+        //
+        // Nothing breaks locally -- which is why this went unnoticed -- but a
+        // remote instance receiving a federated event for the team runs the
+        // owner row through `MemberRequest::insertOrUpdate()` inside
+        // `syncRemoteCircle()`, where the throw is NOT caught, and answers the
+        // event with a 409 "Could not verify Team". The invite reports success
+        // on this side and nothing ever arrives on the other.
+        //
+        // The length test is done in PHP rather than as a SQL `LENGTH()`:
+        // both MySQL and Postgres have the function, but the whole class of
+        // portability question is avoidable here for the cost of reading a
+        // few more rows, and `/migrations` exists because of that class of
+        // question. Scoped to source=16 for the same reason every other step
+        // is -- a circle TeamHub did not create is not ours to rewrite.
+        $midQb  = $this->db->getQueryBuilder();
+        $midRes = $midQb
+            ->select('cm.circle_id', 'cm.member_id', 'cm.level',
+                     'c.name', 'c.display_name', 'c.sanitized_name')
+            ->from('circles_member', 'cm')
+            ->innerJoin('cm', 'circles_circle', 'c', $midQb->expr()->eq('c.unique_id', 'cm.circle_id'))
+            ->where($midQb->expr()->eq('c.source', $midQb->createNamedParameter(16, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+            ->executeQuery();
+
+        /** @var array<string, array{name:string, count:int, owner:bool}> $badIds */
+        $badIds = [];
+        while ($midRow = $midRes->fetch()) {
+            $memberId = $midRow['member_id'];
+            if (CirclesMemberId::isValid($memberId === null ? null : (string)$memberId)) {
+                continue;
+            }
+
+            $name = (string)($midRow['name'] ?? '');
+            $skip = false;
+            foreach ($systemPfx as $pfx) {
+                if (str_starts_with($name, $pfx)) { $skip = true; break; }
+            }
+            if ($skip) continue;
+
+            $teamId = (string)$midRow['circle_id'];
+            if (!isset($badIds[$teamId])) {
+                $displayName = $midRow['display_name'] ?? '';
+                if ($displayName === '') $displayName = $midRow['sanitized_name'] ?? '';
+                if ($displayName === '') {
+                    $displayName = str_starts_with($name, 'app:circles:') ? substr($name, 12) : $name;
+                }
+                $badIds[$teamId] = ['name' => (string)$displayName, 'count' => 0, 'owner' => false];
+            }
+
+            $badIds[$teamId]['count']++;
+            // The owner row is the one that actually blocks federation: it is
+            // the single `insertOrUpdate()` in `syncRemoteCircle()` that has no
+            // `catch (InvalidIdException)` around it. Every other member is
+            // skipped individually by `syncRemoteMembers()`.
+            if ((int)$midRow['level'] === 9) {
+                $badIds[$teamId]['owner'] = true;
+            }
+        }
+        $midRes->closeCursor();
+
+        foreach ($badIds as $teamId => $info) {
+            $issues[] = [
+                'id'               => $teamId,
+                'name'             => $info['name'],
+                'issue_type'       => 'invalid_member_id',
+                'invalid_count'    => $info['count'],
+                'owner_affected'   => $info['owner'],
+                'direct_count'     => 0,
+                'effective_count'  => 0,
+                'member_count'     => 0,
+                'membership_count' => 0,
+            ];
+        }
+
         foreach ($circles as $circle) {
             $total++;
             $teamId = $circle['unique_id'];
@@ -1561,6 +1748,90 @@ class MaintenanceService {
             'mismatched'  => count($issues),
             'issues'      => $issues,
         ];
+    }
+
+    /**
+     * Give every member row of one team a `member_id` Circles will accept
+     * (v4.14.7, DESIGN 2.249).
+     *
+     * Rewrites each row whose current value is shorter than 14 characters,
+     * empty, or absent, to a freshly generated 31-character id -- see
+     * {@see CirclesMemberId} for why it is generated rather than the uid, and
+     * rather than the single id the row already has.
+     *
+     * **`circles_token` is updated alongside, and has to be.** That table
+     * keeps a copy of `member_id` and includes it in its unique index
+     * `sicisimit` (`share_id, circle_id, single_id, member_id, token`). There
+     * is no foreign key, so rewriting one side alone fails silently: the
+     * database accepts it and the token rows simply stop matching their
+     * member. Scoped by circle **and** single id as well as the old value, so
+     * one member's tokens cannot pick up another's.
+     *
+     * A row whose old value is the empty string gets no token update. An
+     * empty `member_id` in `circles_token` is that table's own default (set
+     * NOT NULL default '' by Circles' Version360000Date20260922130000), not a
+     * reference to this row, and matching on it would rewrite unrelated
+     * tokens.
+     *
+     * Deliberately not run through Circles' own `MemberRequest`: it would
+     * refuse these rows on read-modify-write for exactly the reason they need
+     * repairing. This is the one place that may write the column directly,
+     * and it only ever moves a row from invalid to valid.
+     *
+     * @return int number of member rows rewritten
+     */
+    public function repairInvalidMemberIds(string $teamId): int {
+
+        $this->requireNcAdmin();
+
+        $qb  = $this->db->getQueryBuilder();
+        $res = $qb->select('id', 'single_id', 'member_id', 'user_id', 'level')
+            ->from('circles_member')
+            ->where($qb->expr()->eq('circle_id', $qb->createNamedParameter($teamId)))
+            ->executeQuery();
+        $rows = $res->fetchAll();
+        $res->closeCursor();
+
+        $repaired = 0;
+        foreach ($rows as $row) {
+            $old = $row['member_id'] === null ? null : (string)$row['member_id'];
+            if (CirclesMemberId::isValid($old)) {
+                continue;
+            }
+
+            $new = CirclesMemberId::generate();
+
+            $updQb = $this->db->getQueryBuilder();
+            $updQb->update('circles_member')
+                ->set('member_id', $updQb->createNamedParameter($new))
+                ->where($updQb->expr()->eq('id', $updQb->createNamedParameter((int)$row['id'], \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                ->executeStatement();
+
+            if ($old !== null && $old !== '') {
+                $tokQb = $this->db->getQueryBuilder();
+                $tokQb->update('circles_token')
+                    ->set('member_id', $tokQb->createNamedParameter($new))
+                    ->where($tokQb->expr()->eq('circle_id', $tokQb->createNamedParameter($teamId)))
+                    ->andWhere($tokQb->expr()->eq('single_id', $tokQb->createNamedParameter((string)$row['single_id'])))
+                    ->andWhere($tokQb->expr()->eq('member_id', $tokQb->createNamedParameter($old)))
+                    ->executeStatement();
+            }
+
+            $repaired++;
+        }
+
+        if ($repaired > 0) {
+            // The uid is logged because an administrator repairing a team
+            // needs to know whose row changed; the ids themselves are not,
+            // since a member id is not information an admin can act on.
+            $this->logger->info('[TeamHub][MaintenanceService] repairInvalidMemberIds: rewrote member ids', [
+                'teamId'   => $teamId,
+                'repaired' => $repaired,
+                'app'      => Application::APP_ID,
+            ]);
+        }
+
+        return $repaired;
     }
 
     /**
@@ -1702,7 +1973,12 @@ class MaintenanceService {
         $now      = time();
 
         // Generate a single_id for the new member row — use the admin's personal circle unique_id
-        $singleId = $this->memberService->resolveUserSingleId($adminUid, $this->db) ?? $adminUid;
+        // `$this->memberService` does not exist on this class: MemberService
+        // depends on this service, so it is resolved from the container at the
+        // point of use (see the note on the constructor and the same idiom in
+        // resolveSingleId()). As written this line was a fatal.
+        $memberService = $this->container->get(MemberService::class);
+        $singleId = $memberService->resolveUserSingleId($adminUid, $this->db) ?? $adminUid;
 
         $insQb = $this->db->getQueryBuilder();
         $insQb->insert('circles_member')
@@ -1710,6 +1986,9 @@ class MaintenanceService {
             ->setValue('single_id',  $insQb->createNamedParameter($singleId))
             ->setValue('user_id',    $insQb->createNamedParameter($adminUid))
             ->setValue('user_type',  $insQb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
+            // v4.14.7 — this row used to be written with no `member_id` at
+            // all, which is as invalid as a short one: see CirclesMemberId.
+            ->setValue('member_id',  $insQb->createNamedParameter(CirclesMemberId::generate()))
             ->setValue('level',      $insQb->createNamedParameter(9, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT))
             ->setValue('status',     $insQb->createNamedParameter('Member'))
             ->setValue('cached_name', $insQb->createNamedParameter($adminUid))
@@ -1931,7 +2210,8 @@ class MaintenanceService {
      * @return array{
      *     ghost_memberships:  array{count: int, sample_uid: string|null},
      *     orphan_teams:       array{count: int, sample_name: string|null},
-     *     profile_compliance: array<string,mixed>
+     *     profile_compliance: array<string,mixed>,
+     *     audit_integrity:    array<string,mixed>
      * }
      */
     public function getComplianceSummary(): array {
@@ -1956,6 +2236,13 @@ class MaintenanceService {
             // The failure that rule exists to prevent is two gates asking
             // different questions inside one call.
             'profile_compliance' => $this->policyService->complianceSummary(),
+            // v4.13.17 — the cheap half of the audit-integrity check: whether a
+            // chain exists, how far behind it is, and whether this instance can
+            // sign one at all. The full re-hash is its own endpoint and its own
+            // button, for the reason that endpoint's docblock gives. Same-gate
+            // exception as `profile_compliance` above: both ask whether the
+            // caller is a Nextcloud administrator.
+            'audit_integrity' => $this->auditIntegrity->summary(),
         ];
     }
 
@@ -2738,8 +3025,9 @@ class MaintenanceService {
      * on this class, so the method belongs here and adds no edge at all.
      *
      * Two things happen, in this order and for a reason: levels first, then the
-     * transfer. `assignOwner()` demotes the outgoing owner to moderator, so
-     * running it first would have the level pass overwrite that.
+     * transfer. `assignOwner()` demotes the outgoing owner to member (level 1
+     * since v4.13.56), so running it first would have the level pass overwrite
+     * that.
      *
      * **The gate is "you own this team", not "you are an administrator"** —
      * unlike everything else on this service. The creator holds level 9 because

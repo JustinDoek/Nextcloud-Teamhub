@@ -2,12 +2,24 @@
     <li class="th-member-row">
         <!-- Avatar with merged presence dot -->
         <div class="th-member-row__avatar-wrap">
+            <!-- v4.14.16 - a colleague whose account is on another Nextcloud
+                 has no avatar here to load and no contacts menu to open, so
+                 the globe takes the avatar's place and carries their server
+                 as its title (DESIGN 2.257). Until this version they were not
+                 in this list at all, which is the bug. -->
+            <span
+                v-if="member.isRemote"
+                class="th-member-row__remote"
+                :title="t('teamhub', 'Account on {instance}', { instance: member.instance })">
+                <Earth :size="ICON_BODY" />
+            </span>
             <NcAvatar
+                v-else
                 :user="member.userId"
                 :display-name="member.displayName"
                 :hide-status="true"
                 :disable-menu="false"
-                :size="32" />
+                :size="AVATAR_MD" />
             <span
                 v-if="presenceDotColor"
                 class="th-member-row__dot"
@@ -22,7 +34,14 @@
             <div class="th-member-row__name" :title="member.displayName">
                 {{ member.displayName }}
             </div>
-            <div class="th-member-row__status">
+            <!-- v4.14.16 - for somebody on another server the second line is
+                 their server, not a status: this instance has no presence, no
+                 last login and no profile for them, so "Current status:
+                 Offline" would be an invention. -->
+            <div v-if="member.isRemote" class="th-member-row__status">
+                <span class="th-member-row__status-value">{{ member.instance }}</span>
+            </div>
+            <div v-else class="th-member-row__status">
                 <span class="th-member-row__status-label">{{ t('teamhub', 'Current status') }}</span>
                 <span class="th-member-row__status-value">{{ statusText }}</span>
             </div>
@@ -66,8 +85,9 @@
 import { translate as t } from '@nextcloud/l10n'
 import { generateUrl } from '@nextcloud/router'
 import { NcAvatar } from '@nextcloud/vue'
-import { ICON_BODY } from '../../constants/uiTokens.js'
+import { ICON_BODY, AVATAR_MD } from '../../constants/uiTokens.js'
 
+import Earth from 'vue-material-design-icons/Earth.vue'
 import MessageIcon from 'vue-material-design-icons/MessageOutline.vue'
 import PhoneIcon   from 'vue-material-design-icons/Phone.vue'
 import EmailIcon   from 'vue-material-design-icons/EmailOutline.vue'
@@ -75,7 +95,7 @@ import EmailIcon   from 'vue-material-design-icons/EmailOutline.vue'
 export default {
     name: 'MemberRow',
 
-    components: { NcAvatar, MessageIcon, PhoneIcon, EmailIcon },
+    components: { NcAvatar, Earth, MessageIcon, PhoneIcon, EmailIcon },
 
     props: {
         /**
@@ -102,6 +122,7 @@ export default {
     data() {
         return {
             ICON_BODY,
+            AVATAR_MD,
         }
     },
 
@@ -244,6 +265,29 @@ export default {
     position: relative;
     flex-shrink: 0;
     display: inline-flex;
+}
+
+/* v4.14.16 - stands exactly where the avatar would, so a mixed list keeps one
+   column. Six locks rather than width/height alone: Nextcloud's global button
+   and clickable-area rules are not in play on a <span>, but the flex parent
+   is, and `flex: 0 0 auto` plus the max pair is what keeps the circle a circle
+   when a long name pulls on the row (`/ui-standards` round shapes). */
+.th-member-row__remote {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    box-sizing: border-box;
+    width: var(--th-avatar-md);
+    height: var(--th-avatar-md);
+    min-width: var(--th-avatar-md);
+    min-height: var(--th-avatar-md);
+    max-width: var(--th-avatar-md);
+    max-height: var(--th-avatar-md);
+    padding: 0;
+    border-radius: 50%;
+    background: var(--color-background-dark);
+    color: var(--color-primary-element);
 }
 
 .th-member-row__dot {

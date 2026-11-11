@@ -15,6 +15,7 @@ use OCA\TeamHub\MyWork\Priority;
 use OCA\TeamHub\MyWork\WorkItem;
 use OCA\TeamHub\MyWork\WorkItemPage;
 use OCA\TeamHub\MyWork\WorkQuery;
+use OCA\TeamHub\Service\MemberReviewService;
 use OCA\TeamHub\Service\MemberService;
 use OCA\TeamHub\Service\ResourceDiscoveryService;
 use OCA\TeamHub\Service\TeamSpaceReconcileService;
@@ -101,6 +102,12 @@ class TeamAdminWorkProvider implements IWorkProvider {
     /** Source status of an open team-space task. */
     public const STATUS_TEAMSPACE_TASK = 'teamspace_task_assigned';
 
+    /** Item-id marker for a membership recertification (v4.13.17). */
+    private const REVIEW_PREFIX = 'memberreview';
+    private const TYPE_MEMBER_REVIEW = 'member_review';
+    /** Source status of a membership review that is due. */
+    public const STATUS_MEMBER_REVIEW = 'member_review_due';
+
     /**
      * Rows per request across all teams.
      *
@@ -119,6 +126,9 @@ class TeamAdminWorkProvider implements IWorkProvider {
         // service's ledger; the owner's display name goes into the
         // administrators' "reported done" notification.
         private TeamSpaceReconcileService $teamSpaceReconcile,
+        // v4.13.17 — the membership recertification clock and its attestation
+        // (DESIGN §2.193).
+        private MemberReviewService       $memberReview,
         private IUserManager              $userManager,
         private IL10N                     $l,
         private LoggerInterface           $logger,
@@ -156,9 +166,13 @@ class TeamAdminWorkProvider implements IWorkProvider {
                 // v4.10.1 — the owner reports a team-space task done.
                 ActionType::COMPLETE,
             ],
-            'resourceTypes' => [self::RESOURCE_TYPE, self::TYPE_JOIN_REQUEST, self::TYPE_TEAMSPACE_TASK],
+            'resourceTypes' => [
+                self::RESOURCE_TYPE, self::TYPE_JOIN_REQUEST, self::TYPE_TEAMSPACE_TASK,
+                self::TYPE_MEMBER_REVIEW,
+            ],
             'statuses'      => [
                 self::STATUS_PENDING_REVIEW, self::STATUS_JOIN_REQUESTED, self::STATUS_TEAMSPACE_TASK,
+                self::STATUS_MEMBER_REVIEW,
             ],
             // v4.10.29 — the quota request (Waiting for others / Completed
             // rows since v4.10.2) moved onto the engine as a Nextcloud
@@ -225,6 +239,24 @@ class TeamAdminWorkProvider implements IWorkProvider {
             }
         } catch (\Throwable $e) {
             $this->logger->warning('[TeamHub][MyWork][TeamAdmin] team-space task lookup failed', [
+                'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+        }
+
+        // v4.13.17 — membership recertifications, second: a review that is due
+        // is the only row here with a date somebody else set, and an overdue
+        // access review is the row an auditor asks about. One per team at most,
+        // and only inside the notice window.
+        try {
+            foreach ($this->memberReview->listDue($teamIds, $query->now) as $due) {
+                if (count($items) >= self::MAX_ITEMS) {
+                    $truncated = true;
+                    break;
+                }
+                $items[] = $this->buildMemberReviewItem($query, $due);
+            }
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][MyWork][TeamAdmin] membership review lookup failed', [
                 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
         }
@@ -336,6 +368,31 @@ class TeamAdminWorkProvider implements IWorkProvider {
             return null;
         }
 
+        // v4.13.17 — a membership review, same marker-in-front shape. The
+        // third segment is a fixed word rather than an id, because there is
+        // exactly one open review per team by construction.
+        if ($parts[0] === self::REVIEW_PREFIX) {
+            $teamId = $parts[1];
+            if (!in_array($teamId, $allowedTeamIds, true) || !$this->isTeamAdmin($teamId)) {
+                return null;
+            }
+            try {
+                foreach ($this->memberReview->listDue([$teamId]) as $due) {
+                    return $this->buildMemberReviewItem(
+                        new WorkQuery(userId: $userId, teamIds: $allowedTeamIds, now: time()),
+                        $due,
+                    );
+                }
+            } catch (\Throwable $e) {
+                $this->logger->warning('[TeamHub][MyWork][TeamAdmin] membership review re-read failed', [
+                    'itemId' => $itemId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+                ]);
+            }
+            // Attested by a colleague while the row was on screen, or the
+            // profile stopped asking for a review.
+            return null;
+        }
+
         // v4.6.17 — a join request wears the same three-segment shape with a
         // marker in front. Told apart before the resource branch reads $parts[0]
         // as a team id.
@@ -402,7 +459,9 @@ class TeamAdminWorkProvider implements IWorkProvider {
     // ---------------------------------------------------------------------
 
     public function getAvailableActions(string $userId, WorkItem $item): array {
-        if ($item->resourceType === self::TYPE_TEAMSPACE_TASK) {
+        if ($item->resourceType === self::TYPE_TEAMSPACE_TASK
+            || $item->resourceType === self::TYPE_MEMBER_REVIEW
+        ) {
             return [ActionType::OPEN, ActionType::COMPLETE];
         }
         return [ActionType::OPEN, ActionType::APPROVE, ActionType::REJECT];
@@ -411,6 +470,9 @@ class TeamAdminWorkProvider implements IWorkProvider {
     public function executeAction(string $userId, WorkItem $item, string $action, array $params): ActionResult {
         if ($item->resourceType === self::TYPE_TEAMSPACE_TASK) {
             return $this->completeTeamSpaceTask($userId, $item, $action);
+        }
+        if ($item->resourceType === self::TYPE_MEMBER_REVIEW) {
+            return $this->completeMemberReview($item, $action, $params);
         }
         if ($item->resourceType === self::TYPE_JOIN_REQUEST) {
             return $this->decideJoinRequest($item, $action);
@@ -569,7 +631,7 @@ class TeamAdminWorkProvider implements IWorkProvider {
             // would be the fastest way to make the whole category ignorable.
             'priority'       => Priority::LOW,
             'status'         => self::STATUS_PENDING_REVIEW,
-            'reason'         => $this->l->t('Connected to this team outside TeamHub — accept it or ignore it'),
+            'reason'         => $this->l->t('Connected to this team outside TeamHub: accept it or ignore it'),
             'createdAt'      => $row->getCreatedAt(),
             'updatedAt'      => $row->getUpdatedAt() ?: $row->getCreatedAt(),
             // No deadline. See the class docblock.
@@ -656,6 +718,131 @@ class TeamAdminWorkProvider implements IWorkProvider {
      *
      * @param array{teamId: string, teamName: string, sharedFolderId: int, sharedFolderName: string, spaceName: string|null, spaceConnected: bool, since: int, task: array<string,mixed>} $task
      */
+    /**
+     * The attestation (v4.13.17). `getItem()` has already established that the
+     * caller administers this team; `attest()` re-checks it anyway, because the
+     * service is also reachable from the Members tab and a gate that only one
+     * caller applies is not a gate.
+     *
+     * @param array<string,mixed> $params
+     */
+    private function completeMemberReview(WorkItem $item, string $action, array $params): ActionResult {
+        if ($action !== ActionType::COMPLETE) {
+            return ActionResult::unsupported($this->l->t('Unknown action.'));
+        }
+
+        try {
+            // The dialog's optional note. `reason` is the generic field the row
+            // dialog sends; nothing here requires one.
+            $note = trim((string)($params['reason'] ?? ''));
+            $this->memberReview->attest($item->teamId, $note);
+
+            return ActionResult::success(
+                $this->l->t('Membership confirmed. The review is recorded with your name and today\'s date.'),
+                null,
+                true,
+            );
+        } catch (\RuntimeException $e) {
+            return ActionResult::conflict($e->getMessage());
+        } catch (\Throwable $e) {
+            $this->logger->error('[TeamHub][MyWork][TeamAdmin] membership review failed', [
+                'teamId' => $item->teamId, 'exception' => $e, 'app' => Application::APP_ID,
+            ]);
+            return ActionResult::failure($this->l->t('That could not be saved.'), 'failed');
+        }
+    }
+
+    /**
+     * One team's membership recertification as a queue row.
+     *
+     * `openTarget` is the Members tab, because the work is done there: the row
+     * is where the obligation is tracked and the roster is where it is
+     * examined. The *Confirm membership* action is on both, which is the one
+     * place `/mywork-workflows` allows a workflow button outside the row — the
+     * opening action lives where the subject lives.
+     *
+     * @param array{teamId: string, dueAt: int, overdue: bool, periodMonths: int, lastReviewedAt: int|null, lastReviewedBy: string} $due
+     */
+    private function buildMemberReviewItem(WorkQuery $query, array $due): WorkItem {
+        $teamId  = $due['teamId'];
+        $overdue = $due['overdue'];
+        $lastBy  = (string)$due['lastReviewedBy'];
+        $lastAt  = $due['lastReviewedAt'];
+
+        $lastName = $lastBy === ''
+            ? ''
+            : ($this->userManager->get($lastBy)?->getDisplayName() ?: $lastBy);
+
+        $steps = [
+            $this->l->t('Open Manage team → Members and read the list. Each person carries the date they joined.'),
+            $this->l->t('Remove anyone who should no longer have access. Removing somebody here is the ordinary Remove button.'),
+            $this->l->t('Then confirm the list. Your name and the date are recorded as the review.'),
+        ];
+
+        return WorkItem::make([
+            'providerId'     => self::ID,
+            'providerItemId' => self::REVIEW_PREFIX . ':' . $teamId . ':due',
+            'teamId'         => $teamId,
+            'teamName'       => $query->teamNames[$teamId] ?? $teamId,
+            'category'       => Category::ACTION_REQUIRED,
+            'title'          => $overdue
+                ? $this->l->t('Membership review is overdue')
+                : $this->l->t('Membership review is due'),
+            'subtitle'       => $lastAt === null
+                // TRANSLATORS: %d is a number of months between membership reviews
+                ? $this->l->n('Reviewed every %n month. This team has not been reviewed yet.', 'Reviewed every %n months. This team has not been reviewed yet.', $due['periodMonths'])
+                // TRANSLATORS: %s is the name of the person who confirmed the member list last time
+                : $this->l->t('Last confirmed by %s', [$lastName]),
+            'resourceType'   => self::TYPE_MEMBER_REVIEW,
+            'resourceId'     => $teamId,
+            'resourceUrl'    => '/apps/teamhub?team=' . rawurlencode($teamId),
+            'openTarget'     => OpenTarget::manageTeam('members'),
+            // Nobody is waiting on this person, so NORMAL — until the date has
+            // passed, at which point the instance's own policy is.
+            'priority'       => $overdue ? Priority::HIGH : Priority::NORMAL,
+            'status'         => self::STATUS_MEMBER_REVIEW,
+            'reason'         => $overdue
+                ? $this->l->t('This team\'s classification asks for a membership review and the date has passed.')
+                : $this->l->t('This team\'s classification asks for a membership review.'),
+            'createdAt'      => $lastAt,
+            'updatedAt'      => $lastAt,
+            'dueAt'          => $due['dueAt'],
+            'completedAt'    => null,
+            'assignee'       => null,
+            'waitingFor'     => null,
+            'availableActions' => [],
+            'metadata'       => [
+                'steps'        => $steps,
+                'periodMonths' => $due['periodMonths'],
+                'lastReviewedBy'   => $lastName,
+                'lastReviewedAt'   => $lastAt,
+                'actionLabels' => [
+                    // TRANSLATORS: button on a My Work row — the team admin confirms the member list is correct
+                    ActionType::COMPLETE => $this->l->t('Confirm membership'),
+                ],
+                'confirm'      => [
+                    ActionType::COMPLETE => [
+                        'title'       => $this->l->t('Confirm this team\'s member list?'),
+                        'body'        => $this->l->t('Your name and today\'s date are recorded as the membership review, together with how many members the team has. Nothing is added or removed by this button.'),
+                        'reasonLabel' => $this->l->t('Note for the record (optional)'),
+                    ],
+                ],
+                'workflow'     => $this->memberReview->workflowSteps(
+                    [
+                        // TRANSLATORS: workflow step — the review period elapsed and the review became due
+                        $this->l->t('Review became due'),
+                        // TRANSLATORS: workflow step — a team admin confirms the member list
+                        $this->l->t('Team admin confirms the list'),
+                    ],
+                    $due['dueAt'],
+                    $lastAt,
+                    $lastName,
+                ),
+            ],
+            'permissions'    => ['canComplete' => true],
+        ]);
+    }
+
     private function buildTeamSpaceTaskItem(WorkQuery $query, array $task): WorkItem {
         $teamId  = $task['teamId'];
         $shared  = $task['sharedFolderName'];
@@ -665,7 +852,7 @@ class TeamAdminWorkProvider implements IWorkProvider {
             $this->l->t('In Files, open the shared folder "%1$s", select everything and move it into the team space "%2$s".', [$shared, $space]),
         ];
         if (!$task['spaceConnected']) {
-            $steps[] = $this->l->t('In Manage team → Modules & integrations → Files, connect the team space with "+ Connect team folder" — it is already listed.');
+            $steps[] = $this->l->t('In Manage team → Modules & integrations → Files, connect the team space with "+ Connect team folder": it is already listed.');
         }
         $steps[] = $this->l->t('Disconnect the shared folder "%s" in the same section. The folder stays in your Files; only the team\'s access to it ends.', [$shared]);
         $steps[] = $this->l->t('Then press Complete here. The Nextcloud administrators are told, and this row disappears.');

@@ -7,6 +7,8 @@ namespace OCA\TeamHub\Service\Suggestion;
 use OCA\TeamHub\AppInfo\Application;
 use OCA\TeamHub\Service\MemberService;
 use OCA\TeamHub\Service\TimezoneService;
+use OCA\TeamHub\Service\NextcloudAvailabilityService;
+use OCA\TeamHub\Db\HolidayMapper;
 use OCA\TeamHub\Util\CalendarBlob;
 use OCP\IConfig;
 use OCP\IDBConnection;
@@ -31,13 +33,8 @@ use Psr\Log\LoggerInterface;
  *   conflate two concerns. Keep them apart.
  *
  * Privacy contract:
- *   This service reads other users' personal-calendar event time-ranges
- *   directly via the calendarobjects table (mirroring the read-pattern
- *   the team-cal provider already uses through ActivityService — same
- *   trust model as the existing approved code path). It NEVER returns
- *   event titles, descriptions, attendees, UIDs, locations, or any
- *   identifying detail upstream; only integer timestamps. The class
- *   itself encloses everything that touches event data.
+ *   Reads only boolean free/busy results through Nextcloud's supported
+ *   calendar manager API. Event content is never accessed or returned.
  *
  * Fall-back rule:
  *   The half-day was already chosen because presence said these
@@ -74,6 +71,8 @@ class TimeslotSuggestionService {
         private IDBConnection     $db,
         private IConfig           $config,
         private TimezoneService   $timezoneService,
+        private NextcloudAvailabilityService $nativeAvailability,
+        private HolidayMapper $holidays,
         private LoggerInterface   $logger,
     ) {
     }
@@ -157,33 +156,25 @@ class TimeslotSuggestionService {
             return ['suggestions' => [], 'attendeeCount' => count($attendees), 'durationMinutes' => $durationMin];
         }
 
-        // Read each attendee's personal-calendar busy intervals across the
-        // search window. The window is small (a few hours), so we read once
-        // per attendee, not per candidate.
-        $busyByUser = [];
-        foreach ($attendees as $uid) {
-            $busyByUser[$uid] = $this->readPersonalBusy($uid, $searchStartTs, $searchEndTs);
+        // TeamHub holidays always exclude candidate dates; we do not
+        // write those dates into users' calendars.
+        if ($this->holidays->findByDate($date) !== null) {
+            return ['suggestions' => [], 'attendeeCount' => count($attendees), 'durationMinutes' => $durationMin];
         }
 
-        // Walk the grid. For each candidate start, count how many attendees
-        // have NO overlapping busy interval (= available). Tie-breaks:
-        // (1) more available, (2) on-the-hour, (3) earlier start.
-        $gridSec   = self::GRID_MINUTES * 60;
+        // Native Nextcloud checkAvailability combines recurring working
+        // hours (VAVAILABILITY), absences and personal calendar FreeBusy.
+        // Check the EXACT proposed interval, including 16:30 boundaries.
+        $gridSec = self::GRID_MINUTES * 60;
         $candidates = [];
         for ($startTs = $searchStartTs; $startTs + $durationSec <= $searchEndTs; $startTs += $gridSec) {
             $endTs = $startTs + $durationSec;
-            $available = 0;
-            foreach ($attendees as $uid) {
-                if (!$this->hasConflict($busyByUser[$uid] ?? [], $startTs, $endTs)) {
-                    $available++;
-                }
-            }
+            $verdicts = $this->nativeAvailability->checkMany($organiserUid, $attendees, $startTs, $endTs);
+            $available = count(array_filter($verdicts, static fn ($v) => $v === true));
             $isOnHour = ((int)(($startTs - $searchStartTs) % 3600) === 0) ? 1 : 0;
             $candidates[] = [
-                'startTs'   => $startTs,
-                'endTs'     => $endTs,
-                'available' => $available,
-                'onHour'    => $isOnHour,
+                'startTs' => $startTs, 'endTs' => $endTs,
+                'available' => $available, 'onHour' => $isOnHour,
             ];
         }
 
@@ -203,6 +194,7 @@ class TimeslotSuggestionService {
         // rather than 09:00 / 09:15 / 09:30.
         $picked = [];
         foreach ($candidates as $c) {
+            if ($c['available'] === 0) { continue; }
             $overlaps = false;
             foreach ($picked as $p) {
                 if ($c['startTs'] < $p['endTs'] && $c['endTs'] > $p['startTs']) {

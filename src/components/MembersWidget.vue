@@ -74,7 +74,9 @@
                         :key="m.userId"
                         :member="m"
                         :morning="tomorrowSlotFor(m.userId, 0)"
-                        :afternoon="tomorrowSlotFor(m.userId, 1)" />
+                        :afternoon="tomorrowSlotFor(m.userId, 1)"
+                        :morning-availability="tomorrowAvailabilityFor(m.userId, 0)"
+                        :afternoon-availability="tomorrowAvailabilityFor(m.userId, 1)" />
                 </ul>
 
                 <!--
@@ -171,6 +173,7 @@ export default {
             // Search tab — local string, filtered against the same allEffectiveMembers list.
             searchQuery: '',
             // Tomorrow tab data — keyed by `${YYYY-MM-DD}_${0|1}` per the team-presence API.
+            tomorrowAvailability: {},
             tomorrowSlots:    {},   // { userId: { 'YYYY-MM-DD_0': slot, 'YYYY-MM-DD_1': slot } }
             tomorrowLoading:  false,
             tomorrowLoadedFor: null, // teamId we last loaded tomorrow for
@@ -366,6 +369,10 @@ export default {
          * Look up the slot for a given member and half-day.
          * Returns the slot object ({ color, label, slug, is_busy, ... }) or null.
          */
+        tomorrowAvailabilityFor(userId, half) {
+            return this.tomorrowAvailability[userId]?.[`${this.tomorrowDate()}_${half}`] ?? null
+        },
+
         tomorrowSlotFor(userId, half) {
             const userSlots = this.tomorrowSlots[userId] || {}
             const key = `${this.tomorrowDate()}_${half}`
@@ -386,6 +393,7 @@ export default {
                     generateUrl(`/apps/teamhub/api/v1/teams/${teamId}/presence`),
                     { params: { from: day, to: day } },
                 )
+                this.tomorrowAvailability = data.availability || {}
                 this.tomorrowSlots = (data && data.slots && typeof data.slots === 'object')
                     ? data.slots
                     : {}
@@ -393,6 +401,7 @@ export default {
             } catch (e) {
                 // Non-fatal — pills render as "no schedule".
                 this.tomorrowSlots = {}
+                this.tomorrowAvailability = {}
             } finally {
                 this.tomorrowLoading = false
             }

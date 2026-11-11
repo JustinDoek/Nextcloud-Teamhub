@@ -63,6 +63,37 @@ class AnnouncementController extends Controller {
         ]);
     }
 
+    /**
+     * POST /api/v1/announcements/seen
+     * Body: { filename: string, event: 'shown'|'read'|'ack'|'optout' }
+     *
+     * v4.13.56 — the forced popup's counters. Always 200 with what was
+     * recorded: a refused event (unknown filename, unknown event, this user
+     * already counted) is not an error the administrator reading the message
+     * should be shown, and the body says `recorded: false` for anything that
+     * wants to know.
+     *
+     * #[NoAdminRequired] like the rest of this controller. The popup itself is
+     * only drawn for instance admins, but the service answers "may this user
+     * see this announcement" and that is the boundary that matters here; an
+     * extra admin gate would be a second copy of the audience rule.
+     */
+    #[NoAdminRequired]
+    public function seen(): JSONResponse {
+        $uid = $this->userSession->getUser()?->getUID();
+        if ($uid === null) {
+            return new JSONResponse(['error' => 'Unauthenticated'], Http::STATUS_UNAUTHORIZED);
+        }
+        $filename = trim((string) $this->request->getParam('filename', ''));
+        $event    = trim((string) $this->request->getParam('event', ''));
+        if ($filename === '' || $event === '') {
+            return new JSONResponse(['error' => 'filename and event required'], Http::STATUS_BAD_REQUEST);
+        }
+        return new JSONResponse([
+            'recorded' => $this->announcementService->recordPopupEvent($uid, $filename, $event),
+        ]);
+    }
+
     #[NoAdminRequired]
     public function dismiss(): JSONResponse {
         $uid = $this->userSession->getUser()?->getUID();

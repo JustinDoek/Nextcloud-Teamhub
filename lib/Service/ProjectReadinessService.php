@@ -342,7 +342,7 @@ class ProjectReadinessService {
             'done'     => $project->getEvaluationMeetingAt() !== null,
             'advisory' => true,
             'label'    => $l10n->t('Organise an evaluation meeting'),
-            'hint'     => $l10n->t('A retro to look back on scope, timeline, budget, and what to carry into the next project. Optional — mark as done once it\'s on the calendar, or skip if you don\'t want to run one.'),
+            'hint'     => $l10n->t('A retro to look back on scope, timeline, budget, and what to carry into the next project. Optional. Mark as done once it\'s on the calendar, or skip if you don\'t want to run one.'),
             'link'     => ['target' => 'add-meeting'],
             'markable' => 'evaluation_meeting',
         ];

@@ -218,6 +218,30 @@ class PresenceUserController extends Controller {
         }
     }
 
+    /**
+     * PUT /api/v1/presence/slots/override-range
+     * Apply vacation, sickness or other non-working time for a date range,
+     * with a morning/afternoon/full-day scope. restore=true removes the
+     * temporary change and restores each day from its weekly workplace.
+     */
+    #[NoAdminRequired]
+    public function overrideRange(
+        string $from_date = '',
+        string $to_date = '',
+        string $part = 'all',
+        ?int $presence_type_id = null,
+        bool $restore = false,
+    ): JSONResponse {
+        try {
+            $userId = $this->requireUserId();
+            return new JSONResponse($this->slotService->overrideRange(
+                $userId, $from_date, $to_date, $part, $presence_type_id, $restore,
+            ));
+        } catch (\Throwable $e) {
+            return $this->mapError($e, 'overrideRange');
+        }
+    }
+
     // =========================================================================
     // Helpers
     // =========================================================================

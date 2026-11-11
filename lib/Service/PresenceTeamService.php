@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace OCA\TeamHub\Service;
 
 use OCA\TeamHub\Db\PresenceSlotMapper;
+use OCA\TeamHub\Db\HolidayMapper;
 use OCA\TeamHub\Db\PresenceTeamConfig;
 use OCA\TeamHub\Db\PresenceTeamConfigMapper;
 use OCA\TeamHub\Db\PresenceTypeMapper;
@@ -30,7 +31,8 @@ use Psr\Log\LoggerInterface;
  *
  * Config:
  *   Reads/writes teamhub_presence_team rows. Absence of a row = all defaults
- *   (presence_enabled=0, hide_reasons=0). Rows are created on first write.
+ *   (presence_enabled=1, hide_reasons=0). Rows are created on first write. The v4.13.41 data migration
+ * retains disabled settings for pre-existing teams.
  */
 class PresenceTeamService {
 
@@ -42,6 +44,10 @@ class PresenceTeamService {
     public function __construct(
         private PresenceTeamConfigMapper $configMapper,
         private PresenceSlotMapper       $slotMapper,
+        private HolidayMapper            $holidayMapper,
+        // v4.13.64 — NextcloudAvailabilityService, TimezoneService and
+        // IUserSession left with the free/busy sampling above. The service
+        // itself stays in the app; the meeting wizard is its only caller now.
         private PresenceTypeMapper       $typeMapper,
         private MemberService            $memberService,
         private IUserStatusManager       $userStatusManager,
@@ -56,13 +62,18 @@ class PresenceTeamService {
      * Return the per-team presence config as a plain array.
      * Absent row = defaults.
      *
-     * @return array{presence_enabled: bool, hide_reasons: bool}
+     * v4.13.68 — `shifts_enabled` joins the row. Unlike `presence_enabled`,
+     * an absent row reads as **off**: Shifts is licensed, so a team that has
+     * never been told about it must not acquire a roster on upgrade.
+     *
+     * @return array{presence_enabled: bool, hide_reasons: bool, shifts_enabled: bool}
      */
     public function getConfig(string $teamId): array {
         $row = $this->configMapper->findByTeam($teamId);
         return [
-            'presence_enabled' => $row !== null && $row->getPresenceEnabled() === 1,
+            'presence_enabled' => $row === null || $row->getPresenceEnabled() === 1,
             'hide_reasons'     => $row !== null && $row->getHideReasons() === 1,
+            'shifts_enabled'   => $row !== null && $row->getShiftsEnabled() === 1,
         ];
     }
 
@@ -70,8 +81,8 @@ class PresenceTeamService {
      * Write one or both config flags. Only keys present in $data are changed.
      * Creates the row on first write.
      *
-     * @param array<string, mixed> $data  Keys: presence_enabled (bool/int), hide_reasons (bool/int)
-     * @return array{presence_enabled: bool, hide_reasons: bool}
+     * @param array<string, mixed> $data  Keys: presence_enabled (bool/int), hide_reasons (bool/int), shifts_enabled (bool/int)
+     * @return array{presence_enabled: bool, hide_reasons: bool, shifts_enabled: bool}
      */
     public function saveConfig(string $teamId, array $data): array {
         $now = time();
@@ -80,8 +91,9 @@ class PresenceTeamService {
         if ($row === null) {
             $row = new PresenceTeamConfig();
             $row->setTeamId($teamId);
-            $row->setPresenceEnabled(0);
+            $row->setPresenceEnabled(1);
             $row->setHideReasons(0);
+            $row->setShiftsEnabled(0);
             $row->setCreatedAt($now);
             $row->setUpdatedAt($now);
 
@@ -90,6 +102,9 @@ class PresenceTeamService {
             }
             if (array_key_exists('hide_reasons', $data)) {
                 $row->setHideReasons((int)!!$data['hide_reasons']);
+            }
+            if (array_key_exists('shifts_enabled', $data)) {
+                $row->setShiftsEnabled((int)!!$data['shifts_enabled']);
             }
 
             /** @var PresenceTeamConfig $saved */
@@ -100,6 +115,9 @@ class PresenceTeamService {
             }
             if (array_key_exists('hide_reasons', $data)) {
                 $row->setHideReasons((int)!!$data['hide_reasons']);
+            }
+            if (array_key_exists('shifts_enabled', $data)) {
+                $row->setShiftsEnabled((int)!!$data['shifts_enabled']);
             }
             $row->setUpdatedAt($now);
 
@@ -117,6 +135,7 @@ class PresenceTeamService {
         return [
             'presence_enabled' => $saved->getPresenceEnabled() === 1,
             'hide_reasons'     => $saved->getHideReasons() === 1,
+            'shifts_enabled'   => $saved->getShiftsEnabled() === 1,
         ];
     }
 
@@ -184,11 +203,48 @@ class PresenceTeamService {
             $slotsByUser[$uid] = [];
             foreach ($userSlots as $slot) {
                 $key = $slot->getSlotDate() . '_' . $slot->getHalfDay();
+                $type = $types[$slot->getPresenceTypeId() ?? -1] ?? null;
+                if ($slot->getSource() === 'holiday' || $type === null
+                    || ($type->getIsBusy() === 1 && $slot->getSource() !== 'override')) {
+                    continue; // Ignore old busy templates, keep deliberate time-off overrides.
+                }
                 $slotsByUser[$uid][$key] = $this->serializeSlotCell(
                     $slot, $types, $hideReasons
                 );
             }
         }
+
+        // Holidays are global admin settings and must not overwrite workplace
+        // records. Overlay read-time for every member, including those who
+        // have never configured their workplace.
+        $day = new \DateTimeImmutable($fromDate . ' 12:00:00');
+        $last = new \DateTimeImmutable($toDate . ' 12:00:00');
+        for ($i = 0; $i < 14 && $day <= $last; $i++, $day = $day->modify('+1 day')) {
+            $date = $day->format('Y-m-d');
+            $holiday = $this->holidayMapper->findByDate($date);
+            if ($holiday === null) { continue; }
+            foreach ($userIds as $uid) {
+                foreach ([0, 1] as $half) {
+                    $slotsByUser[$uid][$date . '_' . $half] = $hideReasons
+                        ? ['color' => self::PALETTE_OFF, 'label' => null, 'slug' => null, 'is_busy' => true]
+                        : ['color' => '#C2185B', 'label' => $holiday->getName(), 'slug' => 'holiday', 'is_busy' => true, 'is_locked' => true];
+                }
+            }
+        }
+
+        // v4.13.64 — the grid no longer samples free/busy. §2.215 added two
+        // samples per day (10:00-11:00, 14:00-15:00) as a by-product of
+        // building NextcloudAvailabilityService for the meeting wizard, and
+        // said in as many words that if a dot were ever read as "free all day"
+        // the honest fix was to label the samples. It was labelled, and the
+        // label is the finding: a signal that needs a sentence above the table
+        // to avoid being misread was costing more than it gave. Justin's call,
+        // 2026-11-01, reasoning in §2.230.
+        //
+        // The wizard is unaffected and is where the question is decided
+        // properly, per candidate slot at exact times, including the rule that
+        // a deliberate TeamHub absence beats a `free` from FreeBusy
+        // (MeetingSuggestionService::scoreCandidate).
 
         // Fetch live NC user status for the same members. The members widget
         // merges this with the presence schedule into a single dot (the schedule
@@ -343,6 +399,17 @@ class PresenceTeamService {
         $isBusy  = $typeRow !== null && $typeRow->getIsBusy() === 1;
         $isLocked = $slot->getSource() === 'holiday';
 
+        // Health-related absence reasons are sensitive. Never expose the
+        // exact category to other team members, even if hide_reasons is off.
+        if ($isBusy && $slot->getSource() === 'override') {
+            return [
+                'color' => self::PALETTE_BUSY,
+                'label' => $hideReasons ? null : 'Unavailable',
+                'icon' => null, 'slug' => $hideReasons ? null : 'unavailable',
+                'is_busy' => true, 'requires_location' => false,
+                'location_room_id' => null, 'source' => 'override', 'is_locked' => false,
+            ];
+        }
         if ($hideReasons) {
             // Apply 3-tone palette; suppress all identifying information.
             if ($typeRow === null) {

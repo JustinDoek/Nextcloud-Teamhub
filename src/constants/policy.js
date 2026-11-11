@@ -42,7 +42,7 @@ export function tagLabel(tag) {
 export function tagExplanation(tag) {
 	return tag === TAG.ENFORCED
 		? t('teamhub', 'Only TeamHub can change this. A locked value is refused.')
-		: t('teamhub', 'Contacts, the Teams app or the app itself can also change this. TeamHub sets it, keeps its own screens read-only, and reports any later change — it cannot prevent one.')
+		: t('teamhub', 'Contacts, the Teams app or the app itself can also change this. TeamHub sets it, keeps its own screens read-only, and reports any later change. It cannot prevent one.')
 }
 
 // ── Fields ──────────────────────────────────────────────────────────────
@@ -63,6 +63,9 @@ export const FIELD = {
 	INTEGRATIONS_ALLOWED: 'integrations_allowed',
 	PUBLIC_MESSAGES: 'public_messages',
 	CONFIDENTIAL_TAG: 'confidential_tag',
+	// v4.13.17 — how often this kind of team's member list must be
+	// recertified. On the profile, not the template: see PolicyField.
+	MEMBER_REVIEW_MONTHS: 'member_review_months',
 	// Expiry left this list in v4.8.3 — whether a kind of team can expire, and
 	// for how long by default, is a property of the template rather than of how
 	// sensitive the team is.
@@ -107,6 +110,9 @@ export function fieldLabel(fieldKey) {
 	case FIELD.CONFIDENTIAL_TAG:
 		// TRANSLATORS: policy setting — the classification tag put on the team's shared folder
 		return t('teamhub', 'Team folder classification')
+	case FIELD.MEMBER_REVIEW_MONTHS:
+		// TRANSLATORS: policy setting — how many months may pass before a team's member list must be reviewed again
+		return t('teamhub', 'Membership review period (months)')
 	default:
 		return fieldKey
 	}
@@ -127,7 +133,7 @@ export function fieldHint(fieldKey) {
 		// nothing ticked still allows everything, which is the field's inert
 		// setting and the reason the wording has to name it rather than leave an
 		// administrator to discover that an empty list is not an empty team.
-		return t('teamhub', 'Restricting to nothing allows every integration — the same as leaving it to the team.')
+		return t('teamhub', 'Restricting to nothing allows every integration: the same as leaving it to the team.')
 	case FIELD.CONFIDENTIAL_TAG:
 		// The sentence an administrator most needs and is most likely to get
 		// wrong. Nextcloud has no tag inheritance, so the files themselves are
@@ -137,6 +143,12 @@ export function fieldHint(fieldKey) {
 		// as "this does nothing"; saying only the second would promise
 		// protection TeamHub does not itself provide.
 		return t('teamhub', 'The tag goes on the team folder, not on the files in it. Access-control rules that match this tag still apply to those files.')
+	case FIELD.MEMBER_REVIEW_MONTHS:
+		// Says what the number does and who it lands on, because a review
+		// period set here becomes somebody else's task list. 0 is the inert
+		// value and has to be named: an administrator reading only "months"
+		// would have no way to express "never" except by ungoverning the field.
+		return t('teamhub', 'The team admins are asked to confirm the member list this often. 0 asks for no review.')
 	default:
 		return ''
 	}
@@ -309,7 +321,7 @@ export function moduleLabel(moduleId) {
 	case 'decisions':
 		return t('teamhub', 'Decisions')
 	case 'presence':
-		return t('teamhub', 'Presence')
+		return t('teamhub', 'People')
 	case 'timeline':
 		return t('teamhub', 'Timeline')
 	case 'messages':

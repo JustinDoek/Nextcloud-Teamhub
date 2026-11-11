@@ -208,7 +208,7 @@ class ApprovalWorkProvider implements IWorkProvider {
                 : $this->l->t('not found')],
             ['label' => $this->l->t('Activity table'),  'value' => $schema['hasActivity']
                 ? $this->l->t('readable')
-                : $this->l->t('not readable — requester and timing are unknown, so Waiting for others falls back to rule membership')],
+                : $this->l->t('not readable: requester and timing are unknown, so Waiting for others falls back to rule membership')],
         ];
 
         // v4.11.21 — do not probe the rules when the app is not installed.

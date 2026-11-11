@@ -1,10 +1,13 @@
 <template>
     <div class="my-presence-panel">
         <div class="my-presence-panel__header">
-            <h2 class="my-presence-panel__title">{{ t('teamhub', 'My presence') }}</h2>
+            <h2 class="my-presence-panel__title">{{ t('teamhub', 'My workplace') }}</h2>
             <p class="my-presence-panel__desc">
-                {{ t('teamhub', 'Set your typical weekly presence below. Changes take effect after you click Save. Use the calendar to override individual dates.') }}
+                {{ t('teamhub', 'Set where you normally work. Nextcloud manages your working hours and absences; workplace choices apply across all your teams.') }}
             </p>
+            <a class="my-presence-panel__availability-link" :href="availabilitySettingsUrl" target="_blank" rel="noopener noreferrer">
+                {{ t('teamhub', 'Configure working hours and absences in Nextcloud') }} ↗
+            </a>
         </div>
 
         <div v-if="loading" class="my-presence-loading">
@@ -17,9 +20,9 @@
         <template v-else>
             <!-- Section 1: Week template -->
             <section class="my-presence-section">
-                <h3 class="my-presence-section__title">{{ t('teamhub', 'Weekly template') }}</h3>
+                <h3 class="my-presence-section__title">{{ t('teamhub', 'Usual workplace') }}</h3>
                 <p class="my-presence-section__desc">
-                    {{ t('teamhub', 'Default schedule. Click a cell to change it, then click Save.') }}
+                    {{ t('teamhub', 'Your workplace pattern is separate from your hours. Use morning and afternoon only when your location changes during the day.') }}
                 </p>
 
                 <div class="presence-grid" role="grid" :aria-label="t('teamhub', 'Week presence template')">
@@ -34,6 +37,29 @@
                         </div>
                     </div>
 
+                    <!-- One workplace for the whole day is the default.
+                         AM/PM are optional refinements, not working hours. -->
+                    <div class="presence-grid__row" role="row">
+                        <div class="presence-grid__half-label" role="rowheader">{{ t('teamhub', 'All day') }}</div>
+                        <div v-for="day in days" :key="'full-'+day.index" class="presence-grid__cell" role="gridcell">
+                            <button v-if="isSplitDay(day.index)"
+                                type="button" class="presence-split-day"
+                                :aria-label="t('teamhub', 'Change workplace for entire day')"
+                                @click="onDayPick(day.index)">
+                                {{ t('teamhub', 'Split') }}
+                            </button>
+                            <PresenceCell v-else
+                                :cell="getDraftCell(day.index, 0)"
+                                :types="types"
+                                :dirty="isDirty(day.index, 0) || isDirty(day.index, 1)"
+                                :saving="false"
+                                :half-day-label="t('teamhub', 'All day')"
+                                :day-label="day.label"
+                                @pick="onDayPick(day.index)" />
+                        </div>
+                    </div>
+
+                    <template v-if="showSplitDays">
                     <div class="presence-grid__row" role="row">
                         <div class="presence-grid__half-label" role="rowheader">{{ t('teamhub', 'Morning') }}</div>
                         <div
@@ -69,9 +95,13 @@
                                 @pick="onTemplatePick(day.index, 1)" />
                         </div>
                     </div>
+                    </template>
                 </div>
 
                 <div class="presence-grid__actions">
+                    <NcButton variant="tertiary" @click="showSplitDays = !showSplitDays">
+                        {{ showSplitDays ? t('teamhub', 'Hide morning/afternoon') : t('teamhub', 'Split morning/afternoon') }}
+                    </NcButton>
                     <NcButton
                         variant="primary"
                         :disabled="!hasDirty || savingTemplate"
@@ -111,10 +141,45 @@
 
             <!-- Section 3: Per-date overrides -->
             <section class="my-presence-section">
-                <h3 class="my-presence-section__title">{{ t('teamhub', 'Date overrides') }}</h3>
+                <h3 class="my-presence-section__title">{{ t('teamhub', 'Temporary workplace changes') }}</h3>
                 <p class="my-presence-section__desc">
-                    {{ t('teamhub', 'Click a date cell to override your schedule for that day. Holidays (striped) cannot be changed.') }}
+                    {{ t('teamhub', 'Change a workplace or mark vacation, sickness or other non-working time. Your usual workplace remains unchanged. Public holidays are managed by administrators.') }}
                 </p>
+                <div class="presence-period">
+                    <h4 class="presence-period__title">{{ t('teamhub', 'Set a day or date range') }}</h4>
+                    <div class="presence-period__fields">
+                        <label class="presence-period__field">
+                            <span>{{ t('teamhub', 'From') }}</span>
+                            <input v-model="range.from" type="date" :min="today" required>
+                        </label>
+                        <label class="presence-period__field">
+                            <span>{{ t('teamhub', 'To (inclusive)') }}</span>
+                            <input v-model="range.to" type="date" :min="range.from || today" required>
+                        </label>
+                        <label class="presence-period__field">
+                            <span>{{ t('teamhub', 'Part of day') }}</span>
+                            <select v-model="range.part">
+                                <option value="all">{{ t('teamhub', 'Full day') }}</option>
+                                <option value="morning">{{ t('teamhub', 'Morning') }}</option>
+                                <option value="afternoon">{{ t('teamhub', 'Afternoon') }}</option>
+                            </select>
+                        </label>
+                        <label class="presence-period__field">
+                            <span>{{ t('teamhub', 'Temporary change') }}</span>
+                            <select v-model="range.typeSlug">
+                                <option v-for="type in absenceTypes" :key="type.id" :value="type.slug">{{ type.label }}</option>
+                                <option value="restore">{{ t('teamhub', 'Restore usual workplace') }}</option>
+                            </select>
+                        </label>
+                    </div>
+                    <p class="presence-period__note">
+                        {{ t('teamhub', 'Time off here blocks TeamHub meeting suggestions, but is not synchronized to Nextcloud Calendar. Update Nextcloud Absence separately if needed.') }}
+                    </p>
+                    <NcButton variant="primary" :disabled="savingRange || !rangeIsValid" @click="saveRange">
+                        <template #icon><NcLoadingIcon v-if="savingRange" :size="ICON_BODY" /></template>
+                        {{ t('teamhub', 'Apply temporary change') }}
+                    </NcButton>
+                </div>
                 <div v-if="loadingSlots" class="my-presence-loading">
                     <NcLoadingIcon :size="ICON_BODY" />
                 </div>
@@ -132,9 +197,9 @@
             size="small"
             @update:open="closePicker">
             <template #default>
-                <ul class="presence-picker-list" role="listbox" :aria-label="t('teamhub', 'Select a status')">
+                <ul class="presence-picker-list" role="listbox" :aria-label="t('teamhub', 'Select a workplace')">
                     <li
-                        v-for="type in selectableTypes"
+                        v-for="type in pickerTypes"
                         :key="type.id"
                         class="presence-picker-item"
                         :class="{ 'presence-picker-item--selected': picker.currentTypeId === type.id }"
@@ -156,6 +221,7 @@
                              room's label instead. -->
                         <NcSelect
                             v-model="picker.roomId"
+                            @update:modelValue="onRoomPicked"
                             class="presence-picker-location__select"
                             :aria-label-combobox="t('teamhub', 'Select a room')"
                             label-outside
@@ -208,10 +274,12 @@ export default {
         return {
             ICON_BODY,
             ICON_LARGE,
+            availabilitySettingsUrl: generateUrl('/settings/user/availability'),
             loading: true,
             loadingSlots: true,
             loadError: null,
             savingTemplate: false,
+            showSplitDays: false,
             cells: {},   // server-confirmed
             draft: {},   // local edits
             types: [],
@@ -226,12 +294,15 @@ export default {
                 roomId: null,
                 justOpened: true,
             },
+            today: todayIso(),
+            range: { from: todayIso(), to: todayIso(), part: 'all', typeSlug: 'vacation' },
+            savingRange: false,
         }
     },
     computed: {
         /** Flat room list for the picker: "Building — Floor — Room", with a "no room" entry first. */
         roomOptions() {
-            const out = [{ id: null, label: t('teamhub', '— No specific room —') }]
+            const out = [{ id: null, label: t('teamhub', 'Office location not specified') }]
             for (const building of this.locationTree) {
                 for (const floor of building.floors || []) {
                     for (const room of floor.rooms || []) {
@@ -249,7 +320,24 @@ export default {
             return labels.map((label, index) => ({ label, index }))
         },
         selectableTypes() {
-            return this.types.filter(tp => tp.selectable_by_user)
+            return this.types.filter(tp => tp.selectable_by_user && !tp.is_busy)
+        },
+        absenceTypes() {
+            // Only these built-ins are allowed as time-off overrides. An admin
+            // may rename their labels, but their slugs remain the stable keys.
+            return this.types.filter(tp => tp.selectable_by_user && ['vacation', 'sick', 'non_working_day'].includes(tp.slug))
+        },
+        pickerTypes() {
+            return this.picker.mode === 'override'
+                ? [...this.selectableTypes, ...this.absenceTypes]
+                : this.selectableTypes
+        },
+        rangeIsValid() {
+            if (!this.range.from || !this.range.to || this.range.to < this.range.from) return false
+            if (this.range.typeSlug !== 'restore' && !this.absenceTypes.some(tp => tp.slug === this.range.typeSlug)) return false
+            // Back-end enforces the exact 120-day cap; give immediate feedback.
+            const days = Math.round((Date.parse(this.range.to) - Date.parse(this.range.from)) / 86400000) + 1
+            return days >= 1 && days <= 120
         },
         hasDirty() {
             for (let day = 0; day <= 6; day++) {
@@ -268,10 +356,11 @@ export default {
                 return `${dateStr} — ${half}`
             }
             if (this.picker.day !== null) {
+                if (this.picker.mode === 'day') return `${this.days[this.picker.day]?.label || ''} — ${t('teamhub', 'All day')}`
                 const half = this.picker.half === 0 ? t('teamhub', 'Morning') : t('teamhub', 'Afternoon')
                 return `${this.days[this.picker.day]?.label || ''} ${half}`
             }
-            return t('teamhub', 'Select a status')
+            return t('teamhub', 'Select a workplace')
         },
         selectedTypeRequiresLocation() {
             if (this.picker.currentTypeId === null) return false
@@ -364,6 +453,20 @@ export default {
             return this.draft[`${day}_${half}`] || { day_of_week: day, half_day: half, presence_type_id: null, location_room_id: null }
         },
 
+        isSplitDay(day) {
+            const am = this.getDraftCell(day, 0)
+            const pm = this.getDraftCell(day, 1)
+            return am.presence_type_id !== pm.presence_type_id
+                || am.location_room_id !== pm.location_room_id
+        },
+
+        onDayPick(day) {
+            const cell = this.getDraftCell(day, 0)
+            this.picker = { open: true, mode: 'day', day, half: null, iso: null, overrideHalf: null,
+                currentTypeId: this.isSplitDay(day) ? null : cell.presence_type_id,
+                roomId: this.isSplitDay(day) ? null : cell.location_room_id, justOpened: true }
+        },
+
         isDirty(day, half) {
             const k = `${day}_${half}`
             return (this.cells[k]?.presence_type_id ?? null) !== (this.draft[k]?.presence_type_id ?? null)
@@ -398,7 +501,7 @@ export default {
                 )
                 // Server returns the full template; sync confirmed state.
                 this.applyTemplate(data)
-                showSuccess(t('teamhub', 'Weekly template saved'))
+                showSuccess(t('teamhub', 'Workplace pattern saved'))
                 this.loadSlots()
             } catch (err) {
                 showError(err?.response?.data?.error || t('teamhub', 'Failed to save template'))
@@ -420,6 +523,14 @@ export default {
                 currentTypeId: existing?.presence_type_id || null, roomId: existing?.location_room_id || null, justOpened: true }
         },
 
+        onRoomPicked(roomId) {
+            // Selecting a different room is a real change even when Office was
+            // already selected. Otherwise Apply stays disabled until the user
+            // toggles Office → Home → Office.
+            this.picker.roomId = roomId
+            this.picker.justOpened = false
+        },
+
         selectType(typeId) {
             this.picker.currentTypeId = typeId
             this.picker.justOpened   = false
@@ -432,18 +543,44 @@ export default {
 
         async confirmPicker() {
             if (this.picker.justOpened) return
-            if (this.picker.mode === 'template') {
+            if (this.picker.mode === 'template' || this.picker.mode === 'day') {
                 const { day, half, currentTypeId, roomId } = this.picker
-                this.draft[`${day}_${half}`] = {
-                    day_of_week: day, half_day: half,
-                    presence_type_id: currentTypeId,
-                    location_room_id: currentTypeId !== null ? roomId : null,
+                const halves = this.picker.mode === 'day' ? [0, 1] : [half]
+                for (const h of halves) {
+                    this.draft[`${day}_${h}`] = {
+                        day_of_week: day, half_day: h,
+                        presence_type_id: currentTypeId,
+                        location_room_id: currentTypeId !== null ? roomId : null,
+                    }
                 }
                 this.closePicker()
             } else {
                 const { iso, overrideHalf, currentTypeId, roomId } = this.picker
                 this.closePicker()
                 await this.saveOverride(iso, overrideHalf, currentTypeId, roomId)
+            }
+        },
+
+        async saveRange() {
+            if (this.savingRange || !this.rangeIsValid) return
+            this.savingRange = true
+            try {
+                const restore = this.range.typeSlug === 'restore'
+                const type = this.absenceTypes.find(tp => tp.slug === this.range.typeSlug)
+                const { data } = await axios.put(generateUrl('/apps/teamhub/api/v1/presence/slots/override-range'), {
+                    from_date: this.range.from,
+                    to_date: this.range.to,
+                    part: this.range.part,
+                    presence_type_id: restore ? null : type.id,
+                    restore,
+                })
+                await this.loadSlots()
+                showSuccess(t('teamhub', 'Temporary change saved'))
+                if (data?.skipped > 0) showSuccess(t('teamhub', '{count} public holiday days were skipped', { count: data.skipped }))
+            } catch (err) {
+                showError(err?.response?.data?.error || t('teamhub', 'Failed to save temporary change'))
+            } finally {
+                this.savingRange = false
             }
         },
 
@@ -519,6 +656,9 @@ export default {
 .presence-grid__half-label { font-size: var(--th-font-meta); color: var(--color-text-maxcontrast); display: flex; align-items: center; }
 .presence-grid__cell { min-width: 60px; }
 
+.presence-split-day { width: 100%; min-height: 40px; border: 1px dashed var(--color-border-dark); border-radius: var(--border-radius-small); background: var(--color-background-hover); color: var(--color-text-maxcontrast); cursor: pointer; }
+.presence-split-day:focus-visible { outline: 2px solid var(--color-primary-element); }
+.my-presence-panel__availability-link { display: inline-block; margin-bottom: 12px; }
 .presence-grid__actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
 .presence-grid__unsaved-hint { font-size: var(--th-font-meta); color: var(--color-warning-text); }
 
@@ -546,4 +686,11 @@ export default {
 .presence-picker-location { padding: 12px 12px 4px; display: flex; flex-direction: column; gap: 6px; }
 .presence-picker-location__label { font-size: var(--th-font-meta); color: var(--color-text-maxcontrast); }
 .presence-picker-location__select { width: 100%; }
+.presence-period { padding: 16px; margin: 0 0 18px; border: 1px solid var(--color-border); border-radius: var(--border-radius-large); }
+.presence-period__title { font-size: var(--th-font-body); font-weight: 600; margin: 0 0 12px; }
+.presence-period__fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 12px; }
+.presence-period__field { display: flex; flex-direction: column; gap: 4px; font-size: var(--th-font-meta); }
+.presence-period__field input, .presence-period__field select { width: 100%; min-height: 38px; color: var(--color-main-text); background: var(--color-main-background); border: 1px solid var(--color-border-dark); border-radius: var(--border-radius-small); padding: 6px; }
+.presence-period__note { font-size: var(--th-font-meta); color: var(--color-text-maxcontrast); margin-bottom: 12px; }
 </style>
+

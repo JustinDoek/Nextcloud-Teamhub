@@ -908,6 +908,9 @@ export const RESOURCE_TYPE_ICONS = {
 	team_space_conflict: 'AlertCircleOutline',
 	// The owner's task is the same subject seen from the other side.
 	team_space_task: 'FolderAccountOutline',
+	// v4.13.17 — a membership recertification. People, with a check: the row
+	// asks somebody to confirm a list of people.
+	member_review: 'AccountCheckOutline',
 }
 
 /** Same glyphs, keyed by provider, for the source chip. */
@@ -977,6 +980,9 @@ export function resourceTypeLabel(type) {
 	case 'team_space_task':
 		// TRANSLATORS: the kind of thing a My Work row is — a team owner's task to move a shared folder into the team space
 		return t('teamhub', 'Team space task')
+	case 'member_review':
+		// TRANSLATORS: the kind of thing a My Work row is — confirming that a team's member list is still correct
+		return t('teamhub', 'Membership review')
 	default:
 		return type
 	}
@@ -1059,6 +1065,9 @@ export function statusLabel(status) {
 	case 'teamspace_task_assigned':
 		// TRANSLATORS: My Work status filter option — a folder move a Nextcloud administrator handed to the team owner
 		return t('teamhub', 'Handed to you')
+	case 'member_review_due':
+		// TRANSLATORS: My Work status filter option — a team's membership review has come due
+		return t('teamhub', 'Membership review due')
 	// v4.10.2's quota_* statuses left with the ledger quota rows (v4.10.29):
 	// the quota request is a workflow on the engine and renders as one.
 	default:
@@ -1069,8 +1078,13 @@ export function statusLabel(status) {
 /**
  * The notice a provider warning becomes (v4.9.7). Mirrors
  * `WorkItemPage::WARN_*`. Returns `{ text, tone, action }` where `action`
- * names what the notice offers: `reconnect` (the personal settings page) or
- * nothing.
+ * names what the notice offers — today always nothing.
+ *
+ * A connection the source no longer accepts is not a notice here (removed
+ * 2026-10-23, with the matching line in What's new): My Work is the list of
+ * what the reader has to do, and "reconnect your account" is a settings
+ * errand standing on top of it. Only a source that answered incompletely
+ * says anything.
  *
  * @param {string} code a WARN_* code
  * @param {string} providerName translated source name
@@ -1078,12 +1092,6 @@ export function statusLabel(status) {
  */
 export function providerWarning(code, providerName) {
 	switch (code) {
-	case 'auth_required':
-		return {
-			text: t('teamhub', '{source} no longer accepts your connection. Reconnect your account in your personal settings.', { source: providerName }),
-			tone: 'warning',
-			action: 'reconnect',
-		}
 	case 'partial':
 		return {
 			text: t('teamhub', 'Some {source} projects could not be read. The rows shown are complete for the projects that answered.', { source: providerName }),

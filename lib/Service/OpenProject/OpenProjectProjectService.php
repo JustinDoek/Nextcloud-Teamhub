@@ -46,6 +46,16 @@ class OpenProjectProjectService {
     /** Milestone candidates fetched to find the next one. */
     private const MILESTONE_LIMIT = 10;
 
+    /**
+     * Most versions considered per project. `VersionCollectionRepresenter`
+     * is an `UnpaginatedCollection` in OpenProject 17 — the endpoint has no
+     * `pageSize` and answers with every shared version at once — so this is
+     * a bound on what TeamHub walks, not on what it asks for. A project's
+     * versions are few; the allowance is generous because `shared_versions`
+     * includes those inherited from a parent project.
+     */
+    private const VERSION_LIMIT = 50;
+
     public function __construct(
         private OpenProjectClient $client,
         private OpenProjectCache  $cache,
@@ -198,11 +208,92 @@ class OpenProjectProjectService {
             'counts'            => $counts,
             'dueSoonDays'       => self::DUE_SOON_DAYS,
             'nextMilestone'     => $this->nextMilestone($userId, $projectId, $today, $warnings),
+            'version'           => $this->currentVersion($userId, $projectId, $today, $warnings),
             'recentlyCompleted' => $this->recentlyCompleted($userId, $projectId, $warnings),
             'files'             => $this->projectFiles($userId, $projectId, $warnings),
             'warnings'          => array_values(array_unique($warnings)),
             'retrievedAt'       => time(),
         ];
+    }
+
+    /**
+     * The version the project is in right now — its current sprint or
+     * release — or the next one due to start (v4.13.13).
+     *
+     * `GET /api/v3/projects/{id}/versions` answers the project's
+     * `shared_versions` and needs `view_work_packages` **or**
+     * `manage_versions` in the project, so a member who may see the project
+     * but not its work packages gets a warning code and no block, like
+     * every other best-effort section here.
+     *
+     * Only `open` versions are considered: a locked or closed one is not
+     * what the team is working in. A version with no dates is open-ended
+     * and therefore counts as running; among running ones the soonest to
+     * end wins, which is the one a team means by "this sprint".
+     *
+     * @param list<string> $warnings
+     * @return ?array{
+     *   id: int, name: string, startDate: ?string, endDate: ?string,
+     *   status: ?string, upcoming: bool, url: ?string
+     * }
+     */
+    private function currentVersion(string $userId, int $projectId, string $today, array &$warnings): ?array {
+        try {
+            $raw = $this->client->get($userId, 'projects/' . $projectId . '/versions');
+            $collection = OpenProjectNormalizer::collection($raw);
+            if ($collection === null) {
+                $warnings[] = 'version:' . OpenProjectException::UNSUPPORTED_RESPONSE;
+                return null;
+            }
+
+            $running  = [];
+            $upcoming = [];
+            $seen     = 0;
+            foreach ($collection['elements'] as $element) {
+                if (++$seen > self::VERSION_LIMIT) {
+                    break;
+                }
+                if (($element['_type'] ?? null) !== 'Version') {
+                    continue;
+                }
+                $v = OpenProjectNormalizer::version($element);
+                if ($v['id'] <= 0 || $v['name'] === '' || ($v['status'] ?? 'open') !== 'open') {
+                    continue;
+                }
+                if ($v['startDate'] !== null && $v['startDate'] > $today) {
+                    $upcoming[] = $v;
+                    continue;
+                }
+                if ($v['endDate'] === null || $v['endDate'] >= $today) {
+                    $running[] = $v;
+                }
+            }
+
+            // Soonest to end first, undated ones last: an open-ended version
+            // is running, but it never beats one with a real deadline.
+            usort($running, static function (array $a, array $b): int {
+                return [$a['endDate'] === null, (string)$a['endDate']]
+                   <=> [$b['endDate'] === null, (string)$b['endDate']];
+            });
+            usort($upcoming, static fn (array $a, array $b): int => (string)$a['startDate'] <=> (string)$b['startDate']);
+
+            $chosen = $running[0] ?? $upcoming[0] ?? null;
+            if ($chosen === null) {
+                return null;
+            }
+            return [
+                'id'        => $chosen['id'],
+                'name'      => $chosen['name'],
+                'startDate' => $chosen['startDate'],
+                'endDate'   => $chosen['endDate'],
+                'status'    => $chosen['status'],
+                'upcoming'  => $running === [],
+                'url'       => $this->client->versionUrl($chosen['id']),
+            ];
+        } catch (OpenProjectException $e) {
+            $warnings[] = 'version:' . $e->getErrorCode();
+            return null;
+        }
     }
 
     /**

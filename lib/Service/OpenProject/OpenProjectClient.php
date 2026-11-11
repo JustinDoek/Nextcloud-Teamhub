@@ -5,41 +5,45 @@ namespace OCA\TeamHub\Service\OpenProject;
 
 use OCA\TeamHub\AppInfo\Application;
 use OCA\TeamHub\Exception\OpenProjectException;
-use OCP\App\AppPathNotFoundException;
-use OCP\App\IAppManager;
-use OCP\IConfig;
+use OCA\TeamHub\Service\OpenProject\Transport\IOpenProjectTransport;
+use OCA\TeamHub\Service\OpenProject\Transport\OpenProjectTransportSelector;
+use OCA\TeamHub\Service\OpenProject\Transport\TransportUrl;
 use OCP\IUserSession;
-use Psr\Container\ContainerInterface;
 use Psr\Log\LoggerInterface;
 
 /**
- * The one place TeamHub talks to OpenProject (v4.9.3, Phase 1).
+ * The one place TeamHub talks to OpenProject (v4.9.3; transport seam cut in
+ * v4.13.4).
  *
- * ## What it reuses, and why
+ * ## What changed in 4.13.4, and what did not
  *
- * The official `integration_openproject` app already owns the hard part: the
- * OpenProject instance URL an administrator configured, the OAuth2 client, the
- * per-user access and refresh tokens, and — since 2.x — the OIDC token
- * exchange through `user_oidc`. All of it is reachable through one public
- * method on its service:
+ * Until 4.13.3 this class *was* the dependency on `integration_openproject`:
+ * it resolved that app's service, called its one `request()` method, and
+ * read its settings. All of that moved, unchanged, into
+ * {@see \OCA\TeamHub\Service\OpenProject\Transport\IntegrationAppTransport},
+ * and a second transport was added beside it. What stayed here is
+ * everything that is true however the request travels:
  *
- *     OCA\OpenProject\Service\OpenProjectAPIService::request(
- *         string $userId, string $endPoint, array $params = [], string $method = 'GET'
- *     ): array
+ *  - the **module gate** (licence + the administrator's switch), asked once,
+ *    above both transports;
+ *  - **classification** — one upstream status, one `OpenProjectException`
+ *    code, one sentence in `OpenProjectMessages`, for both transports;
+ *  - **encoding** a body once, so the two transports cannot drift;
+ *  - every **URL helper** and the origin check that keeps a link OpenProject
+ *    handed back from leaving the configured host.
  *
- * It refreshes an expired token itself, sends the request as `$userId`, and
- * returns the decoded HAL body — or `['error' => …, 'statusCode' => …]` on
- * failure. TeamHub calls that and nothing else. It never reads a token, never
- * refreshes one, never sees an Authorization header. There is no second token
- * store to secure because there is no second token store.
+ * Its public surface is unchanged, so the fifteen services, the controllers
+ * and the My Work provider above it did not move. The one addition is
+ * {@see patch()}.
  *
- * The two other things read from the official app are not secrets:
- *   - appconfig `openproject_instance_url` — the host, for deep links and for
- *     the stale-link check;
- *   - user preference `user_name` — set by the official app when a user
- *     connects, deleted when they disconnect. It answers "has this user ever
- *     connected" without an HTTP round trip. Both are read through `IConfig`,
- *     which is the supported interface for that data.
+ * ## Why there are two transports
+ *
+ * The full reasoning is in {@see IOpenProjectTransport}. In short: the
+ * official app's latest stable declares `max-version 34` while Nextcloud 35
+ * has shipped, and its `rawRequest()` refuses PATCH outright — so the two
+ * things DESIGN §2.124 and §2.126 recorded as "not built because the
+ * official app has no PATCH" could never be built on it. Which transport
+ * answers is {@see OpenProjectTransportSelector}'s decision, per user.
  *
  * ## The module gate (v4.9.16)
  *
@@ -47,53 +51,32 @@ use Psr\Log\LoggerInterface;
  * (`OpenProjectModuleService`). `isIntegrationEnabled()` and
  * `compatibilityProblem()` ask that first, so every caller of either — the
  * My Work provider, the news and meetings services, the layout bundle's
- * facts, the capability probe, and `send()` itself — follows the gate without
- * naming it, and a switched-off module cannot reach OpenProject at all.
- * `isIntegrationAppEnabled()` is the raw app check for the diagnostics that
- * need to tell the two apart.
- *
- * ## The compatibility guard
- *
- * The method's signature has been stable since the app's 1.x line, but it is
- * not a published contract, so it is checked rather than trusted: the class
- * must resolve, the method must exist, and it must take at least the two
- * arguments we pass. Anything else reports `integration_incompatible` rather
- * than a fatal `Error` on the first widget render.
+ * facts, the capability probe, and `send()` itself — follows the gate
+ * without naming it, and a switched-off module cannot reach OpenProject at
+ * all, by either route.
  *
  * ## What never reaches the log
  *
  * A failed response's body can carry a project name, a user's name or the
- * message of an error we did not anticipate. This class logs the endpoint's
- * path (never its query string — a project search carries user input) and the
- * upstream status, and builds exception messages from those alone.
+ * message of an error we did not anticipate. Nothing here logs more than
+ * the endpoint's path (never its query string — a project search carries
+ * user input) and the upstream status, and exception messages are built
+ * from those alone. The transports keep the same rule, and the direct one
+ * additionally never logs a host, a header or a token.
  */
 class OpenProjectClient {
 
-    public const INTEGRATION_APP_ID = 'integration_openproject';
-
-    /** The official app's service class, resolved through the container. */
-    private const API_SERVICE_CLASS = 'OCA\\OpenProject\\Service\\OpenProjectAPIService';
-
-    /** appconfig key the official app stores its instance URL under. */
-    private const CFG_INSTANCE_URL = 'openproject_instance_url';
-    /** appconfig key the official app stores its auth method under. */
-    private const CFG_AUTH_METHOD = 'authorization_method';
-    /** user preference the official app writes on a successful connect. */
-    private const PREF_USER_NAME = 'user_name';
-
-    /** Memo per request — the environment does not change mid-request. */
-    private ?object $service = null;
-    private bool $serviceResolved = false;
+    /**
+     * Kept for the callers and tests that have named it since 4.9.3. The
+     * app id now lives on the transport that knows about that app.
+     */
+    public const INTEGRATION_APP_ID = Transport\IntegrationAppTransport::INTEGRATION_APP_ID;
 
     public function __construct(
-        private IAppManager              $appManager,
-        private IConfig                  $config,
-        private ContainerInterface       $container,
-        private IUserSession             $userSession,
-        // v4.9.16 — the module gate. A DI leaf from here: it reads appconfig
-        // and LicenseService, neither of which reaches back into OpenProject.
-        private OpenProjectModuleService $module,
-        private LoggerInterface          $logger,
+        private OpenProjectTransportSelector $transports,
+        private OpenProjectModuleService     $module,
+        private IUserSession                 $userSession,
+        private LoggerInterface              $logger,
     ) {
     }
 
@@ -106,114 +89,111 @@ class OpenProjectClient {
         return $this->module->isAvailable();
     }
 
-    /** Is the official app present on disk at all. */
-    public function isIntegrationInstalled(): bool {
-        try {
-            $this->appManager->getAppPath(self::INTEGRATION_APP_ID);
-            return true;
-        } catch (AppPathNotFoundException) {
-            return false;
-        }
+    /**
+     * Which transport answers for the current user, as an
+     * `IOpenProjectTransport::ID_*` value. For diagnostics and the
+     * capability envelope.
+     */
+    public function transportId(): string {
+        return $this->transportForCurrentUser()->id();
+    }
+
+    /** Can the active transport send this HTTP method (v4.13.4). */
+    public function supportsMethod(string $method): bool {
+        return $this->transportForCurrentUser()->supportsMethod($method);
     }
 
     /**
-     * Is the official app enabled for the current user — the raw app check,
-     * regardless of TeamHub's module (v4.9.16). Nextcloud can enable an app
-     * for some groups only, so this is asked per user, not per instance. For
-     * diagnostics that report the app's own state; everything that decides
-     * whether to *use* the integration asks `isIntegrationEnabled()`.
+     * Is the **official app** present on disk at all. Unchanged in meaning
+     * since 4.9.3: it is a fact about that app, not about whether TeamHub
+     * can reach OpenProject, and the diagnostics need to keep telling the
+     * two apart.
      */
+    public function isIntegrationInstalled(): bool {
+        return $this->transports->integrationApp()->isInstalled();
+    }
+
+    /** Is the official app enabled for the current user — the raw app check. */
     public function isIntegrationAppEnabled(): bool {
-        if (!$this->isIntegrationInstalled()) {
-            return false;
-        }
-        $user = $this->userSession->getUser();
-        return $this->appManager->isEnabledForUser(self::INTEGRATION_APP_ID, $user);
+        return $this->transports->integrationApp()->isAppEnabled();
     }
 
     /**
      * Can the integration be used from TeamHub by the current user: the
-     * module is available **and** the official app is enabled for them.
+     * module is available **and** some transport is usable.
      *
-     * The module half was added in v4.9.16 here rather than at each caller,
-     * so that every surface that already asked this question — and every one
-     * written later out of habit — inherits the gate.
+     * Widened in 4.13.4 — before the seam this could only mean the official
+     * app. An instance with the direct transport configured and no official
+     * app installed now answers true, which is the point of the exercise.
      */
     public function isIntegrationEnabled(): bool {
-        return $this->module->isAvailable() && $this->isIntegrationAppEnabled();
+        return $this->module->isAvailable()
+            && $this->transportForCurrentUser()->unavailableCode() === null;
     }
 
     /**
-     * The administrator-configured OpenProject instance URL, or '' when none
-     * is set or the value is not an http(s) URL. Trailing slash removed.
+     * The OpenProject instance URL in force, without a trailing slash, or ''.
      *
      * **This is the only host TeamHub will ever talk to or link to.** It is
-     * set by a Nextcloud administrator in the official app's settings; no
-     * TeamHub surface accepts one.
+     * set by a Nextcloud administrator — in the official app's settings or
+     * in TeamHub's own, depending on the transport. No TeamHub surface
+     * accepts one from a user.
      */
     public function getHost(): string {
-        $url = trim($this->config->getAppValue(self::INTEGRATION_APP_ID, self::CFG_INSTANCE_URL, ''));
-        if ($url === '' || !self::isValidHost($url)) {
-            return '';
-        }
-        return rtrim($url, '/');
+        return $this->transportForCurrentUser()->getHost();
     }
 
-    /** The official app's configured method: 'oauth2' (default) or 'oidc'. */
+    /** The configured method: 'oauth2' or 'oidc'. */
     public function getAuthMethod(): string {
-        $method = $this->config->getAppValue(self::INTEGRATION_APP_ID, self::CFG_AUTH_METHOD, '');
-        return $method === 'oidc' ? 'oidc' : 'oauth2';
+        return $this->transportForCurrentUser()->getAuthMethod();
     }
 
     /**
-     * Has this user connected their OpenProject account — as far as can be
-     * told without a request. OAuth2 users connect explicitly and the official
-     * app records `user_name` when they do; OIDC users are connected by their
-     * login, and the official app's `isOIDCUser()` says whether this login is
-     * one of those. A `true` here is a hint; `users/me` is the proof.
+     * Has this user connected an OpenProject account, as far as can be told
+     * without a request. A `true` here is a hint; `users/me` is the proof.
      */
     public function isUserConnected(string $userId): bool {
-        if ($this->config->getUserValue($userId, self::INTEGRATION_APP_ID, self::PREF_USER_NAME, '') !== '') {
-            return true;
-        }
-        if ($this->getAuthMethod() === 'oidc') {
-            $service = $this->resolveService();
-            if ($service !== null && method_exists($service, 'isOIDCUser')) {
-                try {
-                    return (bool)$service->isOIDCUser();
-                } catch (\Throwable) {
-                    return false;
-                }
-            }
-        }
-        return false;
+        return $this->transports->forUser($userId)->isUserConnected($userId);
     }
 
     /**
-     * The compatibility verdict for the installed official app. Null when it
-     * is usable; otherwise the error code that says why not.
+     * The compatibility verdict. Null when OpenProject is usable; otherwise
+     * the error code that says why not, in the order an administrator would
+     * fix it: module licence → module switch → the transport's own state.
      */
     public function compatibilityProblem(): ?string {
-        // v4.9.16 — the module before the app: a licence and the switch are
-        // what an administrator fixes first, and an unlicensed instance must
-        // not be told to install an app it cannot use.
+        return $this->problemFor($this->currentUid());
+    }
+
+    /**
+     * The same verdict for a named user (v4.13.4).
+     *
+     * `send()` asks this rather than `compatibilityProblem()` so that the
+     * transport whose state is checked is the same one the request is
+     * about to go out on. The two can only differ where the session user
+     * is not the user being read for — which §2.120 forbids, since every
+     * OpenProject request runs as the person looking — but a gate that is
+     * right only because something else is right is one refactor away from
+     * being wrong.
+     */
+    private function problemFor(string $userId): ?string {
         $module = $this->module->unavailableCode();
         if ($module !== null) {
             return $module;
         }
-        if (!$this->isIntegrationInstalled()) {
-            return OpenProjectException::INTEGRATION_NOT_INSTALLED;
-        }
-        if (!$this->isIntegrationAppEnabled()) {
-            return OpenProjectException::INTEGRATION_DISABLED;
-        }
-        if ($this->resolveService() === null) {
-            return OpenProjectException::INTEGRATION_INCOMPATIBLE;
-        }
-        if ($this->getHost() === '') {
-            return OpenProjectException::HOST_NOT_CONFIGURED;
-        }
-        return null;
+        return $this->transports->forUser($userId)->unavailableCode();
+    }
+
+    /**
+     * Whether the installed official app can be driven at all. Public so
+     * the capability service can report `integration_incompatible`
+     * separately from "not installed".
+     *
+     * Still gated on the module, as it was before the seam: a switched-off
+     * module never resolves that app's service.
+     */
+    public function hasUsableService(): bool {
+        return $this->module->isAvailable() && $this->transports->integrationApp()->hasUsableService();
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -225,10 +205,10 @@ class OpenProjectClient {
      *
      * `$endpoint` is the path under `/api/v3/` — `projects/12`,
      * `work_packages`. `$params` become the query string; array values are
-     * expanded the way the official app expects. Every failure is an
+     * expanded as repeated `key[]=`. Every failure is an
      * `OpenProjectException` with a classified code; a 404 is reported as
-     * `project_not_found` because in Phase 1 every path we request is under a
-     * project, and the caller re-maps it when it means something else.
+     * `project_not_found` because in Phase 1 every path we request is under
+     * a project, and the caller re-maps it when it means something else.
      *
      * @param array<string, mixed> $params
      * @return array<string, mixed>
@@ -240,17 +220,14 @@ class OpenProjectClient {
 
     /**
      * POST one API v3 endpoint as `$userId` with a JSON body (v4.9.6,
-     * Phase 2). The official app sends `$params['body']` as the request body
-     * with `Content-Type: application/json` — verified against
-     * `integration_openproject` 3.2.0's `rawRequest()` — so the body is
-     * encoded here and nothing else is put in `$params`.
+     * Phase 2).
      *
      * The same classification as `get()`, plus 422 → `validation_failed`
      * carrying OpenProject's own sentence, because a creator has to read
      * "Identifier has already been taken" to fix it.
      *
-     * A 302 (OpenProject answers a project copy with one, pointing at the job
-     * status) is followed by Nextcloud's HTTP client, so the decoded body is
+     * A 302 (OpenProject answers a project copy with one, pointing at the
+     * job status) is followed by the HTTP client, so the decoded body is
      * that of the redirect target.
      *
      * @param array<string, mixed> $body
@@ -258,18 +235,35 @@ class OpenProjectClient {
      * @throws OpenProjectException
      */
     public function post(string $userId, string $endpoint, array $body = []): array {
-        // Always a body, `{}` when there is nothing to say: the official app
-        // sets `Content-Type: application/json` only when `body` is present,
-        // and OpenProject answers a bodiless POST with 406 Not Acceptable —
-        // which is how the "may create projects" probe read as "no" for
-        // everyone (found on the instance, 2026-09-13).
-        $params = ['body' => $body === [] ? '{}' : json_encode($body, JSON_THROW_ON_ERROR)];
-        return $this->send($userId, $endpoint, $params, 'POST');
+        return $this->send($userId, $endpoint, $this->jsonBody($body), 'POST');
     }
 
     /**
-     * DELETE one API v3 endpoint as `$userId` (v4.9.6). A 204 comes back from
-     * the official app as `['success' => true]`.
+     * PATCH one API v3 endpoint as `$userId` with a JSON body (v4.13.4).
+     *
+     * **The method OpenProject updates a work package with, and the one the
+     * official app refuses to send.** A caller that reaches this through
+     * the integration-app transport gets `method_unsupported` rather than
+     * upstream's untranslated "Bad HTTP method" — a code with both a user
+     * sentence and an administrator sentence, so the surface above can hide
+     * the action and the diagnostic can say why.
+     *
+     * Callers that offer an edit must ask {@see supportsMethod()} first and
+     * hide the action when it answers false: CLAUDE.md's rule is that what
+     * a person may not do is hidden, not disabled, and a transport that
+     * cannot PATCH is the same kind of fact.
+     *
+     * @param array<string, mixed> $body
+     * @return array<string, mixed>
+     * @throws OpenProjectException
+     */
+    public function patch(string $userId, string $endpoint, array $body = []): array {
+        return $this->send($userId, $endpoint, $this->jsonBody($body), 'PATCH');
+    }
+
+    /**
+     * DELETE one API v3 endpoint as `$userId` (v4.9.6). A 204 comes back as
+     * `['success' => true]`.
      *
      * @return array<string, mixed>
      * @throws OpenProjectException
@@ -279,64 +273,75 @@ class OpenProjectClient {
     }
 
     /**
+     * Always a body, `{}` when there is nothing to say: the official app
+     * sets `Content-Type: application/json` only when `body` is present,
+     * and OpenProject answers a bodiless POST with 406 Not Acceptable —
+     * which is how the "may create projects" probe read as "no" for
+     * everyone (found on the instance, 2026-09-13).
+     *
+     * @param array<string, mixed> $body
+     * @return array<string, string>
+     */
+    private function jsonBody(array $body): array {
+        return ['body' => $body === [] ? '{}' : json_encode($body, JSON_THROW_ON_ERROR)];
+    }
+
+    /**
      * @param array<string, mixed> $params
      * @return array<string, mixed>
      * @throws OpenProjectException
      */
     private function send(string $userId, string $endpoint, array $params, string $method): array {
-        $problem = $this->compatibilityProblem();
+        $problem = $this->problemFor($userId);
         if ($problem !== null) {
             throw new OpenProjectException($problem, 'OpenProject integration is not usable: ' . $problem);
         }
-        if (!$this->isUserConnected($userId)) {
+
+        $transport = $this->transports->forUser($userId);
+        $path      = TransportUrl::safePath($endpoint);
+
+        if (!$transport->supportsMethod($method)) {
+            $this->logger->info('[TeamHub][OpenProjectClient] Active transport cannot send this method', [
+                'endpoint'  => $path,
+                'method'    => strtoupper($method),
+                'transport' => $transport->id(),
+                'app'       => Application::APP_ID,
+            ]);
+            throw new OpenProjectException(
+                OpenProjectException::METHOD_UNSUPPORTED,
+                strtoupper($method) . ' is not available through the ' . $transport->id() . ' transport',
+            );
+        }
+
+        if (!$transport->isUserConnected($userId)) {
             throw new OpenProjectException(
                 OpenProjectException::USER_NOT_CONNECTED,
                 'User has not connected an OpenProject account',
             );
         }
 
-        $service = $this->resolveService();
-        $path    = $this->safePath($endpoint);
+        $result = $transport->request($userId, $endpoint, $params, $method);
+        $cause  = ($result['cause'] ?? null) instanceof \Throwable ? $result['cause'] : null;
 
-        try {
-            /** @var array<string, mixed>|mixed $result */
-            $result = $service->request($userId, $endpoint, $params, $method);
-        } catch (\Throwable $e) {
-            $this->logger->warning('[TeamHub][OpenProjectClient] Request threw', [
-                'endpoint' => $path,
-                'class'    => get_class($e),
-                'app'      => Application::APP_ID,
-            ]);
+        if (isset($result['threw'])) {
             throw new OpenProjectException(
                 OpenProjectException::TEMPORARY_FAILURE,
                 'OpenProject request failed for ' . $path,
                 null,
-                $e,
+                $cause,
             );
         }
-
-        if (!is_array($result)) {
+        if (isset($result['unsupported'])) {
             throw new OpenProjectException(
                 OpenProjectException::UNSUPPORTED_RESPONSE,
                 'OpenProject returned a non-array body for ' . $path,
             );
         }
-
         if (isset($result['error'])) {
-            throw $this->classifyError($result, $path);
+            throw $this->classifyError($result, $path, $cause);
         }
 
         return $result;
-    }
-
-    /**
-     * Whether the installed official app can be driven at all.
-     *
-     * Public so the capability service can report `integration_incompatible`
-     * separately from "not installed"; nothing else needs the object.
-     */
-    public function hasUsableService(): bool {
-        return $this->resolveService() !== null;
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -363,7 +368,7 @@ class OpenProjectClient {
         if (!self::isValidHost($href)) {
             return null;
         }
-        return self::sameOrigin($host, $href) ? $href : null;
+        return TransportUrl::sameOrigin($host, $href) ? $href : null;
     }
 
     /**
@@ -385,6 +390,29 @@ class OpenProjectClient {
 
     public function workPackageUrl(int $workPackageId): ?string {
         return $workPackageId > 0 ? $this->deepLink('/work_packages/' . $workPackageId) : null;
+    }
+
+    /** A version's own page in OpenProject (v4.13.13). */
+    public function versionUrl(int $versionId): ?string {
+        return $versionId > 0 ? $this->deepLink('/versions/' . $versionId) : null;
+    }
+
+    /**
+     * The project's wiki table of contents in OpenProject (v4.13.13).
+     *
+     * `/wiki/index`, not `/wiki`: OpenProject 17 declares the wiki as
+     * `resources :wiki, except: %i[index create]` and adds the index back
+     * explicitly as `get "/index" => "wiki#index"`, so the bare path has no
+     * route. The table of contents is also the right target — it lists the
+     * pages, which is what the Pages widget is about.
+     *
+     * A link-out is all TeamHub can offer here: API v3 mounts wiki pages as
+     * `GET /api/v3/wiki_pages/{id}` only, with no index and no
+     * project-scoped collection, so a project's wiki pages cannot be
+     * enumerated (verified against OpenProject 17, 2026-10-20).
+     */
+    public function wikiUrl(string $projectRef): ?string {
+        return $this->deepLink('/projects/' . rawurlencode($projectRef) . '/wiki/index');
     }
 
     /** A news item's page in OpenProject (v4.9.7). */
@@ -418,25 +446,13 @@ class OpenProjectClient {
         return $host === '' ? null : $host . $path;
     }
 
-    /** Is `$url` an absolute http(s) URL with a host part. */
+    /**
+     * Is `$url` an absolute http(s) URL with a host part. Public static
+     * since 4.9.3; the rule itself lives in `TransportUrl` so both
+     * transports share it.
+     */
     public static function isValidHost(string $url): bool {
-        $parts = parse_url($url);
-        if ($parts === false || !isset($parts['scheme'], $parts['host'])) {
-            return false;
-        }
-        return in_array(strtolower($parts['scheme']), ['http', 'https'], true);
-    }
-
-    private static function sameOrigin(string $a, string $b): bool {
-        $pa = parse_url($a);
-        $pb = parse_url($b);
-        if ($pa === false || $pb === false) {
-            return false;
-        }
-        $norm = static fn (array $p): string => strtolower((string)($p['scheme'] ?? ''))
-            . '://' . strtolower((string)($p['host'] ?? ''))
-            . ':' . (string)($p['port'] ?? '');
-        return $norm($pa) === $norm($pb);
+        return TransportUrl::isValidHost($url);
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -444,56 +460,34 @@ class OpenProjectClient {
     // ─────────────────────────────────────────────────────────────────────
 
     /**
-     * The official app's service, or null when it cannot be driven.
-     * Memoised per request; a null is memoised too.
+     * The transport for the session user. '' when nobody is signed in,
+     * which the selector reads as "no per-user preference" and answers from
+     * the instance configuration alone.
      */
-    private function resolveService(): ?object {
-        if ($this->serviceResolved) {
-            return $this->service;
-        }
-        $this->serviceResolved = true;
+    private function transportForCurrentUser(): IOpenProjectTransport {
+        return $this->transports->forUser($this->currentUid());
+    }
 
-        if (!$this->isIntegrationEnabled() || !class_exists(self::API_SERVICE_CLASS)) {
-            return null;
-        }
-        try {
-            $service = $this->container->get(self::API_SERVICE_CLASS);
-        } catch (\Throwable $e) {
-            $this->logger->warning('[TeamHub][OpenProjectClient] Could not resolve the integration service', [
-                'class' => get_class($e),
-                'app'   => Application::APP_ID,
-            ]);
-            return null;
-        }
-        if (!is_object($service) || !method_exists($service, 'request')) {
-            return null;
-        }
-        try {
-            $method = new \ReflectionMethod($service, 'request');
-            if ($method->getNumberOfParameters() < 2 || $method->getNumberOfRequiredParameters() > 4) {
-                return null;
-            }
-        } catch (\ReflectionException) {
-            return null;
-        }
-
-        $this->service = $service;
-        return $service;
+    private function currentUid(): string {
+        return $this->userSession->getUser()?->getUID() ?? '';
     }
 
     /**
-     * Turn the official app's `['error' => …, 'statusCode' => …]` shape into
-     * a classified exception. The body (`error`) is deliberately not carried
+     * Turn a transport's `['error' => …, 'statusCode' => …]` shape into a
+     * classified exception. The body (`error`) is deliberately not carried
      * over — see the class docblock.
      *
-     * The official app reports a connection failure as `statusCode 404` with
-     * no `message` key, and a real 404 from OpenProject with the JSON error's
-     * `message`. That is the only way to tell "unreachable" from "not found",
-     * so it is what is used.
+     * The official app reports a connection failure as `statusCode 404`
+     * with no `message` key, and a real 404 from OpenProject with the JSON
+     * error's `message`. That is the only way to tell "unreachable" from
+     * "not found" through that transport, so it is what is used. The direct
+     * transport does not reproduce the quirk — it answers `statusCode null`
+     * for a transport failure and always carries a `message` key on a real
+     * response — and lands on the same codes by the ordinary route.
      *
      * @param array<string, mixed> $result
      */
-    private function classifyError(array $result, string $path): OpenProjectException {
+    private function classifyError(array $result, string $path, ?\Throwable $cause = null): OpenProjectException {
         $status = isset($result['statusCode']) ? (int)$result['statusCode'] : null;
 
         if ($status === 401) {
@@ -506,6 +500,26 @@ class OpenProjectClient {
             $code = OpenProjectException::PROJECT_NOT_FOUND;
         } elseif ($status === 429) {
             $code = OpenProjectException::RATE_LIMITED;
+        } elseif ($status === 409) {
+            // v4.13.9 — a stale `lockVersion` on a PATCH: somebody else
+            // changed the work package first. Carries OpenProject's own
+            // sentence for the same reason 422 does, because "which field"
+            // is the useful part.
+            $upstream = is_string($result['message'] ?? null)
+                ? mb_substr(trim(strip_tags((string)$result['message'])), 0, 300)
+                : null;
+            $this->logger->info('[TeamHub][OpenProjectClient] OpenProject refused a write as out of date', [
+                'endpoint' => $path,
+                'status'   => $status,
+                'app'      => Application::APP_ID,
+            ]);
+            return new OpenProjectException(
+                OpenProjectException::EDIT_CONFLICT,
+                'OpenProject answered 409 for ' . $path,
+                $status,
+                $cause,
+                $upstream !== null && $upstream !== '' ? $upstream : null,
+            );
         } elseif ($status === 422) {
             // v4.9.6 — OpenProject's validation verdict on a write. Its
             // `message` is a sentence about the input ("Identifier has
@@ -524,7 +538,7 @@ class OpenProjectClient {
                 'OpenProject answered 422 for ' . $path,
                 $status,
                 null,
-                $upstream,
+                $upstream !== null && $upstream !== '' ? $upstream : null,
             );
         } elseif ($status !== null && $status >= 500) {
             // The official app also uses 500 for "URL is invalid".
@@ -544,12 +558,11 @@ class OpenProjectClient {
             'app'      => Application::APP_ID,
         ]);
 
-        return new OpenProjectException($code, 'OpenProject answered ' . ($status ?? 'nothing') . ' for ' . $path, $status);
-    }
-
-    /** The endpoint without its query string, for logs. */
-    private function safePath(string $endpoint): string {
-        $q = strpos($endpoint, '?');
-        return $q === false ? $endpoint : substr($endpoint, 0, $q);
+        return new OpenProjectException(
+            $code,
+            'OpenProject answered ' . ($status ?? 'nothing') . ' for ' . $path,
+            $status,
+            $cause,
+        );
     }
 }

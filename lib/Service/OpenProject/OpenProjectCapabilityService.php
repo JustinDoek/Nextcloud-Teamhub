@@ -45,6 +45,7 @@ class OpenProjectCapabilityService {
      * @return array{
      *   moduleLicensed: bool, moduleEnabled: bool, moduleAvailable: bool,
      *   integrationAppInstalled: bool, integrationAppEnabled: bool, hostConfigured: bool,
+     *   transport: string, workPackageEditAvailable: bool,
      *   host: ?string, authMethod: string, userConnected: bool, apiReachable: ?bool,
      *   projectReadAvailable: bool, workPackageReadAvailable: bool,
      *   workPackageCreateAvailable: bool, provisioningAvailable: bool,
@@ -64,7 +65,13 @@ class OpenProjectCapabilityService {
         $module    = $this->module->describe();
         $installed = $this->client->isIntegrationInstalled();
         $enabled   = $installed && $this->client->isIntegrationAppEnabled();
-        $host      = $enabled ? $this->client->getHost() : '';
+
+        // v4.13.4 — the host is the active transport's, not the official
+        // app's. Before the seam the two were the same thing and the host
+        // was read only when that app was enabled; an instance on the
+        // direct transport has a host with no official app at all, and
+        // gating on `$enabled` would have hidden it.
+        $host = $this->client->getHost();
 
         $caps = [
             'moduleLicensed'             => $module['licensed'],
@@ -73,6 +80,13 @@ class OpenProjectCapabilityService {
             'integrationAppInstalled'    => $installed,
             'integrationAppEnabled'      => $enabled,
             'hostConfigured'             => $host !== '',
+            // v4.13.4 — which route answers for this viewer, and whether it
+            // can write. `workPackageEditAvailable` is a fact about the
+            // transport, not about a permission: OpenProject's own `update`
+            // link still decides per work package, and the surface needs
+            // both to be true before it offers an edit.
+            'transport'                  => $this->client->transportId(),
+            'workPackageEditAvailable'   => $this->client->supportsMethod('PATCH'),
             'host'                       => $host !== '' ? $host : null,
             'authMethod'                 => $this->client->getAuthMethod(),
             'userConnected'              => false,

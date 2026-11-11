@@ -88,6 +88,18 @@ final class PolicyField {
     public const CONFIDENTIAL_TAG     = 'confidential_tag';
 
     /**
+     * How often this kind of team's membership must be recertified, in months.
+     * 0 (or ungoverned) means never (v4.13.17, DESIGN §2.193).
+     *
+     * On the profile rather than the template, and that is the opposite of
+     * where expiry went: how long a kind of team *lives* is a property of what
+     * it is, but how often its member list must be reviewed is a property of
+     * how sensitive its contents are. A Confidential project and a Public
+     * project can both run for six months and want 3 and 0.
+     */
+    public const MEMBER_REVIEW_MONTHS = 'member_review_months';
+
+    /**
      * The app `confidential_tag` needs before it means anything.
      *
      * Named as a constant rather than typed inline because three layers test it
@@ -247,6 +259,21 @@ final class PolicyField {
             // profile can satisfy, so it is a separate key and the panel greys
             // the field out with a different reason.
             'requiresApp' => self::APP_FILES_CONFIDENTIAL,
+        ],
+
+        // v4.13.17 — the membership recertification period. **ENFORCED**, and
+        // it is the only field in this registry where that is unambiguous:
+        // the value lives in `teamhub_policy_value`, the due date is derived
+        // from it and `teamhub_member_review`, and both tables are ours alone.
+        // Nothing outside TeamHub can set a review period, complete a review,
+        // or move a due date — there is no Circles column, no system tag and
+        // no other app with an opinion. Compare `integrations_allowed`, which
+        // is also our table and is still ASSERTED because resources can be
+        // created in their own apps.
+        self::MEMBER_REVIEW_MONTHS => [
+            'tag'    => self::TAG_ENFORCED,
+            'type'   => self::TYPE_INT,
+            'source' => 'teamhub_member_review.next_due_at',
         ],
 
         // Deliberately absent, each for a stated reason — see

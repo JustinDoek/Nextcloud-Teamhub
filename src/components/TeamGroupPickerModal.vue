@@ -148,10 +148,16 @@ export default {
 .th-gpm {
     display: flex;
     flex-direction: column;
-    gap: var(--default-grid-baseline, 4px);
+    gap: var(--th-space-xs);
     border: 0;
-    padding: 0;
     margin: 0;
+    padding-inline: 0;
+    /* NcDialog leaves 12px under its content wrapper and adds its own 6+12px
+       only when the actions slot is non-empty — this dialog has no button
+       row (a radio applies and closes), so the last radio sat almost on the
+       dialog's edge. This restores the breathing room a dialog with buttons
+       gets, without reaching into @nextcloud/vue's scoped styles. */
+    padding-block: 0 var(--th-space-md);
 }
 
 /* Visually hidden rather than absent — see the note on the element.

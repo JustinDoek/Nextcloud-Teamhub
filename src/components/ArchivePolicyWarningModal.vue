@@ -15,7 +15,7 @@
                     <div class="th-arch-policy__alert-body">
                         <h3>{{ t('teamhub', 'All project data will be lost.') }}</h3>
                         <p>
-                            {{ t('teamhub', 'Your Nextcloud administrator has configured immediate hard deletion with no archive bundle. Continuing will permanently remove the team, its files, and every TeamHub record attached to it — nothing can be restored.') }}
+                            {{ t('teamhub', 'Your Nextcloud administrator has configured immediate hard deletion with no archive bundle. Continuing will permanently remove the team, its files, and every TeamHub record attached to it. Nothing can be restored.') }}
                         </p>
                         <p>
                             {{ t('teamhub', 'If you want a recoverable copy, ask your Nextcloud administrator to enable archiving before continuing.') }}

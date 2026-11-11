@@ -8,11 +8,38 @@
             :is-mobile="isMobile"
             :is-tablet="isTablet"
             :can-manage-links="canManageLinks"
+            :layout-enforced="layoutEnforced"
+            :can-edit-enforced="canSetTeamDefault"
+            :has-team-layout="hasTeamLayout"
+            :layout-action-busy="teamLayoutActionBusy"
+            @reset-team-layout="resetTeamLayoutToTemplate"
             @tab-reorder="onTabReorder"
             @manage-links="showManageLinks = true"
             @toggle-edit-mode="toggleEditMode"
             @show-picker="onShowPicker"
             @preload="preloadView" />
+
+        <!-- ── Team banner ── -->
+        <!-- v4.13.1 — under the tab bar and above everything else, so it is
+             the team's picture on every tab rather than a Home-view widget
+             (Justin, 2026-10-16). Renders nothing at all when the team has no
+             banner, and nothing on a phone: `.teamhub-content` is a
+             fixed-height column, and anything stacked above MobileWidgetView
+             pushes its icon bar and FAB off-screen — the same lesson the
+             project phase stepper and the Compass panel below already carry. -->
+        <TeamBanner v-if="!isMobile" :compact="isTablet" />
+
+        <!-- ── Standing notices ── -->
+        <!-- v4.13.1 — expiry, resources needing review and unfinished
+             provisioning. They were inside the Team info widget's card until
+             that widget became hidden by default; here they cannot be
+             switched off. Mobile is excluded for the reason above — on a
+             phone these three were unreachable before this move as well,
+             because MobileWidgetView never rendered them. -->
+        <TeamNotices
+            v-if="!isMobile"
+            @manage-team="openManageTeam"
+            @provisioning-changed="loadLayout(currentTeamId)" />
 
         <!-- ── Content area ─────────────────────────────────────────── -->
         <div class="teamhub-content">
@@ -107,8 +134,19 @@
                 :pages-data="pagesData"
                 :widget-dynamic-actions="widgetDynamicActions"
                 :layout-differs-from-default="layoutDiffersFromDefault"
+                :layout-is-default="layoutIsDefault"
+                :can-set-team-default="canSetTeamDefault"
+                :can-save-type-default="Boolean(teamType)"
+                :team-preset="teamPreset"
+                :editing-team-preset="editingTeamPreset"
+                :layout-action-busy="teamLayoutActionBusy"
+                @unlock-team-layout="unlockTeamLayout"
+                @publish-team-layout="publishTeamLayoutDraft"
+                @cancel-team-layout="cancelTeamLayoutEdit"
                 @layout-updated="onLayoutUpdated"
-                @layout-autofit="onLayoutAutofit"
+                @layout-arranged="onLayoutArranged"
+                @set-as-team-default="saveAsTeamDefault"
+                @apply-team-preset="applyTeamPreset"
                 @manage-team="openManageTeam"
                 @copy-link="copyTeamLink"
                 @invite="showInviteModal = true"
@@ -117,7 +155,8 @@
                 @add-meeting="showAddMeeting = true"
                 @add-deck-task="showAddTask = true"
                 @add-personal-task="showAddPersonalTask = true"
-                @add-openproject-work-package="showAddOpenProjectWorkPackage = true"
+                @add-openproject-work-package="openOpenProjectWorkPackage(0)"
+                @edit-openproject-work-package="openOpenProjectWorkPackage($event?.workPackageId || 0)"
                 @create-page="openCreatePage"
                 @delete-page="openDeletePage"
                 @create-wiki-page="openCreateWikiPage"
@@ -128,8 +167,7 @@
                 @leave-team="onLeaveTeam"
                 @set-as-default="setAsDefault"
                 @reset-to-default="resetToDefault"
-                @propose-decision="openCompose"
-                @provisioning-changed="loadLayout(currentTeamId)" />
+                @propose-decision="openCompose" />
 
             <!-- Activity feed -->
             <ActivityFeedView v-if="currentView === 'activity'" />
@@ -236,6 +274,12 @@
                 :team-id="currentTeamId"
                 :hide-reasons="presenceConfig.hide_reasons" />
 
+            <!-- Roster tab — the same double gate as People (v4.13.67) -->
+            <TeamRosterView
+                v-if="currentView === 'roster' && presenceModuleEnabled && presenceConfig.presence_enabled && presenceConfig.shifts_enabled"
+                :team-id="currentTeamId"
+                :current-user-id="currentUid" />
+
             <!-- Decisions tab — rendered when module is enabled globally AND for this team -->
             <TeamDecisionsView
                 v-if="currentView === 'decisions' && decisionsModuleEnabled && decisionsConfig.decisions_enabled"
@@ -303,6 +347,21 @@
                     :key="'ext-canvas-' + menuItem.registry_id"
                     :url="menuItemUrl(menuItem)"
                     :label="menuItem.title" />
+            </template>
+
+            <!-- Integration-package tabs (v4.13.23) — keyed by capability id.
+                 Their URL arrives from the server with TeamHub's own verified
+                 team id already appended, so there is no client-side
+                 equivalent of menuItemUrl() here: the team id a tab is scoped
+                 to is decided by the membership check that produced the list,
+                 not by anything this component can influence. -->
+            <template v-for="tab in packageTabs">
+                <AppEmbed
+                    v-if="(preloadedViews.has('pkgtab-' + tab.cap_id) || currentView === 'pkgtab-' + tab.cap_id) && tab.url"
+                    v-show="currentView === 'pkgtab-' + tab.cap_id"
+                    :key="'pkgtab-canvas-' + tab.cap_id"
+                    :url="tab.url"
+                    :label="tab.title" />
             </template>
 
             <!-- NC-relative web link tabs — shown in an iframe like built-in apps -->
@@ -481,11 +540,18 @@
         <!-- v4.9.15 — the Upcoming tasks header's "Create OpenProject work
              package". After a create both OpenProject surfaces are one row
              behind: the widget's list and the Project info counts. -->
+        <!-- v4.13.9 — one modal, two modes. `work-package-id` of 0 is a
+             create; anything else changes that work package, and the key
+             makes Vue build a fresh instance per work package so the form
+             is never seeded from the previous one. -->
         <AddOpenProjectWorkPackageModal v-if="showAddOpenProjectWorkPackage"
+            :key="'op-wp-' + editOpenProjectWorkPackageId"
             :team-id="currentTeamId"
             :project-name="openProjectConfig?.project?.name || ''"
+            :work-package-id="editOpenProjectWorkPackageId"
             @close="showAddOpenProjectWorkPackage = false"
-            @created="$refs.widgetGrid?.refreshOpenProjectWork(); $refs.widgetGrid?.refreshOpenProject()" />
+            @created="$refs.widgetGrid?.refreshOpenProjectWork(); $refs.widgetGrid?.refreshOpenProject()"
+            @updated="$refs.widgetGrid?.refreshOpenProjectWork(); $refs.widgetGrid?.refreshOpenProject()" />
 
         <!-- Shared compose-decision modal — triggered by widget header `+`
              and by TeamDecisionsView's Propose button. Since v4.5.42 it is the
@@ -508,7 +574,7 @@ import { translate as t } from '@nextcloud/l10n'
 import { formatIsoDate, toIsoDate } from '../lib/localDate.js'
 import { generateUrl } from '@nextcloud/router'
 import axios from '@nextcloud/axios'
-import { showError, showSuccess, showWarning } from '@nextcloud/dialogs'
+import { showError, showSuccess, showWarning, showConfirmation } from '@nextcloud/dialogs'
 import { getCurrentUser } from '@nextcloud/auth'
 import { NcButton, NcDialog, NcTextField, NcLoadingIcon } from '@nextcloud/vue'
 import {
@@ -531,6 +597,8 @@ import FilterVariant from 'vue-material-design-icons/FilterVariant.vue'
 import Printer from 'vue-material-design-icons/Printer.vue'
 
 import CollectivesPageRail from './CollectivesPageRail.vue'
+import TeamBanner from './TeamBanner.vue'
+import TeamNotices from './TeamNotices.vue'
 import TeamTabBar from './TeamTabBar.vue'
 import TeamWidgetGrid from './TeamWidgetGrid.vue'
 import ActivityFeedView from './ActivityFeedView.vue'
@@ -548,7 +616,9 @@ import ProjectSwimlaneView from './ProjectSwimlaneView.vue'
 import ProjectBudgetView from './ProjectBudgetView.vue'
 import ProjectTimeView from './ProjectTimeView.vue'
 import TeamPresenceView   from './TeamPresenceView.vue'
+import TeamRosterView    from './TeamRosterView.vue'
 import TeamDecisionsView  from './TeamDecisionsView.vue'
+import { debounce } from '../lib/debounce.js'
 import ServicesWidget     from './ServicesWidget.vue'
 import ServiceTeamTabView from './services/ServiceTeamTabView.vue'
 import ComposeDecisionModal from './ComposeDecisionModal.vue'
@@ -559,13 +629,6 @@ import ProjectSwimlanesModal from './ProjectSwimlanesModal.vue'
 import ClosingArtifactModal from './ClosingArtifactModal.vue'
 import ArchivePolicyWarningModal from './ArchivePolicyWarningModal.vue'
 
-function debounce(fn, delay) {
-    let timer = null
-    return function (...args) {
-        clearTimeout(timer)
-        timer = setTimeout(() => fn.apply(this, args), delay)
-    }
-}
 
 // ── Timeline date helpers (module-level — needed in data() before `this` exists) ──
 function TeamView_startOfWeek(d) {
@@ -644,10 +707,11 @@ export default {
         FileDocumentOutline, CalendarPlus, CalendarRemove, CalendarClock,
         ChevronLeft, ChevronRight, CalendarToday,
         CalendarIcon, GavelIcon, CardTextIcon, FilterVariant, Printer,
-        TeamTabBar, TeamWidgetGrid, CollectivesPageRail,
+        TeamTabBar, TeamBanner, TeamNotices, TeamWidgetGrid, CollectivesPageRail,
         ActivityFeedView, ManageLinksModal, InviteMemberModal,
         AddEventModal, SuggestMeetingWizard, DeleteEventsModal, AddTaskModal, AddPersonalTaskModal, AddOpenProjectWorkPackageModal, AppEmbed, TeamCalendarGrid, ProjectSwimlaneView, ProjectBudgetView, ProjectTimeView,
         TeamPresenceView,
+        TeamRosterView,
         TeamDecisionsView,
         ServicesWidget,
         ServiceTeamTabView,
@@ -665,13 +729,32 @@ export default {
             ICON_BODY,
             gridLayout: [],
             userDefaultLayout: [],
+            // v4.13.33 — true while this team's home comes from the cascade
+            // (a default) rather than from an arrangement of the member's own.
+            // The grid packs a cascaded layout to the widgets the team shows
+            // and nothing saves the result; the first drag flips it to false.
+            layoutIsDefault: false,
+            // v4.13.34 — which wider defaults this viewer may write, and what
+            // this team's own layout is doing to them. Both from the layout
+            // bundle; see LayoutController's `canSetTeamDefault` and `teamPreset`.
+            canSetTeamDefault: false,
+            teamLayoutActionBusy: false,
+            teamPreset: { mode: null, hasLayout: false, layout: null, updatedAt: null },
             orderedTabs: [],
             editMode: false,
+            editingTeamPreset: false,
+            teamLayoutDraftSnapshot: null,
+            teamLayoutDraftTabOrderSnapshot: null,
+            teamLayoutDraftWasDefault: false,
+            // A team-admin publish is not a personal layout edit. Do not let
+            // the editMode watcher save a stale personal arrangement on exit.
+            skipNextPersonalLayoutSave: false,
             layoutLoaded: false,
             // Team id the configured default tab has already been applied for
             // this open. Reset on team change so each fresh open re-applies.
             defaultTabAppliedFor: null,
             _debouncedSave: null,
+            _debouncedUserSave: null,
             // ── Viewport flags ────────────────────────────────────────
             // isMobile: phone (≤768px any) OR tablet portrait (≤1024px portrait)
             //   → single-canvas layout with icon bar
@@ -760,6 +843,8 @@ export default {
             selectedCalendar:    null,   // { id, name } — set when picker chooses
             showAddPersonalTask: false,
             showAddOpenProjectWorkPackage: false,
+            // v4.13.9 — 0 means create; a work package id means change it.
+            editOpenProjectWorkPackageId: 0,
             // Compose-decision modal (Session A) — opened by widget header `+`
             // and by TeamDecisionsView's Propose button. Single instance.
             composeDecisionOpen: false,
@@ -790,10 +875,22 @@ export default {
     },
 
     computed: {
+        /**
+         * The signed-in uid, for the roster's "may I drop this shift myself"
+         * test. Read from @nextcloud/auth rather than threaded through the
+         * store: it never changes for the life of the page.
+         */
+        currentUid() {
+            return getCurrentUser()?.uid || ''
+        },
+
         ...mapState([
             'currentTeamId', 'currentView', 'resources', 'webLinks', 'filesEmbedFileUrl', 'collectivesEmbedPageUrl',
             'calendarEmbedEvent', 'deckEmbedCardUrl',
             'members', 'loading', 'intravoxAvailable', 'teamWidgets', 'teamMenuItems',
+            // v4.13.23 — the package model's tabs. A separate array from
+            // teamMenuItems on purpose: see the store's own comment.
+            'packageTabs',
             'selectedDeckBoard', 'presenceConfig', 'presenceModuleEnabled',
             'decisionsConfig', 'decisionsModuleEnabled',
             // v4.11.42 — { body, nonce } | null, set by the propose deep link.
@@ -803,7 +900,7 @@ export default {
             'timelineConfig', 'messagesConfig', 'collectivesConfig', 'budgetConfig', 'timeConfig', 'project', 'teamType',
             // Sidebar 3-dot action intent — TeamView consumes it after the
             // team's layout has loaded, then clears it.
-            'dashboardConfig', 'pendingTeamAction',
+            'dashboardConfig', 'dashboardLayoutRevision', 'pendingTeamAction',
             // v4.9.15 — the linked project's name for the create modal's title.
             'openProjectConfig',
         ]),
@@ -1287,11 +1384,36 @@ export default {
         },
 
         /**
-         * True when the current team's layout differs from the user's personal default.
+         * True when this team's layout differs from the user's personal template-type default.
          * Compares sizes and column placement per widget — ignores y (determined by snap).
          * Controls visibility of "Set as default" / "Reset to default" buttons.
          */
+        /**
+         * v4.13.34 — a team admin has enforced this team's layout, so no
+         * member arranges it. Greys the Edit layout control (TeamTabBar) and
+         * keeps edit mode shut below.
+         */
+        layoutEnforced() {
+            return this.teamPreset?.mode === 'enforce'
+        },
+
+        // LayoutController intentionally omits the layout coordinates for
+        // enforced presets. Existence is a separate API field; never use the
+        // optional `teamPreset.layout` payload to gate admin controls.
+        hasTeamLayout() {
+            return this.teamPreset?.hasLayout === true
+                || (Array.isArray(this.teamPreset?.layout) && this.teamPreset.layout.length > 0)
+                || this.layoutEnforced
+        },
+
         layoutDiffersFromDefault() {
+            // v4.13.33 — the server already told us this layout *is* a
+            // default, so it cannot differ from one. Without this the
+            // comparison below reads the packing pass as a member's edit
+            // (packed coordinates are not the default's written ones) and
+            // offers "Reset to default" on a home nobody has touched.
+            if (this.layoutIsDefault) return false
+
             if (!this.userDefaultLayout || !this.userDefaultLayout.length || !this.gridLayout.length) {
                 return false
             }
@@ -1372,6 +1494,13 @@ export default {
 
         currentTeamId(newId) {
             if (newId) {
+                this._debouncedSave?.cancel()
+                this._debouncedUserSave?.cancel()
+                this.editingTeamPreset = false
+                this.teamLayoutDraftSnapshot = null
+                this.teamLayoutDraftTabOrderSnapshot = null
+                this.teamLayoutDraftWasDefault = false
+                this.skipNextPersonalLayoutSave = false
                 this.gridLayout = []
                 this.orderedTabs = []
                 this.layoutLoaded = false
@@ -1415,6 +1544,15 @@ export default {
             if (!this.layoutLoaded) return
             this.defaultTabAppliedFor = null
             this.applyDefaultTab()
+        },
+        // Manage Team changes these in the store without refetching the
+        // separate bundle. Reload so enforcement controls update immediately.
+        dashboardLayoutRevision() {
+            if (this.currentTeamId && this.layoutLoaded && !this.editingTeamPreset) {
+                this._debouncedSave?.cancel()
+                this._debouncedUserSave?.cancel()
+                this.loadLayout(this.currentTeamId)
+            }
         },
         // Same pattern for decisionsConfig — rebuild tabs when per-team toggle changes.
         decisionsConfig: {
@@ -1477,8 +1615,12 @@ export default {
                 this.buildOrderedTabs(this.orderedTabs.map(t => t.key))
             },
         },
-        webLinks() { this.syncLinkTabs() },
-        externalMenuItems() { this.syncExtTabs() },
+        // The three registered sources. Each arrives on its own request, so
+        // each needs its own watcher: a team whose only tab comes from a
+        // package never changes the legacy array, and vice versa.
+        webLinks() { this.syncRegisteredTabs() },
+        externalMenuItems() { this.syncRegisteredTabs() },
+        packageTabs() { this.syncRegisteredTabs() },
 
         /**
          * Sidebar 3-dot menu can request an action (Invite / Leave team) on a
@@ -1529,17 +1671,38 @@ export default {
          * v4.6.1 — the applySnap() that used to run first is gone. The grid has
          * already compacted during the drag, so gridLayout is current.
          */
+        /**
+         * v4.13.34 — enforcement can arrive while a member is mid-edit (a team
+         * admin sets it, the member reopens the team). Shut edit mode rather
+         * than leaving them arranging a grid the next load will replace.
+         */
+        layoutEnforced(enforced) {
+            if (enforced) {
+                this._debouncedSave?.cancel()
+                this._debouncedUserSave?.cancel()
+                if (this.editMode && !this.editingTeamPreset) this.editMode = false
+            } else if (this.editingTeamPreset) {
+                this.cancelTeamLayoutEdit()
+            }
+        },
+
         editMode(newVal, oldVal) {
-            if (!newVal && oldVal) {
+            if (!newVal && oldVal && !this.layoutEnforced && !this.editingTeamPreset && !this.skipNextPersonalLayoutSave) {
                 this.$nextTick(() => {
-                    this.saveLayout()
+                    // 'user': leaving edit mode is the end of an arrangement
+                    // the member made, even if the debounce never fired.
+                    this.saveLayout('user')
                 })
             }
         },
     },
 
     created() {
-        this._debouncedSave = debounce(this.saveLayout, 1200)
+        // Two debounces over one endpoint, because the two callers mean
+        // different things by a save (v4.13.33): a drag is the member
+        // arranging their home, a tab reorder is not. See saveLayout.
+        this._debouncedSave     = debounce(() => this.saveLayout('auto'), 1200)
+        this._debouncedUserSave = debounce(() => this.saveLayout('user'), 1200)
     },
 
     async mounted() {
@@ -1573,10 +1736,14 @@ export default {
             }
         }
 
-        await this.$store.dispatch('checkIntravox')
+        // The dashboard layout is the critical first request. Previously a
+        // slow optional Intravox capability probe held it up (including the
+        // 3-second fallback request when that app was absent), making a new
+        // team's Home look empty after creation. Start layout loading first.
         if (this.currentTeamId) {
             this.loadLayout(this.currentTeamId)
         }
+        await this.$store.dispatch('checkIntravox')
         this.schedulePreload()
 
         // Timeline crowding-badge navigation (v3.78.4) — the timeline.php
@@ -1633,6 +1800,21 @@ export default {
         ...mapMutations(['SET_VIEW', 'SET_PRESENCE_CONFIG', 'SET_DECISIONS_CONFIG', 'SET_DECISIONS_TARGET', 'SET_DECISIONS_COMPOSE_PREFILL', 'SET_PROJECT', 'SET_PROJECT_TAB_FOCUS']),
 
         setView(view) { this.SET_VIEW(view) },
+
+        /**
+         * v4.13.9 — open the OpenProject work-package modal. `0` creates;
+         * an id changes that work package.
+         *
+         * The id is set before the flag, so the `:key` is already right
+         * when the modal mounts — otherwise Vue would build it for the
+         * previous id and immediately rebuild it.
+         *
+         * @param {number} workPackageId 0 to create, otherwise the id
+         */
+        openOpenProjectWorkPackage(workPackageId = 0) {
+            this.editOpenProjectWorkPackageId = Number(workPackageId) || 0
+            this.showAddOpenProjectWorkPackage = true
+        },
 
         /**
          * Mark a view as preloaded so its iframe is created (and starts
@@ -1808,7 +1990,89 @@ export default {
 
             this.SET_VIEW(target)
         },
-        toggleEditMode() { this.editMode = !this.editMode },
+        /**
+         * v4.13.34 — the second half of the enforced-layout gate. The button
+         * is already greyed (TeamTabBar), and this is the boundary: a disabled
+         * control is a presentation and a keyboard, a stale prop or a
+         * re-render can all get past one.
+         *
+         * The server does not need this check — an enforced layout is served
+         * regardless of what the client thinks, and a save would be overridden
+         * on the next load — but a member who got into edit mode and dragged a
+         * card would watch their work disappear, which is worse than not
+         * getting in.
+         */
+        toggleEditMode() {
+            if (this.teamLayoutActionBusy) return
+            // A team-admin draft has its own publish/cancel lifecycle. Treat
+            // the top-bar Done as Publish; the Cancel action in the edit banner
+            // explicitly discards the draft. Never change the meaning of a
+            // personal Done button halfway through a save.
+            if (this.editingTeamPreset) {
+                this.publishTeamLayoutDraft()
+                return
+            }
+            if (this.layoutEnforced) {
+                if (!this.canSetTeamDefault || !this.layoutLoaded) return
+                this._debouncedSave?.cancel()
+                this._debouncedUserSave?.cancel()
+                this.teamLayoutDraftSnapshot = this.gridLayout.map(item => ({ ...item }))
+                this.teamLayoutDraftTabOrderSnapshot = this.orderedTabs.map(tab => tab.key)
+                this.teamLayoutDraftWasDefault = this.layoutIsDefault
+                this.layoutIsDefault = false // never repack an admin draft
+                this.editingTeamPreset = true
+                this.editMode = true
+                return
+            }
+            this.editMode = !this.editMode
+        },
+
+        /** Close any editor without writing a personal grid to the server. */
+        async closeEditModeForTeamPublish() {
+            this.skipNextPersonalLayoutSave = true
+            this.editMode = false
+            await this.$nextTick() // let the editMode watcher observe the guard
+            this.skipNextPersonalLayoutSave = false
+        },
+
+        async publishTeamLayoutDraft() {
+            if (!this.editingTeamPreset || !this.canSetTeamDefault || !this.currentTeamId || this.teamLayoutActionBusy) return
+            const teamId = this.currentTeamId
+            this.teamLayoutActionBusy = true
+            try {
+                await axios.put(generateUrl(`/apps/teamhub/api/v1/teams/${teamId}/dashboard/config`), {
+                    team_layout: this.gridLayout,
+                    team_tab_order: this.orderedTabs.map(t => t.key),
+                    team_layout_mode: this.teamPreset?.mode || 'enforce',
+                })
+                if (teamId !== this.currentTeamId) return
+                await this.closeEditModeForTeamPublish()
+                this.editingTeamPreset = false
+                this.teamLayoutDraftSnapshot = null
+                this.teamLayoutDraftTabOrderSnapshot = null
+                await this.loadLayout(teamId)
+                showSuccess(t('teamhub', 'Team layout published'))
+            } catch (err) {
+                // Keep the draft editable after a rejected publish; nothing
+                // has been written as a personal layout.
+                showError(err?.response?.data?.error || t('teamhub', 'Failed to save the default layout'))
+            } finally {
+                this.teamLayoutActionBusy = false
+            }
+        },
+
+        async cancelTeamLayoutEdit() {
+            if (!this.editingTeamPreset) return
+            this.gridLayout = (this.teamLayoutDraftSnapshot || []).map(item => ({ ...item }))
+            this.buildOrderedTabs(this.teamLayoutDraftTabOrderSnapshot || [])
+            this.layoutIsDefault = this.teamLayoutDraftWasDefault
+            // Restore the enforced lock BEFORE Vue gets a chance to repack
+            // the restored grid. A team-admin draft is not a template recipe.
+            this.editingTeamPreset = false
+            await this.closeEditModeForTeamPublish()
+            this.teamLayoutDraftSnapshot = null
+            this.teamLayoutDraftTabOrderSnapshot = null
+        },
 
         // v4.11.18 — `openDecisionCompose(supersedesId)` is gone with the
         // open-proposal *Supersede* button it existed for. Nothing else ever
@@ -1863,6 +2127,15 @@ export default {
                 const data = await this.$store.dispatch('loadTeamLayout', teamId)
                 this.gridLayout        = Array.isArray(data.layout)      ? data.layout      : []
                 this.userDefaultLayout = Array.isArray(data.userDefault) ? data.userDefault : []
+                // v4.13.33 — the server says whether this came from the
+                // cascade. It has been on the response since the endpoint was
+                // written and nothing read it, which is why a default could
+                // never be told apart from an arrangement once it was on
+                // screen.
+                this.layoutIsDefault   = data.isDefault === true
+                this.canSetTeamDefault = data.canSetTeamDefault === true
+                this.teamPreset        = data.teamPreset
+                    || { mode: null, hasLayout: false, layout: null, updatedAt: null }
                 // Project-owner onboarding (v3.90.x) — project is ready now; members
                 // may or may not be (fetchMembers resolves independently via the
                 // store's selectTeam action) — the isTeamAdmin watcher below covers
@@ -1874,42 +2147,184 @@ export default {
             } catch (err) {
                 console.warn('[TeamHub][TeamView] loadLayout: failed', err?.message)
                 this.gridLayout = []
+                this.layoutIsDefault = false
+                this.canSetTeamDefault = false
+                this.teamPreset = { mode: null, hasLayout: false, layout: null, updatedAt: null }
                 this.buildOrderedTabs([])
                 this.layoutLoaded = true
             }
         },
 
-        async saveLayout() {
-            if (!this.currentTeamId || !this.layoutLoaded) return
+        /**
+         * Persist this team's layout and tab order.
+         *
+         * v4.13.33 — `origin` says whether a person arranged what is being
+         * saved. The server only ever promotes it, so a tab reorder (which
+         * says nothing about the grid) cannot mark a cascaded layout as
+         * arranged, and cannot un-mark one that is. Every caller that saves
+         * because the member moved, resized or collapsed a card passes
+         * `'user'`; see LayoutMapper::upsert.
+         */
+        async saveLayout(origin = 'auto') {
+            if (!this.currentTeamId || !this.layoutLoaded || this.layoutEnforced || this.editingTeamPreset) return
             const tabOrder = this.orderedTabs.map(t => t.key)
             try {
                 await axios.put(
                     generateUrl(`/apps/teamhub/api/v1/teams/${this.currentTeamId}/layout`),
-                    { layout: this.gridLayout, tabOrder },
+                    { layout: this.gridLayout, tabOrder, origin },
                 )
+                if (origin === 'user') this.layoutIsDefault = false
             } catch (err) {
                 console.warn('[TeamHub][TeamView] saveLayout: failed', err?.response?.status, err?.message)
             }
         },
 
+        /**
+         * The grid moved something. In edit mode that is the member dragging
+         * or resizing a card, which is an arrangement of their own; outside it
+         * this fires on the library's own recomputes and is not saved at all.
+         */
         onLayoutUpdated(newLayout) {
+            if (this.layoutEnforced && !this.editingTeamPreset) return
             this.gridLayout = newLayout
-            if (this.editMode && this.layoutLoaded) this._debouncedSave()
+            if (this.editingTeamPreset) return // draft, published through dashboard/config only
+            if (this.editMode && this.layoutLoaded) {
+                // Flipped here and not when the save returns: the save is
+                // debounced by 1.2 s, and for that whole window the grid would
+                // otherwise still consider this a cascaded layout and be free
+                // to repack over the drag that is in progress.
+                this.layoutIsDefault = false
+                this._debouncedUserSave()
+            }
         },
 
         /**
-         * v4.0.8 — auto-fit pass finished growing widgets to fit content.
-         * Persist immediately, regardless of editMode, so the flag doesn't
-         * survive across loads and the fitted heights become the user's saved
-         * layout from now on.
+         * v4.13.33 — the grid arranged itself: a cascaded layout packed to the
+         * widgets this team shows, or a canvas card brought up to its size.
+         *
+         * **Deliberately not saved.** A packed default is computed from the
+         * order the server sends and the widgets the team has, both of which
+         * this client already holds, so recomputing it on every load costs
+         * nothing — and not saving it is what keeps the member on the cascade,
+         * where a later change to the default can still reach them. Saving it
+         * is exactly what v4.0.8's auto-fit pass did, and it froze every
+         * member's home on first open (DESIGN §2.206).
          */
-        onLayoutAutofit(newLayout) {
+        onLayoutArranged(newLayout) {
             this.gridLayout = newLayout
-            if (this.layoutLoaded) this.saveLayout()
         },
 
         onTabReorder() {
-            if (this.layoutLoaded) this._debouncedSave()
+            if (!this.layoutLoaded || this.editingTeamPreset) return
+            // Tab navigation is always a personal choice, even on an enforced
+            // team grid. The dedicated endpoint never changes the saved grid.
+            this._debouncedSave?.cancel()
+            this._debouncedUserSave?.cancel()
+            this.saveTabOrder()
+        },
+
+        async saveTabOrder() {
+            if (!this.currentTeamId || !this.layoutLoaded) return
+            try {
+                await axios.put(generateUrl(`/apps/teamhub/api/v1/teams/${this.currentTeamId}/layout/tabs`), {
+                    tabOrder: this.orderedTabs.map(tab => tab.key),
+                })
+            } catch (err) {
+                console.warn('[TeamHub][TeamView] saveTabOrder: failed', err?.response?.status, err?.message)
+            }
+        },
+
+        // ── Team-wide layout controls (issue #109, v4.13.36) ────────────
+
+        /**
+         * All team-wide layout actions use the same admin-gated endpoint.
+         * The server authoritatively checks team-admin permissions. Keep
+         * personal saves and draft publishing out of this path, and reload
+         * the layout bundle after a successful policy change so the toolbar
+         * and grid always reflect the new enforcement state.
+         */
+        async changeTeamLayout(payload, successMessage) {
+            if (!this.currentTeamId || !this.canSetTeamDefault || this.teamLayoutActionBusy || this.editMode) return
+            const teamId = this.currentTeamId
+            this.teamLayoutActionBusy = true
+            this._debouncedSave?.cancel()
+            this._debouncedUserSave?.cancel()
+            try {
+                const { data } = await axios.put(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${teamId}/dashboard/config`),
+                    payload,
+                )
+                if (teamId !== this.currentTeamId) return
+                this.$store.commit('SET_DASHBOARD_CONFIG', data)
+                await this.loadLayout(teamId)
+                showSuccess(successMessage)
+            } catch (err) {
+                if (teamId === this.currentTeamId) {
+                    showError(err?.response?.data?.error || t('teamhub', 'Failed to save the default layout'))
+                }
+            } finally {
+                this.teamLayoutActionBusy = false
+            }
+        },
+
+        /**
+         * A team admin unlocks from the enforced layout's draft editor.
+         * Keep the LAST PUBLISHED team layout; never publish the work-in-progress
+         * grid as a side effect of changing permissions. Existing member-specific
+         * layouts may reappear after the enforced policy is removed.
+         */
+        async unlockTeamLayout() {
+            if (!this.layoutEnforced || !this.hasTeamLayout || !this.canSetTeamDefault
+                || !this.editingTeamPreset || !this.currentTeamId || this.teamLayoutActionBusy) return
+            const teamId = this.currentTeamId
+
+            // An admin may have moved or resized widgets in the draft. Require
+            // confirmation before discarding those unpublished changes.
+            const draftChanged = JSON.stringify(this.gridLayout) !== JSON.stringify(this.teamLayoutDraftSnapshot)
+                || JSON.stringify(this.orderedTabs.map(tab => tab.key)) !== JSON.stringify(this.teamLayoutDraftTabOrderSnapshot)
+            if (draftChanged) {
+                const confirmed = await showConfirmation({
+                    name: t('teamhub', 'Unlock layout'),
+                    text: t('teamhub', 'Unlocking will discard unpublished layout changes. Continue?'),
+                    labelConfirm: t('teamhub', 'Unlock layout'),
+                    labelReject: t('teamhub', 'Cancel'),
+                    severity: 'warning',
+                })
+                if (!confirmed || teamId !== this.currentTeamId || !this.editingTeamPreset || this.teamLayoutActionBusy) return
+            }
+
+            this.teamLayoutActionBusy = true
+            this._debouncedSave?.cancel()
+            this._debouncedUserSave?.cancel()
+            try {
+                const { data } = await axios.put(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${teamId}/dashboard/config`),
+                    { team_layout_mode: 'apply_once' },
+                )
+                if (teamId !== this.currentTeamId) return
+                // Discard the draft BEFORE updating enforcement in the store;
+                // otherwise the enforcement watcher would race the editor close.
+                await this.cancelTeamLayoutEdit()
+                this.$store.commit('SET_DASHBOARD_CONFIG', data)
+                await this.loadLayout(teamId)
+                showSuccess(t('teamhub', 'Unlock layout'))
+            } catch (err) {
+                if (teamId === this.currentTeamId) {
+                    showError(err?.response?.data?.error || t('teamhub', 'Failed to save the default layout'))
+                }
+            } finally {
+                this.teamLayoutActionBusy = false
+            }
+        },
+
+        async resetTeamLayoutToTemplate() {
+            if (!this.hasTeamLayout) return
+            // Keep the current enforce/apply mode; server resolves the team's
+            // template, applies the recipe, and compact-packs missing widgets.
+            await this.changeTeamLayout(
+                { reset_team_layout: true },
+                t('teamhub', 'Reset to template'),
+            )
         },
 
         // ── Widget gating ───────────────────────────────────────────
@@ -1931,46 +2346,129 @@ export default {
         // ── Default layout actions ──────────────────────────────────
 
         /**
-         * Save the current layout as the user's personal default.
-         * Called from TeamWidgetGrid's "Set as default" button.
+         * Save a personal default for this team's template ONLY. The server
+         * validates membership and derives the type rather than using a
+         * client-provided template key. Other team types are unaffected.
          */
         async setAsDefault() {
+            if (!this.currentTeamId || !this.teamType || this.layoutEnforced) return
+            const teamId = this.currentTeamId
+            // Avoid a queued personal save marking this very grid as a local
+            // override immediately after the server rolls out the type default.
+            this._debouncedSave?.cancel()
+            this._debouncedUserSave?.cancel()
             try {
                 const tabOrder = this.orderedTabs.map(t => t.key)
                 await axios.put(
                     generateUrl('/apps/teamhub/api/v1/layout/default'),
-                    { layout: this.gridLayout, tabOrder },
+                    { teamId, layout: this.gridLayout, tabOrder },
                 )
-                // Update local reference so layoutDiffersFromDefault recomputes to false.
-                this.userDefaultLayout = this.gridLayout.map(item => ({ ...item }))
-                showSuccess(t('teamhub', 'Default layout saved'))
+                if (teamId !== this.currentTeamId) return
+                await this.closeEditModeForTeamPublish()
+                await this.loadLayout(teamId)
+                showSuccess(t('teamhub', 'Type default layout saved'))
             } catch (err) {
-                showError(t('teamhub', 'Failed to save default layout'))
+                showError(err?.response?.data?.error || t('teamhub', 'Failed to save default layout'))
             }
         },
 
         /**
-         * Reset the current team's layout to the user's personal default.
-         * Applies snap, then immediately saves the team layout.
-         * Called from TeamWidgetGrid's "Reset to default" button.
+         * v4.13.34 — make the arrangement in front of us this team's own
+         * default (issue #109 phase 3).
+         *
+         * Publishing a team-wide default enforces that exact edited layout;
+         * it is the only way to establish a lock. No separate Lock action
+         * exists. Once saved, exit the personal editor before loading policy.
+         * To unlock later, an admin edits the enforced preset and chooses Unlock.
+         */
+        async saveAsTeamDefault() {
+            if (!this.canSetTeamDefault || !this.currentTeamId) return
+            const teamId = this.currentTeamId
+            // A personal edit may have a queued debounce. Cancel it BEFORE
+            // the request so it cannot write while enforcement is changing.
+            this._debouncedSave?.cancel()
+            this._debouncedUserSave?.cancel()
+            const saved = await this.saveLayoutDefault(
+                `/apps/teamhub/api/v1/teams/${teamId}/dashboard/config`,
+                {
+                    team_layout: this.gridLayout,
+                    team_tab_order: this.orderedTabs.map(t => t.key),
+                    team_layout_mode: 'enforce',
+                },
+                t('teamhub', 'Team layout saved.'),
+            )
+            if (!saved || teamId !== this.currentTeamId) return
+
+            // The save can turn a flexible layout into an enforced preset.
+            // Exit the old PERSONAL editor before loading that policy; keeping
+            // it open made Done turn into Cancel and could schedule a personal
+            // layout write that the API (correctly) rejects with 403.
+            await this.closeEditModeForTeamPublish()
+            await this.loadLayout(teamId)
+        },
+
+        /**
+         * One PUT, one toast, one error path.
+         *
+         * v4.13.35 — one caller left. `saveAsTemplateDefault` and
+         * `saveAsInstanceDefault` are gone: those are Nextcloud administrator
+         * tasks and they belong in Admin -> TeamHub -> Policy, not in whichever
+         * team the administrator happens to be a member of (Justin,
+         * 2026-10-28). Kept as a helper rather than inlined because the error
+         * handling is the part worth keeping: the server's own message is
+         * shown when it sends one, since the refusals that matter here are
+         * specific and worth reading.
+         */
+        async saveLayoutDefault(url, payload, successMessage) {
+            try {
+                await axios.put(generateUrl(url), payload)
+                showSuccess(successMessage)
+                return true
+            } catch (err) {
+                showError(err?.response?.data?.error || t('teamhub', 'Failed to save the default layout'))
+                return false
+            }
+        },
+
+        /**
+         * v4.13.34 — the member takes the team's suggested layout.
+         *
+         * Saved as their own arrangement (`origin: 'user'`), because that is
+         * what it now is: they chose it. It therefore survives a later change
+         * to the suggestion, which is the difference between taking an offer
+         * and following a default.
+         */
+        async applyTeamPreset() {
+            if (this.layoutEnforced) return
+            const preset = this.teamPreset?.layout
+            if (!Array.isArray(preset) || preset.length === 0) return
+
+            this.gridLayout = preset.map(item => ({ ...item }))
+            await this.saveLayout('user')
+            showSuccess(t('teamhub', 'Team layout applied.'))
+        },
+
+        /**
+         * Explicitly reset this one team to its Nextcloud admin template.
+         * This bypasses the user's type default without changing that default
+         * for their other teams. The server stores a template-reset marker
+         * and keeps tab ordering personal. An enforced preset cannot be reset
+         * by an ordinary member; team admins reset the team-wide layout from
+         * the actions beside Edit team layout on Home.
          */
         async resetToDefault() {
-            if (!this.userDefaultLayout || !this.userDefaultLayout.length) return
-
-            // v4.6.1 — copy the default in and let the grid compact it for this
-            // team's active widgets on the next render. The applySnap() that
-            // used to run here did the repack itself, wrongly.
-            this.gridLayout = this.userDefaultLayout.map(item => ({ ...item }))
-
-            // Immediately persist the reset so the debounce doesn't race.
+            if (!this.currentTeamId || this.layoutEnforced) return
+            const teamId = this.currentTeamId
+            this._debouncedSave?.cancel()
+            this._debouncedUserSave?.cancel()
+            // Leaving edit mode normally saves a personal grid. Suppress it:
+            // such a save would race and undo the reset to the template.
+            await this.closeEditModeForTeamPublish()
             try {
-                const tabOrder = this.orderedTabs.map(t => t.key)
-                await axios.put(
-                    generateUrl(`/apps/teamhub/api/v1/teams/${this.currentTeamId}/layout`),
-                    { layout: this.gridLayout, tabOrder },
-                )
+                await axios.delete(generateUrl(`/apps/teamhub/api/v1/teams/${teamId}/layout`))
+                if (teamId === this.currentTeamId) await this.loadLayout(teamId)
             } catch (err) {
-                showError(t('teamhub', 'Failed to reset layout'))
+                showError(err?.response?.data?.error || t('teamhub', 'Failed to reset layout'))
             }
         },
 
@@ -2007,24 +2505,29 @@ export default {
             }
         },
 
-        syncLinkTabs() {
-            const linkTabs = (this.webLinks || []).map(link => ({ key: 'link-' + link.id, label: link.title, url: link.url, isNcRelative: this.isNcRelativeUrl(link.url) }))
-            this.orderedTabs = [...this.orderedTabs.filter(t => !t.key.startsWith('link-')), ...linkTabs]
-        },
-
-        syncExtTabs() {
-            const extTabs = (this.teamMenuItems || []).filter(item => !item.is_builtin)
-                .map(item => ({ key: 'ext-' + item.registry_id, label: item.title, icon: item.icon || 'Puzzle', appId: item.app_id || null }))
-            // v4.10.45 — keep every tab that is not an app's or a link, rather
-            // than a hand-kept list of built-in keys: that list never gained
-            // 'services' (v4.10.41), so the Services tab vanished whenever
-            // the registered apps synced after the layout bundle arrived.
-            const isOwn = t => !t.key.startsWith('ext-') && !t.key.startsWith('link-')
-            this.orderedTabs = [
-                ...this.orderedTabs.filter(isOwn),
-                ...extTabs,
-                ...this.orderedTabs.filter(t => t.key.startsWith('link-')),
-            ]
+        /**
+         * v4.13.24 — `syncLinkTabs()` and `syncExtTabs()` are both this one
+         * call now, and the duplication they carried is gone with them.
+         *
+         * Each used to splice its own slice into `orderedTabs` from its own
+         * copy of the descriptor mapping: three mappings for the same three
+         * sources `buildAllTabDescriptors` already reads, and each new kind of
+         * tab needing a fourth. Worse, a splice is not a rebuild — the nine
+         * config watchers below *do* rebuild, from the builder, and the
+         * builder did not know about package tabs. So every package tab was
+         * wiped the moment presence, decisions, timeline, collectives, budget,
+         * time, the project facts or the service-desk facts arrived, whichever
+         * came last. That is the whole of "the iframe does not render": there
+         * was no tab left to click. The v4.10.45 note in the old body
+         * described the same failure for the Services tab.
+         *
+         * The builder emits all of them now, so a rebuild is the correct
+         * response to any of the three arriving, and it goes through
+         * `buildOrderedTabs` — which also republishes `availableTabs`, so an
+         * app's tab finally shows up in Manage team's Default-tab picker.
+         */
+        syncRegisteredTabs() {
+            this.buildOrderedTabs(this.orderedTabs.map(t => t.key))
         },
 
         // ── URLs ────────────────────────────────────────────────────
@@ -2528,28 +3031,45 @@ export default {
             }
         },
 
+        /**
+         * Create a page under this team's intranet page (v4.13.62).
+         *
+         * One POST to TeamHub, which owns the whole operation: the parent path,
+         * the slug, and creating the team's own page first when it is missing
+         * — the state that produced IntraVox's **"Permission denied: cannot
+         * create pages in this location"**, which reads like a rights problem
+         * and was not one. See `IntravoxService::createSubPage()`.
+         *
+         * v4.13.61 did the same thing from here, in three requests, with this
+         * component deriving `{parentPath}/{teamSlug}` and its own slug of the
+         * title and POSTing straight to `/apps/intravox/api/pages`. That was
+         * the only place in the app that named an IntraVox route from the
+         * browser, and it is why there were two slug rules over one page tree.
+         */
         async submitCreatePage() {
             const title = this.newPageTitle.trim()
             if (!title) return
             this.creatingPage = true
             try {
-                const intravoxParentPath = this.$store.state.intravoxParentPath || 'en/teamhub'
-                const teamName = this.currentTeam?.name || ''
-                const teamSlug = this.toSlug(teamName)
-                const teamPagePath = intravoxParentPath + '/' + teamSlug
-
-                if (!teamSlug || !teamName) {
+                const teamId = this.currentTeam?.id
+                if (!teamId) {
                     showError(t('teamhub', 'Cannot create page: team name not available'))
                     return
                 }
-
-                const body = { id: this.toSlug(title), title, parentPath: teamPagePath }
-                await axios.post(generateUrl('/apps/intravox/api/pages'), body)
-                showSuccess(t('teamhub', 'Page "{title}" created', { title }))
+                const { data } = await axios.post(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${teamId}/intravox/subpage`),
+                    { title },
+                )
+                showSuccess(data?.result?.team_page_created
+                    // TRANSLATORS: {title} is the page the user asked for. Said
+                    // when this team had no intranet page of its own yet, so one
+                    // was created to hold the new page.
+                    ? t('teamhub', 'Page "{title}" created, in a new intranet page for this team', { title })
+                    : t('teamhub', 'Page "{title}" created', { title }))
                 this.showCreatePage = false
                 this.$refs.widgetGrid?.refreshIntravox()
             } catch (e) {
-                const msg = e?.response?.data?.message || e?.response?.data?.error || ''
+                const msg = e?.response?.data?.error || e?.response?.data?.message || ''
                 showError(msg ? t('teamhub', 'Failed to create page: {error}', { error: msg }) : t('teamhub', 'Failed to create page'))
             } finally {
                 this.creatingPage = false
@@ -2575,10 +3095,6 @@ export default {
             } finally {
                 this.deletingPage = false
             }
-        },
-
-        toSlug(text) {
-            return (text || '').toLowerCase().replace(/[^a-z0-9\s-]/g, '').trim().replace(/\s+/g, '-').replace(/-+/g, '-') || 'page'
         },
 
         copyTeamLink() {

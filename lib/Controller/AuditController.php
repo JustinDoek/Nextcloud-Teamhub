@@ -6,6 +6,8 @@ namespace OCA\TeamHub\Controller;
 use OCA\TeamHub\AppInfo\Application;
 use OCA\TeamHub\BackgroundJob\AuditMirrorJob;
 use OCA\TeamHub\Db\AuditLogMapper;
+use OCA\TeamHub\Service\AdminSettingsAuditService;
+use OCA\TeamHub\Service\AuditIntegrityService;
 use OCA\TeamHub\Service\AuditIngestionService;
 use OCA\TeamHub\Service\AuditService;
 use OCP\AppFramework\Controller;
@@ -54,6 +56,10 @@ class AuditController extends Controller {
         string $appName,
         IRequest $request,
         private AuditLogMapper  $mapper,
+        // v4.13.17 — the tamper-evidence report. A DI leaf over the two
+        // mappers; the anchoring half of it belongs to AuditMirrorJob.
+        private AuditIntegrityService $integrity,
+        private AdminSettingsAuditService $settingsAudit,
         private IDBConnection   $db,
         private IAppConfig      $appConfig,
         private IUserSession    $userSession,
@@ -462,14 +468,49 @@ class AuditController extends Controller {
                     Http::STATUS_BAD_REQUEST
                 );
             }
-            $this->appConfig->setValueString(
-                Application::APP_ID,
-                AuditMirrorJob::CFG_RETENTION_DAYS,
-                (string)$retentionDays,
-            );
+            // v4.13.17 — how long the trail is kept is itself a setting an
+            // auditor will ask about, so the change is in the trail.
+            $this->settingsAudit->recordAround('admin.audit_retention', function () use ($retentionDays): void {
+                $this->appConfig->setValueString(
+                    Application::APP_ID,
+                    AuditMirrorJob::CFG_RETENTION_DAYS,
+                    (string)$retentionDays,
+                );
+            });
             return new JSONResponse(['retention_days' => $retentionDays]);
         } catch (\Throwable $e) {
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // GET /api/v1/admin/audit/integrity
+    // -------------------------------------------------------------------------
+
+    /**
+     * Recompute the audit chain and report whether the trail is still what it
+     * was (v4.13.17, DESIGN §2.191).
+     *
+     * A read that costs real work — it re-hashes up to
+     * `AuditIntegrityService::VERIFY_ROW_BUDGET` rows — so it is a button on
+     * the Compliance tab rather than part of that tab's summary fetch. The
+     * cheap half lives in `MaintenanceService::getComplianceSummary()`.
+     *
+     * The verdict is deliberately not a boolean: `unkeyed`, `not_anchored`,
+     * `key_rotated` and `truncated` are each a reason the question cannot be
+     * answered rather than an answer, and collapsing them into "not ok" would
+     * tell an administrator their log had been tampered with when it had not.
+     */
+    #[AuthorizedAdminSetting(settings: \OCA\TeamHub\Settings\AdminSettings::class)]
+    #[NoCSRFRequired]
+    public function integrity(): JSONResponse {
+        try {
+            return new JSONResponse($this->integrity->verify());
+        } catch (\Throwable $e) {
+            $this->logger->error('[TeamHub][AuditController] integrity verification failed', [
+                'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return new JSONResponse(['error' => 'Verification failed'], Http::STATUS_INTERNAL_SERVER_ERROR);
         }
     }
 

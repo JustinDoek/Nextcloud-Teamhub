@@ -7,10 +7,12 @@
 	<section class="mywork__group wf-section" :aria-labelledby="titleId">
 		<div class="wf-section__head">
 			<component :is="icon" :size="iconToolbar" class="wf-section__icon" aria-hidden="true" />
-			<h3 :id="titleId" class="wf-section__title">
+			<!-- v4.13.60 — <h2>, as the aggregated groups beside it: these
+			     cards are sections of My Work, one level under its <h1>. -->
+			<h2 :id="titleId" class="wf-section__title">
 				<span>{{ title }}</span>
 				<span class="mywork__group-count">{{ workflows.length }}</span>
-			</h3>
+			</h2>
 			<span class="wf-section__kind">{{ t('teamhub', 'Workflows') }}</span>
 		</div>
 

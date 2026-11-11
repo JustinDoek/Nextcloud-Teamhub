@@ -164,13 +164,142 @@
                 </p>
             </NcNoteCard>
 
+            <!-- ── Add from the main team ───────────────────────────────── -->
+            <div class="th-subman__field">
+                <label class="th-subman__label" for="th-subman-add">
+                    {{ t('teamhub', 'Add from the main team') }}
+                </label>
+                <!-- Whole option objects rather than `:reduce`, as
+                     CreateSubTeamModal does and for the same reason: `multiple`
+                     with `:reduce` is used nowhere else in this app. -->
+                <NcSelect
+                    v-model="picked"
+                    input-id="th-subman-add"
+                    label-outside
+                    :multiple="true"
+                    :close-on-select="false"
+                    :aria-label-combobox="t('teamhub', 'Add from the main team')"
+                    :options="candidateOptions"
+                    :loading="loadingCandidates"
+                    :disabled="busy"
+                    :placeholder="t('teamhub', 'Pick people from this team')" />
+            </div>
+
+            <!-- ── Invite from outside ──────────────────────────────────── -->
+            <div class="th-subman__field">
+                <!-- A span, not a <label for>: NcTextField owns its own label
+                     element through the `label` prop, and a second one
+                     pointing at an id the component may not put on the input
+                     is a label that announces nothing. -->
+                <span class="th-subman__label">
+                    {{ t('teamhub', 'Invite people or groups from outside') }}
+                </span>
+                <NcTextField
+                    v-model="query"
+                    :label="t('teamhub', 'Invite people or groups from outside')"
+                    :label-visible="false"
+                    :placeholder="t('teamhub', 'Search by name, username or group')"
+                    :disabled="busy"
+                    @input="onSearch" />
+
+                <NcLoadingIcon v-if="searching" :size="iconBody" />
+                <ul v-else-if="results.length" class="th-subman__results">
+                    <li
+                        v-for="item in results"
+                        :key="item.id"
+                        class="th-subman__result">
+                        <!-- The add button is the control, not the row. A <li>
+                             with a click handler is not keyboard reachable
+                             (which is what InviteMemberModal does and should
+                             not), and a <div> inside a <button> is invalid
+                             markup — so the control goes in PersonRow's own
+                             trailing slot, which is what it is for. -->
+                        <PersonRow
+                            :id="item.id"
+                            :display-name="item.label"
+                            :type="item.type"
+                            :subline="item.subline"
+                            compact>
+                            <NcButton
+                                variant="tertiary"
+                                :disabled="busy"
+                                :aria-label="t('teamhub', 'Add {name}', { name: item.label })"
+                                :title="t('teamhub', 'Add {name}', { name: item.label })"
+                                @click="stage(item)">
+                                <template #icon><Plus :size="iconBody" /></template>
+                            </NcButton>
+                        </PersonRow>
+                    </li>
+                </ul>
+                <p v-else-if="query.length >= 2" class="th-subman__hint">
+                    {{ t('teamhub', 'No people or groups found outside this team.') }}
+                </p>
+
+                <div v-if="staged.length" class="th-subman__chips">
+                    <!-- Keyed on type **and** id (v4.13.3): a group and a
+                         person can carry the same string, and two chips with
+                         one key is a render Vue gets wrong rather than one it
+                         complains about. -->
+                    <NcChip
+                        v-for="u in staged"
+                        :key="u.type + ':' + u.id"
+                        variant="primary"
+                        :text="u.label"
+                        :aria-label-close="t('teamhub', 'Remove {name}', { name: u.label })"
+                        @close="unstage(u)">
+                        <template v-if="u.type === 'group'" #icon>
+                            <AccountGroup :size="iconInline" />
+                        </template>
+                    </NcChip>
+                </div>
+                <!-- An outsider is a new licensed seat and gets access to this
+                     sub-team only, never to the main team (DESIGN §2.175).
+                     Worth saying where the choice is made — and a group makes
+                     the seat count the thing to say out loud, because one
+                     click can be fifty people. -->
+                <span class="th-subman__hint">
+                    {{ t('teamhub', 'People and groups from outside join this sub-team only, never the main team. Everyone who reaches it counts as a licensed user.') }}
+                </span>
+            </div>
+
             <!-- ── Members ──────────────────────────────────────────────── -->
             <div class="th-subman__field">
                 <span class="th-subman__label">{{ t('teamhub', 'Members') }}</span>
 
                 <NcLoadingIcon v-if="loadingMembers" :size="iconBody" />
 
-                <ul v-else-if="people.length" class="th-subman__people">
+                <ul v-else-if="people.length || invitedGroups.length" class="th-subman__people">
+                    <!-- v4.13.3 — the groups invited from outside, above the
+                         people. A group is a container, not a person: its
+                         members appear below as "Through {group}" rows, and
+                         this is the only row that can be taken out again.
+                         Without it a group could be added and never removed.
+
+                         PersonRow already draws a group — the AccountGroup
+                         icon and the word *Group* as the subline — so the
+                         chip beside it carries the one fact the reader has to
+                         weigh before removing it: how many people come in
+                         through it. -->
+                    <li v-for="group in invitedGroups" :key="group.key" class="th-subman__person">
+                        <PersonRow
+                            :id="group.id"
+                            :display-name="group.displayName"
+                            type="group"
+                            compact>
+                            <NcChip
+                                no-close
+                                variant="tertiary"
+                                :text="n('teamhub', '{n} member', '{n} members', group.memberCount, { n: group.memberCount })" />
+                            <NcButton
+                                variant="tertiary"
+                                :disabled="busy"
+                                :aria-label="t('teamhub', 'Remove {name}', { name: group.displayName })"
+                                :title="t('teamhub', 'Remove {name}', { name: group.displayName })"
+                                @click="removeGroup(group)">
+                                <template #icon><AccountRemove :size="iconBody" /></template>
+                            </NcButton>
+                        </PersonRow>
+                    </li>
                     <li v-for="person in people" :key="person.key" class="th-subman__person">
                         <!-- PersonRow is the one place a person's
                              disambiguating line is rendered (DESIGN §2.139),
@@ -210,93 +339,6 @@
                     <template #icon><AccountMultipleOutline :size="iconHero" /></template>
                 </NcEmptyContent>
             </div>
-
-            <!-- ── Add from the main team ───────────────────────────────── -->
-            <div class="th-subman__field">
-                <label class="th-subman__label" for="th-subman-add">
-                    {{ t('teamhub', 'Add from the main team') }}
-                </label>
-                <!-- Whole option objects rather than `:reduce`, as
-                     CreateSubTeamModal does and for the same reason: `multiple`
-                     with `:reduce` is used nowhere else in this app. -->
-                <NcSelect
-                    v-model="picked"
-                    input-id="th-subman-add"
-                    label-outside
-                    :multiple="true"
-                    :close-on-select="false"
-                    :aria-label-combobox="t('teamhub', 'Add from the main team')"
-                    :options="candidateOptions"
-                    :loading="loadingCandidates"
-                    :disabled="busy"
-                    :placeholder="t('teamhub', 'Pick people from this team')" />
-            </div>
-
-            <!-- ── Invite from outside ──────────────────────────────────── -->
-            <div class="th-subman__field">
-                <!-- A span, not a <label for>: NcTextField owns its own label
-                     element through the `label` prop, and a second one
-                     pointing at an id the component may not put on the input
-                     is a label that announces nothing. -->
-                <span class="th-subman__label">
-                    {{ t('teamhub', 'Invite someone from outside') }}
-                </span>
-                <NcTextField
-                    v-model="query"
-                    :label="t('teamhub', 'Invite someone from outside')"
-                    :label-visible="false"
-                    :placeholder="t('teamhub', 'Search by name or username')"
-                    :disabled="busy"
-                    @input="onSearch" />
-
-                <NcLoadingIcon v-if="searching" :size="iconBody" />
-                <ul v-else-if="results.length" class="th-subman__results">
-                    <li
-                        v-for="item in results"
-                        :key="item.id"
-                        class="th-subman__result">
-                        <!-- The add button is the control, not the row. A <li>
-                             with a click handler is not keyboard reachable
-                             (which is what InviteMemberModal does and should
-                             not), and a <div> inside a <button> is invalid
-                             markup — so the control goes in PersonRow's own
-                             trailing slot, which is what it is for. -->
-                        <PersonRow
-                            :id="item.id"
-                            :display-name="item.label"
-                            :subline="item.subline"
-                            compact>
-                            <NcButton
-                                variant="tertiary"
-                                :disabled="busy"
-                                :aria-label="t('teamhub', 'Add {name}', { name: item.label })"
-                                :title="t('teamhub', 'Add {name}', { name: item.label })"
-                                @click="stage(item)">
-                                <template #icon><Plus :size="iconBody" /></template>
-                            </NcButton>
-                        </PersonRow>
-                    </li>
-                </ul>
-                <p v-else-if="query.length >= 2" class="th-subman__hint">
-                    {{ t('teamhub', 'Nobody found outside this team.') }}
-                </p>
-
-                <div v-if="staged.length" class="th-subman__chips">
-                    <NcChip
-                        v-for="u in staged"
-                        :key="u.id"
-                        variant="primary"
-                        :text="u.label"
-                        :aria-label-close="t('teamhub', 'Remove {name}', { name: u.label })"
-                        @close="unstage(u)" />
-                </div>
-                <!-- An outsider is a new licensed seat and gets access to this
-                     sub-team only, never to the main team (DESIGN §2.175).
-                     Worth saying where the choice is made. -->
-                <span class="th-subman__hint">
-                    {{ t('teamhub', 'Someone from outside joins this sub-team only, and counts as a licensed user.') }}
-                </span>
-            </div>
         </div>
 
         <template #actions>
@@ -320,11 +362,12 @@ import {
     NcNoteCard, NcSelect, NcTextArea, NcTextField,
 } from '@nextcloud/vue'
 import { translate as t, translatePlural as n } from '@nextcloud/l10n'
+import AccountGroup from 'vue-material-design-icons/AccountGroup.vue'
 import AccountMultipleOutline from 'vue-material-design-icons/AccountMultipleOutline.vue'
 import AccountRemove from 'vue-material-design-icons/AccountRemove.vue'
 import Plus from 'vue-material-design-icons/Plus.vue'
 import PersonRow from '../PersonRow.vue'
-import { ICON_BODY, ICON_HERO } from '../../constants/uiTokens.js'
+import { ICON_BODY, ICON_HERO, ICON_INLINE } from '../../constants/uiTokens.js'
 // v4.12.6 - the label rules for a template, a profile and anything a template
 // switches on. Shared with the admin Policy panel rather than re-derived here.
 import {
@@ -367,7 +410,7 @@ export default {
     components: {
         NcButton, NcChip, NcDialog, NcEmptyContent, NcLoadingIcon,
         NcNoteCard, NcSelect, NcTextArea, NcTextField,
-        AccountMultipleOutline, AccountRemove, Plus,
+        AccountGroup, AccountMultipleOutline, AccountRemove, Plus,
         PersonRow,
     },
 
@@ -424,6 +467,10 @@ export default {
         },
         iconHero() {
             return ICON_HERO
+        },
+        /** 16px, the size for an icon inside a chip beside 13px text. */
+        iconInline() {
+            return ICON_INLINE
         },
         busy() {
             return this.saving || this.applying
@@ -572,6 +619,28 @@ export default {
                 removable: false,
             }))
             return [...direct, ...inherited]
+        },
+
+        /**
+         * The Nextcloud groups invited from outside (v4.13.3).
+         *
+         * `getMembersForManage()`'s own bucket, rendered as rows of its own
+         * because the people inside a group arrive under `inherited` with
+         * `removable: false` - they leave by leaving the group, and until now
+         * the group itself had no row anywhere, so it could be added and
+         * never taken out.
+         *
+         * `id` is the `singleId`, which is the key the `circles_member` row
+         * is deleted by. It is **not** the gid, so it is never compared
+         * against a search result, which carries the gid.
+         */
+        invitedGroups() {
+            return (this.roster?.groups || []).map(g => ({
+                key: 'g:' + g.groupId,
+                id: g.groupId,
+                displayName: g.displayName || g.groupId,
+                memberCount: g.memberCount || 0,
+            }))
         },
 
         /**
@@ -763,23 +832,34 @@ export default {
                     { params: { q: this.query.trim() } },
                 )
                 const inAlready = new Set(this.people.map(p => p.userId))
-                const stagedIds = new Set(this.staged.map(u => u.id))
+                const stagedKeys = new Set(this.staged.map(u => u.type + ':' + u.id))
                 this.results = (data || [])
-                    // Local accounts only. A group or a team is not a person
-                    // the two-list rule can classify, and the server would
-                    // refuse one as an outsider it cannot test against a
-                    // roster of uids.
-                    .filter(u => (u.type || 'user') === 'user')
+                    // v4.13.3 - people and Nextcloud groups. A group needs no
+                    // place in the two-list rule: `splitMembership()` tests
+                    // only the local-user type against the parent's roster,
+                    // because a group is never on one. Teams, email and
+                    // federated candidates stay out - a team cannot be a
+                    // member of a sub-team, and the other two were never
+                    // offered here.
+                    .filter(u => ['user', 'group'].includes(u.type || 'user'))
                     // Anyone on the main team belongs in the picker above, not
                     // here — which is the server's rule, kept out of the
-                    // reader's way rather than enforced at them.
-                    .filter(u => !this.parentRoster.has(u.id))
-                    .filter(u => !inAlready.has(u.id) && !stagedIds.has(u.id))
+                    // reader's way rather than enforced at them. Users only:
+                    // `parentRoster` holds uids.
+                    .filter(u => (u.type || 'user') !== 'user' || !this.parentRoster.has(u.id))
+                    .filter(u => (u.type || 'user') !== 'user' || !inAlready.has(u.id))
+                    .filter(u => !stagedKeys.has((u.type || 'user') + ':' + u.id))
                     // The subline is kept, not dropped: /api/v1/users/search
                     // goes through PersonSearchService, which already answers
                     // with the administrator's "Telling people apart" fields,
-                    // and PersonRow renders them.
-                    .map(u => ({ id: u.id, label: u.displayName || u.id, subline: u.subline || '' }))
+                    // and PersonRow renders them. A group carries none and
+                    // PersonRow labels it *Group* from the type instead.
+                    .map(u => ({
+                        id: u.id,
+                        type: u.type || 'user',
+                        label: u.displayName || u.id,
+                        subline: u.subline || '',
+                    }))
             } catch (e) {
                 this.results = []
             } finally {
@@ -788,7 +868,9 @@ export default {
         },
 
         stage(item) {
-            if (!this.staged.some(u => u.id === item.id)) {
+            // Type and id together (v4.13.3): a group's gid and a uid are
+            // both free-form strings and may be the same word.
+            if (!this.staged.some(u => u.id === item.id && u.type === item.type)) {
                 this.staged.push(item)
             }
             this.query = ''
@@ -796,7 +878,7 @@ export default {
         },
 
         unstage(item) {
-            this.staged = this.staged.filter(u => u.id !== item.id)
+            this.staged = this.staged.filter(u => !(u.id === item.id && u.type === item.type))
         },
 
         async remove(person) {
@@ -812,6 +894,33 @@ export default {
                 await this.loadMembers()
             } catch (e) {
                 this.error = this.messageOf(e, t('teamhub', 'Could not remove this member'))
+            }
+        },
+
+        /**
+         * Take an invited group back out (v4.13.3).
+         *
+         * The same endpoint a person goes through, with `type: 'group'` and
+         * the group's `singleId` - which is how `circles_member` keys the
+         * row. No confirmation in front of it: it is one group losing access
+         * to one sub-team, it destroys nothing, and re-inviting is the same
+         * two clicks. The people who reached the sub-team only through it
+         * disappear from the list below on the reload.
+         */
+        async removeGroup(group) {
+            this.error = ''
+            try {
+                await this.$store.dispatch('removeSubTeamMember', {
+                    teamId: this.parentTeamId,
+                    subTeamId: this.subTeam.id,
+                    userId: group.id,
+                    type: 'group',
+                })
+                showSuccess(t('teamhub', '{name} was removed', { name: group.displayName }))
+                this.$emit('changed')
+                await this.loadMembers()
+            } catch (e) {
+                this.error = this.messageOf(e, t('teamhub', 'Could not remove this group'))
             }
         },
 
@@ -857,7 +966,7 @@ export default {
                         teamId: this.parentTeamId,
                         subTeamId: this.subTeam.id,
                         members: this.picked.map(m => (typeof m === 'string' ? m : m.id)),
-                        outsiders: this.staged.map(u => ({ id: u.id, type: 'user' })),
+                        outsiders: this.staged.map(u => ({ id: u.id, type: u.type })),
                     })
                 }
 

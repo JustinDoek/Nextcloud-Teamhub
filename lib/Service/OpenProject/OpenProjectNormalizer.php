@@ -133,8 +133,22 @@ final class OpenProjectNormalizer {
      *   priority: ?string, priorityId: ?int, assignee: ?string, assigneeId: ?int,
      *   responsible: ?string, author: ?string, project: ?array{id: ?int, name: string},
      *   startDate: ?string, dueDate: ?string, date: ?string, percentageDone: ?int,
-     *   createdAt: ?string, updatedAt: ?string
+     *   createdAt: ?string, updatedAt: ?string, lockVersion: ?int, canEdit: bool
      * }
+     *
+     * v4.13.9 — two more, both needed to change a work package and both
+     * OpenProject's own answer rather than ours:
+     *
+     *  - `lockVersion`, which a PATCH must carry. OpenProject uses it for
+     *    optimistic locking and answers a stale one with 409, which is how
+     *    "somebody else changed this while you were typing" is detected
+     *    rather than silently overwritten.
+     *  - `canEdit`, read off the resource's own `update` /
+     *    `updateImmediately` links exactly as `canEditProject()` reads a
+     *    project's. Those links are present only for a user OpenProject
+     *    lets edit *this* work package, so it already accounts for
+     *    workflow and role rules that no label could tell us. Role names
+     *    are configurable per instance and are never consulted.
      */
     public static function workPackage(array $raw): array {
         $projectName = self::linkTitle($raw, 'project');
@@ -162,7 +176,32 @@ final class OpenProjectNormalizer {
                 : null,
             'createdAt'      => self::isoOrNull($raw['createdAt'] ?? null),
             'updatedAt'      => self::isoOrNull($raw['updatedAt'] ?? null),
+            // v4.13.9 — see the docblock. `lockVersion` is null rather
+            // than 0 when absent: 0 is a real version, and sending a
+            // guessed one would overwrite somebody's edit instead of
+            // being refused.
+            'lockVersion'    => isset($raw['lockVersion']) && is_numeric($raw['lockVersion'])
+                ? (int)$raw['lockVersion']
+                : null,
+            'canEdit'        => self::canEditWorkPackage($raw),
         ];
+    }
+
+    /**
+     * Does OpenProject let this user change this work package (v4.13.9).
+     *
+     * The same technique as {@see canEditProject()}, and for the same
+     * reason: the resource carries `update` / `updateImmediately` links
+     * only for somebody who may edit it, so this is the API's own verdict
+     * including whatever workflow and permission rules the instance has.
+     * A surface that offers an edit must also confirm the transport can
+     * send PATCH — see `OpenProjectClient::supportsMethod()`.
+     *
+     * @param array<string, mixed> $raw
+     */
+    public static function canEditWorkPackage(array $raw): bool {
+        return self::linkHref($raw, 'update') !== null
+            || self::linkHref($raw, 'updateImmediately') !== null;
     }
 
     /**
@@ -195,6 +234,35 @@ final class OpenProjectNormalizer {
             'authorId'  => self::linkId($raw, 'author'),
             'project'   => $projectName !== null ? ['id' => self::linkId($raw, 'project'), 'name' => $projectName] : null,
             'createdAt' => self::isoOrNull($raw['createdAt'] ?? null),
+        ];
+    }
+
+    /**
+     * A version → the Project info widget's current release or sprint
+     * (v4.13.13).
+     *
+     * `endDate` is OpenProject's `effective_date`, which its own
+     * representer renames; `status` is `open`, `locked` or `closed` and
+     * `sharing` says how far the version reaches beyond its project. Both
+     * are pattern-checked because they land in a class name.
+     *
+     * @param array<string, mixed> $raw
+     * @return array{
+     *   id: int, name: string, description: ?string, startDate: ?string,
+     *   endDate: ?string, status: ?string, sharing: ?string
+     * }
+     */
+    public static function version(array $raw): array {
+        $status  = is_string($raw['status'] ?? null) ? $raw['status'] : null;
+        $sharing = is_string($raw['sharing'] ?? null) ? $raw['sharing'] : null;
+        return [
+            'id'          => (int)($raw['id'] ?? 0),
+            'name'        => self::text((string)($raw['name'] ?? '')),
+            'description' => self::excerpt(self::formattable($raw['description'] ?? null)),
+            'startDate'   => self::dateOrNull($raw['startDate'] ?? null),
+            'endDate'     => self::dateOrNull($raw['endDate'] ?? null),
+            'status'      => $status !== null && preg_match('/^[a-z_]{1,20}$/', $status) === 1 ? $status : null,
+            'sharing'     => $sharing !== null && preg_match('/^[a-z_]{1,20}$/', $sharing) === 1 ? $sharing : null,
         ];
     }
 

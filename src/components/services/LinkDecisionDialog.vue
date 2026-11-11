@@ -18,7 +18,7 @@
 			<!-- No heading of its own: `NcModal` renders `name` as the dialog's
 			     title, and a second copy inside would print it twice. -->
 			<p class="svc-linkdec__hint">
-				{{ t('teamhub', 'Post a decision of this service team into the conversation. Only approved, published decisions can be linked — the requester reads this too.') }}
+				{{ t('teamhub', 'Post a decision of this service team into the conversation. Only approved, published decisions can be linked. The requester reads this too.') }}
 			</p>
 
 			<NcNoteCard v-if="error" type="error">{{ error }}</NcNoteCard>

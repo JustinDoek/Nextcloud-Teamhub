@@ -9,7 +9,7 @@
                 :key="b.boardId"
                 type="button"
                 class="th-unassigned__row"
-                :aria-label="n('teamhub', '{n} unassigned card in {board} — open board', '{n} unassigned cards in {board} — open board', b.count, { n: b.count, board: b.boardName || 'board' })"
+                :aria-label="n('teamhub', '{n} unassigned card in {board}: open board', '{n} unassigned cards in {board}: open board', b.count, { n: b.count, board: b.boardName || 'board' })"
                 @click="openBoard(b)">
                 <AlertCircleOutline :size="ICON_INLINE" class="th-unassigned__icon" aria-hidden="true" />
                 <span class="th-unassigned__text">
@@ -89,24 +89,30 @@
                                 {{ t('teamhub', 'Deck') }}
                             </NcChip>
                         </template>
-                        <template v-else-if="task.source === 'openproject'">
-                            <NcChip no-close variant="tertiary"
-                                v-if="task.type"
-                                :title="task.type">
-                                {{ truncate(task.type, 20) }}
-                            </NcChip>
-                            <NcChip no-close variant="secondary">
-                                {{ t('teamhub', 'OpenProject') }}
-                            </NcChip>
-                        </template>
+                        <!-- v4.13.10 — an OpenProject row carried a type chip
+                             ("Task") and an "OpenProject" chip; both said what
+                             the row's badge icon already says, and together
+                             they pushed the assignee onto a line of its own.
+                             The meta line is now the due date and who it is
+                             for (Justin, 2026-11-01). -->
                         <!--
                             v4.11.16 — every VTODO used to be chipped
                             "Personal task", which stopped being true the
                             moment a task could say who it is for. The chip
-                            now says that: your own, a colleague's, or the
-                            team's.
+                            now says that: your own or the team's.
+
+                            v4.13.10 — a task for a named colleague is that
+                            colleague's name, plain, the way an OpenProject
+                            assignee reads: no "For" and no pill, since a
+                            name is not a category (Justin, 2026-11-01).
                         -->
-                        <NcChip no-close variant="tertiary" v-else>
+                        <span
+                            v-else-if="task.source === 'tasks' && !task.mine && task.assigneeName"
+                            class="th-deck__assignee-name"
+                            :title="t('teamhub', 'Assigned to {name}', { name: task.assigneeName })">
+                            {{ task.assigneeName }}
+                        </span>
+                        <NcChip no-close variant="tertiary" v-else-if="task.source === 'tasks'">
                             {{ taskOwnerLabel(task) }}
                         </NcChip>
 
@@ -122,7 +128,8 @@
                                 :size="24" />
                         </span>
                         <!-- Assignee name (OpenProject) — a name OpenProject
-                             gave us, not a Nextcloud account, so no avatar. -->
+                             gave us, not a Nextcloud account, so no avatar.
+                             A Tasks assignee reads the same way, above. -->
                         <span
                             v-if="task.source === 'openproject' && task.assigneeName"
                             class="th-deck__assignee-name"
@@ -131,6 +138,27 @@
                         </span>
                     </div>
                 </div>
+
+                <!--
+                    v4.13.9 - Change a work package without leaving the team.
+                    Shown only when OpenProject grants this viewer the edit
+                    on this row AND the OpenProject connection can send
+                    PATCH; hidden otherwise rather than disabled, which is
+                    CLAUDE.md's rule for anything somebody may not do. On a
+                    connection that cannot write, nobody is shown a button
+                    that would answer 501.
+                -->
+                <NcButton
+                    v-if="task.source === 'openproject' && task.canEdit && opCanEdit"
+                    variant="tertiary"
+                    class="th-deck__edit"
+                    :aria-label="t('teamhub', 'Change {subject}', { subject: task.title })"
+                    :title="t('teamhub', 'Change work package')"
+                    @click="$emit('edit-openproject-work-package', { workPackageId: task.id })">
+                    <template #icon>
+                        <PencilOutlineIcon :size="ICON_BODY" />
+                    </template>
+                </NcButton>
 
             </li>
         </ul>
@@ -164,6 +192,7 @@ import ClipboardCheckOutlineIcon from 'vue-material-design-icons/ClipboardCheckO
 import BriefcaseOutlineIcon from 'vue-material-design-icons/BriefcaseOutline.vue'
 import AlertCircleOutline from 'vue-material-design-icons/AlertCircleOutline.vue'
 import ChevronRightIcon from 'vue-material-design-icons/ChevronRight.vue'
+import PencilOutlineIcon from 'vue-material-design-icons/PencilOutline.vue'
 import { ICON_BODY, ICON_INLINE } from '../constants/uiTokens.js'
 
 /**
@@ -185,6 +214,15 @@ import { ICON_BODY, ICON_INLINE } from '../constants/uiTokens.js'
  * work package" — the same arrangement as OpenProjectOverviewWidget's
  * `actions`. `refreshOpenProject()` is the public re-read TeamView calls
  * after a work package was created.
+ *
+ * v4.13.9 — a row OpenProject lets this viewer change carries a pencil,
+ * and the widget emits `edit-openproject-work-package` for the grid to
+ * open the modal with. Two conditions, both required and both the server's
+ * answer: the row's own `canEdit` (OpenProject's `update` link) and the
+ * connection's ability to send PATCH (`workPackageEditAvailable` from the
+ * capability envelope). Hidden when either is false — never disabled,
+ * because a greyed pencil invites somebody to hunt for the permission that
+ * would ungrey it, and on the integration-app connection there is none.
  */
 export default {
     name: 'DeckWidget',
@@ -198,10 +236,11 @@ export default {
         BriefcaseOutlineIcon,
         AlertCircleOutline,
         ChevronRightIcon,
+        PencilOutlineIcon,
     },
 
     /** `openproject-actions` — `{ canCreate: boolean }`, whenever the work payload (re)loads. */
-    emits: ['openproject-actions'],
+    emits: ['openproject-actions', 'edit-openproject-work-package'],
 
     data() {
         return {
@@ -209,6 +248,10 @@ export default {
             ICON_INLINE,
             // v4.9.5 — the OpenProject part of the list.
             opItems: [],
+            // v4.13.9 - can the OpenProject connection send PATCH. From
+            // the `work` payload, like `canCreate`; false until a page has
+            // been read, so no pencil flashes before the answer arrives.
+            opCanEdit: false,
             opTotal: null,
             opPage: 1,
             opHasMore: false,
@@ -321,6 +364,10 @@ export default {
                     url:          wp.url || '#',
                     type:         wp.type || '',
                     assigneeName: wp.assignee || '',
+                    // v4.13.9 - OpenProject's own answer for this row and
+                    // this viewer. The action also needs the connection to
+                    // be able to send PATCH, which `opCanEdit` folds in.
+                    canEdit:      !!wp.canEdit,
                 }))
                 : []
 
@@ -376,6 +423,9 @@ export default {
         /**
          * Who a VTODO is for, for its chip (v4.11.16).
          *
+         * Only the viewer's own and the team's cases reach this: a task for a
+         * named colleague shows that name plainly instead (v4.13.10).
+         *
          * A task written before the *Who the task is for* field names nobody,
          * which is the team case — so an old task reads "Team task" rather
          * than claiming to belong to whoever happens to be looking.
@@ -388,10 +438,6 @@ export default {
                 // TRANSLATORS: chip on a task in the Upcoming tasks widget — the task is the viewer's own
                 return t('teamhub', 'My task')
             }
-            if (task.assigneeName) {
-                // TRANSLATORS: chip on a task in the Upcoming tasks widget — {name} is the colleague the task is for
-                return t('teamhub', 'For {name}', { name: task.assigneeName })
-            }
             // TRANSLATORS: chip on a task in the Upcoming tasks widget — the task is for the whole team, nobody in particular
             return t('teamhub', 'Team task')
         },
@@ -400,6 +446,7 @@ export default {
 
         resetOpenProject() {
             this.opItems = []
+            this.opCanEdit = false
             this.opTotal = null
             this.opPage = 1
             this.opHasMore = false
@@ -442,6 +489,7 @@ export default {
                 this.opHasMore = !!data.hasMore
                 this.opError = null
                 if (page === 1) {
+                    this.opCanEdit = !!data.canEditWorkPackages
                     this.$emit('openproject-actions', { canCreate: !!data.canCreateWorkPackage })
                 }
             } catch (e) {
@@ -450,6 +498,7 @@ export default {
                 if (page === 1) {
                     this.opItems = []
                     this.opHasMore = false
+                    this.opCanEdit = false
                     this.$emit('openproject-actions', { canCreate: false })
                 }
             } finally {
@@ -626,14 +675,31 @@ export default {
     margin-inline-start: auto;
 }
 
-/* v4.9.5 — an OpenProject assignee is a name, right-aligned where Deck
-   puts its avatars. */
+/* v4.9.5 — an assignee from OpenProject or NC Tasks is a name, not an
+   account, so it reads as text where Deck puts its avatars. v4.13.10: it sits
+   inline on the meta line (it used to be pushed to the far end, which wrapped
+   it onto a line of its own as soon as the widget was narrow). */
 .th-deck__assignee-name {
-    margin-inline-start: auto;
     max-width: 140px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+/* v4.13.9 — the row's Change action. Pushed to the end of the row and
+   kept from shrinking, so a long subject never squeezes it out. It stays
+   in the tab order and keeps NcButton's own focus ring; only its opacity
+   is quiet until the row is hovered or something inside it has focus. */
+.th-deck__edit {
+    flex: 0 0 auto;
+    align-self: center;
+    margin-inline-start: var(--th-space-sm);
+    opacity: 0.6;
+}
+
+.th-widget__row:hover .th-deck__edit,
+.th-widget__row:focus-within .th-deck__edit {
+    opacity: 1;
 }
 
 .th-deck__more {

@@ -6,6 +6,7 @@ namespace OCA\TeamHub\Controller;
 use OCA\TeamHub\Service\PolicyApplyService;
 use OCA\TeamHub\Service\PolicyPropagationService;
 use OCA\TeamHub\Service\PolicyService;
+use OCA\TeamHub\Service\TeamsFrontendService;
 use OCP\AppFramework\Controller;
 use OCP\AppFramework\Http\Attribute\AuthorizedAdminSetting;
 use OCP\AppFramework\Http\Attribute\NoAdminRequired;
@@ -57,6 +58,10 @@ class PolicyController extends Controller {
         private PolicyApplyService $policyApplyService,
         // v4.8.27 — rolling a saved profile or template out to its teams.
         private PolicyPropagationService $policyPropagationService,
+        // v4.13.16 — the Nextcloud Teams frontend switch. A DI leaf (IConfig,
+        // session, group manager, app manager, AuditService, logger), and the
+        // one endpoint pair here that touches no TeamHub state at all.
+        private TeamsFrontendService $teamsFrontendService,
         private LoggerInterface $logger,
     ) {
         parent::__construct($appName, $request);
@@ -353,6 +358,64 @@ class PolicyController extends Controller {
      * @param list<string> $apps
      * @param list<string> $modules
      */
+    /**
+     * POST /api/v1/admin/policy/templates — v4.13.24.
+     *
+     * Create a team template. Any Nextcloud administrator; there was no
+     * create route at all before this, so the five shipped templates were the
+     * only kinds of team an estate could have.
+     *
+     * Not `#[NoCSRFRequired]` — it writes. The same validation the update
+     * route gets, in the same service helpers.
+     *
+     * @param list<string> $apps
+     * @param list<string> $modules
+     */
+    #[AuthorizedAdminSetting(settings: \OCA\TeamHub\Settings\AdminSettings::class)]
+    public function createTemplate(
+        string  $templateKey = '',
+        string  $label = '',
+        ?string $description = null,
+        array   $apps = [],
+        array   $modules = [],
+        bool    $expiryEnabled = false,
+        int     $expiryDefaultDays = 0,
+        int     $preselectConfig = 0,
+        int     $sortIndex = 0,
+        ?string $defaultProfileKey = null,
+    ): JSONResponse {
+        try {
+            return new JSONResponse($this->policyService->createTemplate(
+                $templateKey, $label, $description, $apps, $modules,
+                $expiryEnabled, $expiryDefaultDays, $preselectConfig, $sortIndex,
+                $defaultProfileKey,
+            ));
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Could not create the team template.', [
+                'templateKey' => $templateKey,
+            ]);
+        }
+    }
+
+    /**
+     * DELETE /api/v1/admin/policy/templates/{templateKey} — v4.13.24.
+     *
+     * Refused for a seeded template (an upgrade would restore it) and for the
+     * last remaining one (no team could be created). Teams already created
+     * from the template keep everything they were created with; the response
+     * carries how many there are so the panel can say so.
+     */
+    #[AuthorizedAdminSetting(settings: \OCA\TeamHub\Settings\AdminSettings::class)]
+    public function destroyTemplate(string $templateKey): JSONResponse {
+        try {
+            return new JSONResponse($this->policyService->deleteTemplate($templateKey));
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Could not delete the team template.', [
+                'templateKey' => $templateKey,
+            ]);
+        }
+    }
+
     #[AuthorizedAdminSetting(settings: \OCA\TeamHub\Settings\AdminSettings::class)]
     public function updateTemplate(
         string  $templateKey,
@@ -450,6 +513,49 @@ class PolicyController extends Controller {
         } catch (\Throwable $e) {
             return $this->exceptionResponse($e, 'Could not roll the template out.', [
                 'templateKey' => $templateKey,
+            ]);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // The Nextcloud Teams (Circles) frontend switch
+    // -------------------------------------------------------------------------
+
+    /**
+     * GET /api/v1/admin/policy/teams-frontend
+     *
+     * Whether Nextcloud's own Teams app has a user-facing frontend. Not a
+     * policy field and not a team setting — it sits on the Policy tab because
+     * that is where an administrator decides how teams are governed on this
+     * instance, and this decides whether there is a second way in at all.
+     * {@see \OCA\TeamHub\Service\TeamsFrontendService} for what the switch
+     * reaches.
+     */
+    #[AuthorizedAdminSetting(settings: \OCA\TeamHub\Settings\AdminSettings::class)]
+    #[NoCSRFRequired]
+    public function teamsFrontend(): JSONResponse {
+        try {
+            return new JSONResponse($this->teamsFrontendService->status());
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Could not read the Teams app frontend setting.');
+        }
+    }
+
+    /**
+     * PUT /api/v1/admin/policy/teams-frontend
+     * Body: { enabled: bool }
+     *
+     * Writes another app's config value, which is the one thing worth pausing
+     * on when reading this: `circles`' `frontend_enabled` has no admin UI of
+     * its own, so there is no second switch for this one to drift from.
+     */
+    #[AuthorizedAdminSetting(settings: \OCA\TeamHub\Settings\AdminSettings::class)]
+    public function setTeamsFrontend(bool $enabled): JSONResponse {
+        try {
+            return new JSONResponse($this->teamsFrontendService->setEnabled($enabled));
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Could not change the Teams app frontend setting.', [
+                'enabled' => $enabled,
             ]);
         }
     }

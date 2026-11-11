@@ -174,7 +174,24 @@
 		     Approve, Reject and Complete are one click further away, in the
 		     menu, where the deliberate actions belong. -->
 		<div class="mywork-row__actions">
+			<!-- v4.13.60 — in the compact view the button carries the verb
+			     instead of the glyph: a row with no second line cannot show
+			     what else is possible, so the one action worth taking is the
+			     one thing that says itself. Open goes back into the menu,
+			     which `visibleMenuActions` handles, so no row loses it. -->
 			<NcButton
+				v-if="compact"
+				class="mywork-row__primary"
+				variant="secondary"
+				:disabled="busy"
+				:aria-label="compactActionName"
+				:title="compactActionName"
+				@click="runAction(compactAction)">
+				<template #icon><component :is="actionIcon(compactAction)" :size="iconBody" /></template>
+				{{ actionLabel(compactAction) }}
+			</NcButton>
+			<NcButton
+				v-else
 				variant="secondary"
 				:disabled="busy"
 				:aria-label="t('teamhub', 'Open {title}', { title: item.title })"
@@ -184,14 +201,14 @@
 			</NcButton>
 
 			<NcActions
-				v-if="menuActions.length || canSnooze"
+				v-if="visibleMenuActions.length || canSnooze"
 				:aria-label="t('teamhub', 'More actions for {title}', { title: item.title })"
 				:disabled="busy">
-				<template v-for="action in menuActions" :key="action">
+				<template v-for="action in visibleMenuActions" :key="action">
 					<NcActionButton
 						v-if="action !== 'snooze'"
 						close-after-click
-						@click="$emit('action', { item, action })">
+						@click="runAction(action)">
 						<template #icon>
 							<component :is="actionIcon(action)" :size="iconNav" />
 						</template>
@@ -200,7 +217,7 @@
 				</template>
 
 				<template v-if="canSnooze">
-					<NcActionSeparator v-if="menuActions.length" />
+					<NcActionSeparator v-if="visibleMenuActions.length" />
 					<NcActionCaption :name="t('teamhub', 'Snooze until')" />
 					<NcActionButton
 						v-for="preset in snoozeOptions"
@@ -344,6 +361,8 @@ import Calendar from 'vue-material-design-icons/Calendar.vue'
 // as a meeting, and tasks sit next to meetings in the queue.
 import CheckboxMarkedOutline from 'vue-material-design-icons/CheckboxMarkedOutline.vue'
 import Puzzle from 'vue-material-design-icons/Puzzle.vue'
+// v4.13.17 — a membership recertification: people, with a check.
+import AccountCheckOutline from 'vue-material-design-icons/AccountCheckOutline.vue'
 
 import {
 	ACTION,
@@ -383,6 +402,7 @@ export default {
 		Close, CommentEditOutline, CommentOutline, AccountArrowRight,
 		InformationOutline, OpenInNew, VideoOutline, FileDocumentOutline, EmailOutline,
 		CardText, Folder, FolderAccountOutline, Gavel, Calendar, CheckboxMarkedOutline, Puzzle, ShieldAccountOutline, CalendarClock,
+		AccountCheckOutline,
 		AccountPlusOutline, FileEyeOutline, ArchiveCheckOutline, BriefcaseOutline, FlagOutline,
 		ChevronDown, ChevronUp, SourceBranch,
 	},
@@ -392,7 +412,12 @@ export default {
 		providerNames: { type: Object, default: () => ({}) },
 		/** True while an action on this row is in flight. */
 		busy: { type: Boolean, default: false },
-		/** Compact density — action buttons collapse to icons only. */
+		/**
+		 * The compact view (v4.13.60): one line per item — the subject,
+		 * where it came from, the one action worth a button and the menu.
+		 * The team, the reason and the deadline are what it trades away;
+		 * all three are on the item itself once it is open.
+		 */
 		compact: { type: Boolean, default: false },
 	},
 	emits: ['open', 'open-team', 'action', 'snooze'],
@@ -616,6 +641,53 @@ export default {
 			return ranked.filter(a => a !== ACTION.SNOOZE && a !== ACTION.OPEN)
 		},
 
+		/**
+		 * The compact view's one button (v4.13.60): the most consequential
+		 * verb this row actually offers, or Open when it offers none.
+		 *
+		 * The full view promotes Open because it is the one action every
+		 * row has and the one that leads to all the others (v4.5.25). A
+		 * compact row has no second line to say what else is possible, so
+		 * it promotes the verb instead and keeps Open in the menu — the
+		 * same trade in the other direction.
+		 */
+		compactAction() {
+			return this.menuActions[0] || ACTION.OPEN
+		},
+
+		/**
+		 * What the menu holds, which depends on which view promoted what:
+		 * whichever action is a button is not also an entry. Nothing is
+		 * ever lost — Open rejoins the menu in compact, because that is
+		 * the button the verb took.
+		 */
+		/**
+		 * The compact button's accessible name: the verb *and* the subject.
+		 *
+		 * The visible label is the verb alone, which is the right length for
+		 * a one-line row and useless on its own to anybody reading the page
+		 * through a screen reader — twenty rows of "Approve, button" names
+		 * no row. The full view's Open button has said "Open {title}" since
+		 * v4.5.25 for the same reason; this is that, for a verb that varies.
+		 */
+		compactActionName() {
+			// TRANSLATORS: accessible name of the one action button on a
+			// compact My Work row. {action} is a verb already translated
+			// ("Approve", "Complete", "Open"), {title} is the item's subject.
+			return this.t('teamhub', '{action}: {title}', {
+				action: this.actionLabel(this.compactAction),
+				title: this.item.title,
+			})
+		},
+
+		visibleMenuActions() {
+			if (!this.compact) {
+				return this.menuActions
+			}
+			const rest = this.menuActions.filter(a => a !== this.compactAction)
+			return this.compactAction === ACTION.OPEN ? rest : [...rest, ACTION.OPEN]
+		},
+
 		canSnooze() {
 			return (this.item.availableActions || []).includes(ACTION.SNOOZE)
 		},
@@ -654,6 +726,24 @@ export default {
 			return ACTION_ICONS[action] || FALLBACK_ICON
 		},
 
+		/**
+		 * Take one action, from the button or from the menu (v4.13.60).
+		 *
+		 * Open is not an action the parent performs — it opens the item — so
+		 * it has always had its own event. Both views can now put Open in
+		 * either place, so the choice of event belongs here rather than at
+		 * each call site, where one of the four would have got it wrong.
+		 *
+		 * @param {string} action One of the ACTION values.
+		 */
+		runAction(action) {
+			if (action === ACTION.OPEN) {
+				this.$emit('open', this.item)
+				return
+			}
+			this.$emit('action', { item: this.item, action })
+		},
+
 	},
 }
 </script>
@@ -683,39 +773,75 @@ export default {
 	}
 }
 
-/* v4.5.25 — compact actually does something now.
-   It used to remove the action buttons' labels, and when the row dropped to a
-   single icon button there was nothing left for it to change: the class was
-   applied and styled nothing, so the toggle did nothing. Density is now what
-   the name always implied — vertical space. Roughly 40% shorter rows, so a
-   long Action-required list fits on one screen. */
+/* ── The compact view (v4.5.25, rebuilt v4.13.60) ─────────────────────────
+   One line per item: the subject, where it came from, the one action worth a
+   button and the menu. That is Justin's list and it is four things, so the
+   three cells that are not on it — the team, the reason and the deadline —
+   are not hidden text but gone from the grid, which is what lets the title
+   have the width they were using.
+
+   `display: none` rather than `visibility`, so the cells give up their grid
+   tracks too and the two-column template below is what the row actually
+   lays out. The narrow-viewport rules at the foot of this file turn the row
+   into a wrapping flex container and give those cells an `order`; one class
+   more here (0,2,0 against 0,1,0) is what keeps compact compact on a phone
+   without an `!important`.
+
+   Everything the full row can do, the compact row can still do: the second
+   line's disclosures move into nothing, but the roster and the workflow
+   tracker are both on the item once it is open, and the menu holds every
+   verb either view promoted. */
 .mywork-row--compact {
+	grid-template-columns: minmax(0, 1fr) auto;
 	padding-top: 4px;
 	padding-bottom: 4px;
 	row-gap: 0;
 
-	.mywork-row__sub {
-		/* The second line is the first thing to go: it is context, and in
-		   compact mode the user has chosen density over context. */
+	.mywork-row__cell,
+	.mywork-row__roster,
+	.mywork-row__workflow {
 		display: none;
 	}
 
-	/* v4.8.20 — except the roster disclosure. Hiding the whole second line
-	   also hid "2 of 4 reviewed", which is not context but the answer to the
-	   question the row exists to raise — and the only way to reach the names.
-	   Compact should cost density, not a control. */
-	.mywork-row__sub:has(.mywork-row__roster-toggle) {
-		display: block;
-
-		> *:not(.mywork-row__roster-toggle) {
-			display: none;
-		}
+	/* One line, so the glyph sits on it rather than at the top of a
+	   two-line block. */
+	.mywork-row__main {
+		align-items: center;
 	}
 
-	.mywork-row__team,
-	.mywork-row__reason-text,
-	.mywork-row__due {
-		font-size: var(--th-font-micro, 11px);
+	/* Title and source on one line, not two: the second line *is* the thing
+	   this view gives up, so the one piece of it worth keeping comes up
+	   beside the title rather than under it. */
+	.mywork-row__text {
+		flex-direction: row;
+		align-items: center;
+		gap: var(--th-space-sm, 8px);
+	}
+
+	.mywork-row__sub {
+		flex: 0 0 auto;
+	}
+
+	/* The source, and nothing else from that line. v4.8.20 kept the roster
+	   disclosure here when compact was a density toggle and the row still had
+	   a second line to keep it on; this view has one line and four things on
+	   it, and "2 of 4 reviewed" is on the item it opens. */
+	.mywork-row__sub > *:not(.mywork-row__source) {
+		display: none;
+	}
+
+	/* The whole slack goes to the subject, which is the one thing a reader
+	   scans a compact list for. */
+	.mywork-row__title {
+		flex: 0 1 auto;
+		white-space: nowrap;
+	}
+
+	/* A labelled button, so it must not be squeezed to its ellipsis by a long
+	   title in the column beside it. */
+	.mywork-row__primary {
+		flex: 0 0 auto;
+		white-space: nowrap;
 	}
 }
 

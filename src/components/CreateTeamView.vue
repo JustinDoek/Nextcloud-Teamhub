@@ -143,8 +143,8 @@
                         </p>
                         <ul class="ctv__services-list">
                             <li v-for="service in serviceClaim.availableServices" :key="service.serviceKey">
-                                <strong>{{ service.label }}</strong>
-                                <span>{{ service.description }}</span>
+                                <span class="ctv__service-name">{{ service.label }}</span>
+                                <span class="ctv__service-desc">{{ service.description }}</span>
                             </li>
                         </ul>
                     </div>
@@ -170,7 +170,7 @@
                         :options="[...policyProfiles.map(p => ({ id: p.profileKey, label: p.label }))]"
                         :reduce="o => o.id"
                         :clearable="false"
-                        :placeholder="t('teamhub', 'Choose a policy…')" />
+                        :placeholder="t('teamhub', 'Choose a policy')" />
                     <span v-if="policyError" class="ctv__error">{{ policyError }}</span>
 
                     <!-- v4.8.7 — the administrator's own words about this
@@ -224,7 +224,7 @@
                         <span class="ctv__label-optional">{{ t('teamhub', '(optional)') }}</span>
                     </label>
                     <p id="ctv-expires-hint" class="ctv__hint">
-                        {{ t('teamhub', 'Leave empty for a team with no end date. If you set one, the team keeps working after it passes — nothing is deleted — but its administrators and a Nextcloud administrator are reminded a week beforehand, and the date can be extended at any time.') }}
+                        {{ t('teamhub', 'Leave empty for a team with no end date. If you set one, the team keeps working after it passes (nothing is deleted), but its administrators and a Nextcloud administrator are reminded a week beforehand, and the date can be extended at any time.') }}
                     </p>
                     <div class="ctv__expiry-row">
                         <input
@@ -264,7 +264,7 @@
                         <NcTextField
                             v-model="memberSearch"
                             :label="t('teamhub', 'Search members')"
-                            :placeholder="t('teamhub', 'Search by name or username...')"
+                            :placeholder="t('teamhub', 'Search by name or username')"
                             @input="onMemberSearch" />
                         <div v-if="userResults.length > 0" class="ctv__user-results">
                             <div
@@ -286,14 +286,16 @@
                          InviteMemberModal: SSO accounts (user_oidc, user_saml)
                          are created on first login, so a colleague who has
                          never signed in cannot be found yet. -->
+                    <!-- The live region stays on the wrapper: NcEmptyContent
+                         is not one, and a search result that appears without a
+                         sound is a result a screen reader never hears. -->
                     <div v-if="memberSearchEmpty" class="ctv__search-empty" role="status">
-                        <p class="ctv__search-empty-headline">
-                            {{ t('teamhub', 'No users or groups found') }}
-                        </p>
                         <!-- TRANSLATORS: hint shown when a user-search returns zero results — explains that SSO-provisioned users (Microsoft Entra, SAML, OIDC) only appear after their first Nextcloud login -->
-                        <p class="ctv__hint">
-                            {{ t('teamhub', 'If this colleague was just added via single sign-on (Microsoft Entra, SAML, or OIDC), they need to sign in to Nextcloud once before they can be added to a team.') }}
-                        </p>
+                        <NcEmptyContent
+                            :name="t('teamhub', 'No users or groups found')"
+                            :description="t('teamhub', 'If this colleague was just added via single sign-on (Microsoft Entra, SAML, or OIDC), they need to sign in to Nextcloud once before they can be added to a team.')">
+                            <template #icon><AccountSearchOutline :size="ICON_XL" /></template>
+                        </NcEmptyContent>
                     </div>
                     <!-- v4.8.7 — members carry a role. A list rather than the
                          old chip row: a chip is the wrong shape once each one
@@ -306,7 +308,7 @@
                             <div v-if="m.type === 'group'" class="ctv__group-avatar ctv__group-avatar--small">
                                 <AccountGroup :size="ICON_BODY" aria-hidden="true" />
                             </div>
-                            <NcAvatar v-else :user="m.id" :display-name="m.displayName" :size="24" :hide-status="true" />
+                            <NcAvatar v-else :user="m.id" :display-name="m.displayName" :size="AVATAR_SM" :hide-status="true" />
 
                             <span class="ctv__member-name">{{ m.displayName }}</span>
 
@@ -319,7 +321,7 @@
                                 :model-value="m.level || 1"
                                 class="ctv__select ctv__select--role"
                                 @update:model-value="setMemberLevel(m, Number($event))"
-                                :options="[{ id: 1, label: t('teamhub', 'Member') }, { id: 4, label: t('teamhub', 'Moderator') }, { id: 8, label: t('teamhub', 'Team admin') }, { id: 9, label: t('teamhub', 'Team owner') }]"
+                                :options="roleOptions"
                                 :reduce="o => o.id"
                                 :clearable="false" />
 
@@ -338,7 +340,7 @@
                     </ul>
 
                     <p v-if="form.members.some(m => m.type === 'group')" class="ctv__hint">
-                        {{ t('teamhub', 'A group cannot own a team, so Team owner is unavailable for groups.') }}
+                        {{ t('teamhub', 'A group cannot hold a team, so that choice is unavailable for groups.') }}
                     </p>
 
                     <!-- v4.8.10 — says what actually happens to the creator.
@@ -348,8 +350,8 @@
                     <p v-if="appointedOwner" class="ctv__policy-note">
                         <AccountArrowRight :size="ICON_BODY" aria-hidden="true" />
                         {{ creatorStaysOnTeam
-                            ? t('teamhub', '{name} becomes the owner at the end. You stay on the team, because you added yourself to the list.', { name: appointedOwner.displayName })
-                            : t('teamhub', '{name} becomes the owner at the end and you leave the team. Add yourself to the list above if you want to stay on it.', { name: appointedOwner.displayName }) }}
+                            ? t('teamhub', '{name} takes the team over at the end. You stay on the team, because you added yourself to the list.', { name: appointedOwner.displayName })
+                            : t('teamhub', '{name} takes the team over at the end and you leave the team. Add yourself to the list above if you want to stay on it.', { name: appointedOwner.displayName }) }}
                     </p>
 
                     <!-- v4.9.6 — the OpenProject Workspace template: every
@@ -448,7 +450,15 @@
                      screen, because everything below it says "ready". -->
                 <p v-if="roleResult?.owner?.status === 'failed'" class="ctv__done-warn">
                     <AlertCircle :size="ICON_BODY" aria-hidden="true" />
-                    {{ t('teamhub', 'The team was created, but ownership could not be transferred. You are still the owner — you can hand over from Manage team.') }}
+                    {{ t('teamhub', 'The team was created, but it could not be handed over. You still hold it. You can hand it over from Manage team.') }}
+                </p>
+                <!-- v4.13.28 — the template did not save. Above the service
+                     claim because it is the broader failure: without a
+                     template the team has no integrations, no badge and no
+                     expiry, whatever else succeeded. -->
+                <p v-if="templateError" class="ctv__done-warn">
+                    <AlertCircle :size="ICON_BODY" aria-hidden="true" />
+                    {{ templateError }}
                 </p>
                 <!-- v4.10.23 — the box was ticked and the claim did not
                      land. The team exists, so "ready" is true; what is not
@@ -466,16 +476,16 @@
                 <p v-else-if="roleResult?.owner?.status === 'transferred'" class="ctv__done-note">
                     <AccountArrowRight :size="ICON_BODY" aria-hidden="true" />
                     {{ creatorLeftTeam
-                        ? t('teamhub', '{name} is now the owner and you have left the team.', { name: appointedOwnerName })
-                        : t('teamhub', '{name} is now the owner of this team.', { name: appointedOwnerName }) }}
+                        ? t('teamhub', '{name} has taken the team over and you have left it.', { name: appointedOwnerName })
+                        : t('teamhub', '{name} has taken this team over.', { name: appointedOwnerName }) }}
                 </p>
 
-                <p v-if="provisioned.length" class="ctv__done-summary">
-                    {{ t('teamhub', 'Set up for this team:') }}
-                    <span class="ctv__done-chips">
-                        <span v-for="item in provisioned" :key="item" class="ctv__done-chip">{{ item }}</span>
-                    </span>
-                </p>
+                <div v-if="provisioned.length" class="ctv__done-summary">
+                    <p class="ctv__done-summary-text">{{ t('teamhub', 'Set up for this team:') }}</p>
+                    <div class="ctv__done-chips">
+                        <NcChip v-for="item in provisioned" :key="item" no-close variant="tertiary" :text="item" />
+                    </div>
+                </div>
 
                 <!-- v4.8.10 — none of the hand-off actions work once the
                      creator has left: Open team, Invite people and Review apps
@@ -494,7 +504,7 @@
                 </template>
 
                 <template v-else>
-                    <p class="ctv__done-next-label">{{ t('teamhub', 'What’s next') }}</p>
+                    <h4 class="ctv__done-next-label">{{ t('teamhub', 'What’s next') }}</h4>
                     <div class="ctv__done-actions">
                         <NcButton
                             :variant="noMembersInvited ? 'primary' : 'secondary'"
@@ -553,13 +563,19 @@
 import { translate as t } from '@nextcloud/l10n'
 import { shiftToday } from '../lib/localDate.js'
 import { generateUrl } from '@nextcloud/router'
-import { ICON_BODY, ICON_INLINE, ICON_LARGE, ICON_XL } from '../constants/uiTokens.js'
+import { AVATAR_SM, ICON_BODY, ICON_INLINE, ICON_LARGE, ICON_XL } from '../constants/uiTokens.js'
+// v4.13.25 — which template cards this wizard offers, and in what order.
+// A pure function over the server's template set, because the literal array
+// that used to stand in `teamTypes()` could not offer a template an
+// administrator created.
+import { buildTemplateCards } from '../lib/teamTemplateCards.js'
 // v4.8.10 — to tell whether the creator named themselves as a member, which
 // decides whether they stay on the team after handing it over.
 import { getCurrentUser } from '@nextcloud/auth'
-import { showError, showSuccess } from '@nextcloud/dialogs'
+import { showError, showSuccess, showConfirmation } from '@nextcloud/dialogs'
+import { shouldOpenCreatedTeam } from '../lib/newTeamHandoff.js'
 import axios from '@nextcloud/axios'
-import { NcButton, NcTextField, NcTextArea, NcAvatar, NcLoadingIcon, NcCheckboxRadioSwitch, NcSelect } from '@nextcloud/vue'
+import { NcButton, NcChip, NcEmptyContent, NcTextField, NcTextArea, NcAvatar, NcLoadingIcon, NcCheckboxRadioSwitch, NcSelect } from '@nextcloud/vue'
 import Check from 'vue-material-design-icons/Check.vue'
 import Close from 'vue-material-design-icons/Close.vue'
 import CheckCircle from 'vue-material-design-icons/CheckCircle.vue'
@@ -599,6 +615,7 @@ import {
     pumpOperation, roleLabel,
 } from '../lib/provisioning.js'
 import AccountPlus from 'vue-material-design-icons/AccountPlus.vue'
+import AccountSearchOutline from 'vue-material-design-icons/AccountSearchOutline.vue'
 import CogOutline from 'vue-material-design-icons/CogOutline.vue'
 import ArrowRight from 'vue-material-design-icons/ArrowRight.vue'
 // v4.10.23 — the Service template card and its Nextcloud Services claim.
@@ -634,12 +651,12 @@ const CONFIG_FIELD_KEYS = {
 export default {
     name: 'CreateTeamView',
     components: {
-         NcSelect, NcButton, NcTextField, NcTextArea, NcAvatar, NcLoadingIcon, NcCheckboxRadioSwitch,
+        NcSelect, NcButton, NcChip, NcEmptyContent, NcTextField, NcTextArea, NcAvatar, NcLoadingIcon, NcCheckboxRadioSwitch,
         Check, Close, CheckCircle, AlertCircle,
         Chat, Folder, Calendar, CardText, Briefcase, AccountMultiple, AccountGroup, AccountArrowRight, OfficeBuildingOutline,
         Gavel, AccountClock, TimelineClockOutline, FileDocumentOutline, BookOpenOutline, LockOutline,
         BriefcaseCheckOutline, OpenProjectProjectPicker,
-        AccountPlus, CogOutline, ArrowRight,
+        AccountPlus, AccountSearchOutline, CogOutline, ArrowRight,
         LifebuoyIcon, HelpCircleOutline,
         BulkCreateTeams, PersonRow,
         OpenProjectSetupStep, ProvisioningRolePreview, ProvisioningReviewStep, ProvisioningProgress,
@@ -647,6 +664,7 @@ export default {
     emits: ['created', 'cancel'],
     data() {
         return {
+            AVATAR_SM,
             ICON_BODY,
             ICON_INLINE,
             ICON_LARGE,
@@ -724,6 +742,11 @@ export default {
             // Set when the claim posted after creation failed — shown on the
             // success screen, because the team itself was created.
             serviceClaimError: '',
+            // v4.13.28 — set when the template write after creation failed.
+            // Shown on the success screen for the same reason: the team is
+            // real, but it has no template, and everything the template was
+            // chosen for is therefore off. See the call site.
+            templateError: '',
             // The sentence under the project picker: a missing pick at
             // step 1, or (v4.9.4) the reason the create call refused the
             // project — the wizard comes back here with no team made.
@@ -796,7 +819,7 @@ export default {
                 },
                 modules: {
                     decisions: true,
-                    presence: false,
+                    presence: true,
                     timeline: false,
                     messages: true,
                     pages: true,
@@ -894,7 +917,7 @@ export default {
                 const decision = this.form.decisions[key]
                 const opRole = mapping[roleKey]?.name
                 let note = opRole ? t('teamhub', 'OpenProject: {role}', { role: opRole }) : t('teamhub', 'No OpenProject access')
-                if (decision === 'teamhub_only') note = t('teamhub', 'Team only — no OpenProject account')
+                if (decision === 'teamhub_only') note = t('teamhub', 'Team only: no OpenProject account')
                 return { id: m.id, type: m.type || 'user', displayName: m.displayName || m.id, teamRole: roleKey, note, omitted: decision === 'omit' }
             })
 
@@ -932,256 +955,25 @@ export default {
                 { id: 'bulk', label: t('teamhub', 'Multiple teams') },
             ]
         },
+        /**
+         * The template cards. The rule lives in `src/lib/teamTemplateCards.js`
+         * — see that file for why it is not here any more (v4.13.25).
+         *
+         * In short: this was a literal array of five cards, so the template a
+         * v4.13.24 administrator created had none and could not be chosen.
+         * The third surface in two releases to answer "what should I render?"
+         * with a list of what exists rather than a rule, after the widget grid
+         * and the tab bar (DESIGN §2.199) — so it moves to a pure function
+         * with a test on it, as those two did.
+         */
         teamTypes() {
-            const types = [
-                { id: 'project', label: t('teamhub', 'Project'), description: t('teamhub', 'Time-bound work with clear goals'), icon: 'Briefcase', accent: 'project' },
-                { id: 'collaboration', label: t('teamhub', 'Collaboration'), description: t('teamhub', 'Ongoing team knowledge sharing'), icon: 'AccountMultiple', accent: 'collaboration' },
-                { id: 'department', label: t('teamhub', 'Department'), description: t('teamhub', 'Organizational department or unit'), icon: 'OfficeBuildingOutline', accent: 'department' },
-            ]
-            // v4.9.16 — no card at all while TeamHub's OpenProject module is
-            // unlicensed or switched off: a module that is off is hidden, not
-            // explained (the Presence and Decisions rule). Locked-with-reason
-            // below is for the module being on and *this creator* unable to
-            // use it yet.
-            // v4.10.23 — the Service desk. Absent, not locked, while the
-            // instance has no licence: Service Teams have no reduced
-            // version, so a card that explains what a licence would buy is
-            // the wrong shape here (the OpenProject card's rule, and
-            // CLAUDE.md § Permissions). `null` while the status fetch is in
-            // flight is "not yet known" rather than "off", so the row of
-            // cards does not reflow when the answer lands.
-            if (this.serviceClaim === null || this.serviceClaim.available) {
-                types.push({
-                    id: 'service',
-                    label: t('teamhub', 'Service team'),
-                    description: t('teamhub', 'Answers requests from the organisation'),
-                    icon: 'LifebuoyIcon',
-                    accent: 'service',
-                })
-            }
-            if (!this.openProjectModuleOff) {
-                // v4.9.3 — a project whose engine is OpenProject. Locked, with
-                // the reason, when the creator cannot use the integration:
-                // the project must be picked here, so a card that cannot
-                // finish is a card that must say so before it is clicked.
-                types.push({
-                    id: 'openproject',
-                    label: t('teamhub', 'OpenProject project'),
-                    description: t('teamhub', 'A project managed in OpenProject'),
-                    icon: 'BriefcaseCheckOutline',
-                    accent: 'openproject',
-                    locked: !!this.openProjectLockedReason,
-                    lockedReason: this.openProjectLockedReason,
-                })
-            }
-            return types
+            return buildTemplateCards(this.templates, {
+                serviceAvailable: this.serviceClaim === null ? null : !!this.serviceClaim.available,
+                openProjectModuleOff: this.openProjectModuleOff,
+                openProjectLockedReason: this.openProjectLockedReason,
+            })
         },
 
-        /**
-         * v4.9.16 — the capability check said TeamHub's OpenProject module is
-         * unlicensed or switched off. Null capabilities (still loading) are
-         * not "off": the card is locked meanwhile, not absent, so the row of
-         * cards does not reflow when the answer arrives on an instance that
-         * has the module.
-         */
-        openProjectModuleOff() {
-            if (this.openProjectCaps === null) return false
-            if (this.openProjectCaps.moduleAvailable === false) return true
-            return isOpModuleCode(this.openProjectCaps.errorCode)
-        },
-
-        /**
-         * v4.9.3 — why the OpenProject template cannot be chosen right now,
-         * or '' when it can. Null capabilities (still loading) lock it too:
-         * a card that unlocks a second later is better than one that lets
-         * the user pick a template they then cannot finish.
-         */
-        openProjectLockedReason() {
-            if (this.openProjectCaps === null) return ''
-            if (!this.openProjectCaps.errorCode) return ''
-            return this.openProjectCaps.userMessage || opErrorMessage(this.openProjectCaps.errorCode)
-        },
-        /**
-         * Whether this kind of team can be given an expiration date.
-         *
-         * **v4.8.3 — read off the template row**, which an administrator sets
-         * on Admin → TeamHub → Policy ("Enable team expiration"). It used to be
-         * hard-coded to Collaboration and Project, mirroring
-         * `TeamExpiryService::ELIGIBLE_TYPES`.
-         *
-         * Falls back to the old rule while `templates` is still empty, so the
-         * field does not flicker in and then out during the mount fetch.
-         *
-         * The server agrees: `TeamExpiryService::isEligibleTemplate()` reads
-         * the same row, so enabling expiration on the Department template both
-         * shows the field here and has the date accepted there. The two used to
-         * be a hard-coded pair in two places, which is exactly the shape of bug
-         * this change exists to remove.
-         */
-        expiryAvailable() {
-            if (this.templates.length) {
-                return !!this.activeTemplate?.expiryEnabled
-            }
-            return this.form.teamType === 'collaboration' || this.form.teamType === 'project'
-        },
-
-        /**
-         * The earliest date the picker will accept: tomorrow. The server
-         * rejects anything at or before now, and letting the browser refuse it
-         * first saves a round trip to be told so.
-         */
-        expiryMinDate() {
-            return shiftToday({ days: 1 })
-        },
-
-        projectModes() {
-            const advancedLocked = !this.licenseCanCreateAdvanced
-            return [
-                {
-                    id: 'advanced',
-                    // TRANSLATORS: project setup mode — the full guided project experience
-                    label: t('teamhub', 'Advanced'),
-                    description: advancedLocked
-                        // TRANSLATORS: shown on the Advanced project mode tile when the instance has no valid business license
-                        ? t('teamhub', 'This feature requires a license — ask your admin.')
-                        : t('teamhub', 'Guided project lifecycle — phases (Initiation, Planning, Execution, Closing) and project tools.'),
-                    locked: advancedLocked,
-                },
-                {
-                    id: 'basic',
-                    // TRANSLATORS: project setup mode — the simple, no-lifecycle project experience
-                    label: t('teamhub', 'Basic'),
-                    description: t('teamhub', 'A project-flavoured team with the familiar setup — no lifecycle tools.'),
-                    locked: false,
-                },
-            ]
-        },
-        appOptions() {
-            const filesDesc = this.groupfoldersAvailable
-                ? t('teamhub', 'Create a team folder for this team')
-                : t('teamhub', 'Create a shared folder for this team')
-            const all = [
-                { id: 'talk',     label: 'Talk',     description: t('teamhub', 'Create a group conversation for this team'), icon: Chat,     available: this.talkAvailable },
-                { id: 'files',    label: 'Files',    description: filesDesc,                                                  icon: Folder,   available: true },
-                { id: 'calendar', label: 'Calendar', description: t('teamhub', 'Create a shared calendar for this team'),     icon: Calendar, available: this.calendarAvailable },
-                { id: 'deck',     label: 'Deck',     description: t('teamhub', 'Create a task board for this team'),          icon: CardText, available: this.deckAvailable },
-            ]
-            // v4.8.4 — an integration the classification does not permit is
-            // removed, not disabled. A disabled row invites the user to wonder
-            // what they would have to do to enable it; the answer is "be a
-            // different kind of team", which is not an action. The server
-            // filters the same list in ResourceService, so this is the
-            // courtesy half — DESIGN §2.103 on why the UI is never the gate.
-            const allowed = this.allowedIntegrations
-            return all
-                .filter(a => a.available)
-                .filter(a => allowed === null || allowed.includes(a.id))
-        },
-        moduleOptions() {
-            return [
-                {
-                    id: 'decisions',
-                    label: t('teamhub', 'Decisions'),
-                    description: t('teamhub', 'Track and record team decisions'),
-                    icon: Gavel,
-                    available: this.decisionsModuleEnabled,
-                },
-                {
-                    id: 'presence',
-                    label: t('teamhub', 'Presence'),
-                    description: t('teamhub', 'Track team member availability'),
-                    icon: AccountClock,
-                    available: this.presenceModuleEnabled,
-                },
-                {
-                    id: 'timeline',
-                    label: t('teamhub', 'Timeline'),
-                    description: t('teamhub', 'Visualize team activity over time'),
-                    icon: TimelineClockOutline,
-                    available: true,
-                },
-                {
-                    id: 'messages',
-                    label: t('teamhub', 'Messages'),
-                    description: t('teamhub', 'Team message stream — posts, questions, polls, pinned messages'),
-                    icon: MessageOutline,
-                    available: true,
-                },
-            ]
-        },
-
-        /**
-         * v4.4.10 — Intravox + Collective sit in the App integrations block,
-         * not the Team modules block. They each provision a resource (a
-         * documentation page / a wiki collective) rather than toggle a
-         * feature, so they belong next to Calendar and Deck rather than next
-         * to Decisions and Presence. Rendered as toggle-only rows (no
-         * New/Existing chooser, no ResourcePicker) because there is no
-         * existing intravox page or collective to connect to — always create.
-         *
-         * `moduleKey` names the boolean in form.modules that stores the
-         * choice, so submit()/progressTasks/applyTemplateDefaults keep
-         * working against the same data model.
-         *
-         * Labels are proper app names, deliberately unwrapped by t() to match
-         * the pattern for Talk / Files / Calendar / Deck above.
-         */
-        toggleOnlyAppOptions() {
-            return [
-                {
-                    id: 'intravox',
-                    moduleKey: 'pages',
-                    label: 'Intravox',
-                    description: t('teamhub', 'Create a team page on the intranet provided by Intravox.'),
-                    icon: FileDocumentOutline,
-                    available: this.intravoxAvailable,
-                },
-                {
-                    id: 'collective',
-                    moduleKey: 'wiki',
-                    label: 'Collectives',
-                    description: t('teamhub', 'Create a collective for this team.'),
-                    icon: BookOpenOutline,
-                    available: this.collectivesAvailable,
-                },
-            ]
-        },
-
-        /**
-         * v4.4.10 — single source of truth for module availability, consumed
-         * by applyTemplateDefaults(). Previously that walked moduleOptions
-         * and treated "not in the list" as "unavailable"; now the toggle-only
-         * apps are not in moduleOptions but their form.modules entries still
-         * need to be gated the same way, so both lists reference this map.
-         */
-        moduleAvailability() {
-            return {
-                decisions: this.decisionsModuleEnabled,
-                presence: this.presenceModuleEnabled,
-                timeline: true,
-                messages: true,
-                pages: this.intravoxAvailable,
-                wiki: this.collectivesAvailable,
-            }
-        },
-        /**
-         * The active template's defaults.
-         *
-         * **v4.8.3 — the mirror is gone.** This used to be a hand-maintained
-         * copy of `lib/Constants/TeamTemplateProfiles.php`, and the two had to
-         * be edited together. Templates are admin-editable rows now; the whole
-         * set is fetched once in `mounted()` from `GET /api/v1/templates`, so
-         * switching template is still a local lookup and the round trip is not
-         * in the critical path — which was the objection that kept the mirror
-         * alive.
-         *
-         * `subtitle` and `placeholder` stay here: they are wizard copy, never
-         * had a server side, and belong with the other translated strings.
-         *
-         * `templates` is empty until the fetch lands. Returning a null-shaped
-         * profile rather than a guess means `applyTemplateDefaults()` ticks
-         * nothing before the answer arrives; it is called again on load.
-         */
         templateProfile() {
             const row = this.templates.find(x => x.templateKey === this.form.teamType)
                 || this.templates.find(x => x.templateKey === 'collaboration')
@@ -1307,7 +1099,33 @@ export default {
         // `applyPolicyToForm()` writes them into `form.config` directly.
 
         /**
-         * The member appointed team owner, if any (v4.8.7).
+         * The four role choices in the member list (v4.13.56).
+         *
+         * A computed rather than an inline array in the template, because the
+         * level-9 entry needed a note and an HTML comment cannot sit between
+         * a tag's attributes.
+         *
+         * **Level 9 is no longer labelled "Team owner"** (DESIGN §2.223).
+         * Nothing inside a team names an owner any more, so the entry says
+         * what picking it actually does: that person ends up holding the team.
+         * The level itself is unchanged, and so is everything downstream of
+         * it — `setMemberLevel()` still allows only one, and the hand-over
+         * still runs at the end of creation.
+         */
+        roleOptions() {
+            return [
+                { id: 1, label: t('teamhub', 'Member') },
+                { id: 4, label: t('teamhub', 'Moderator') },
+                { id: 8, label: t('teamhub', 'Team admin') },
+                // TRANSLATORS: role choice when creating a team — this person
+                // becomes a team admin AND the team is handed over to them at
+                // the end of creation, so they hold it instead of the creator.
+                { id: 9, label: t('teamhub', 'Team admin, takes over the team') },
+            ]
+        },
+
+        /**
+         * The member appointed to take the team over, if any (v4.8.7).
          *
          * Null means the creator keeps it, which is what Circles does anyway —
          * so the common case costs no extra call at the end of creation.
@@ -1901,10 +1719,14 @@ export default {
                 let { data } = await axios.post(url, { confirm: false })
                 if (data.status === 'confirm_required') {
                     const parts = (data.needsConfirm || []).map(k => k).join(', ')
-                    // eslint-disable-next-line no-alert
-                    if (!window.confirm(t('teamhub', 'These parts may already hold content: {parts}. Remove the team and everything created for it? The OpenProject project is never deleted by TeamHub.', { parts }))) {
-                        return
-                    }
+                    const confirmed = await showConfirmation({
+                        name: t('teamhub', 'Remove this team?'),
+                        text: t('teamhub', 'These parts may already hold content: {parts}. Remove the team and everything created for it? The OpenProject project is never deleted by TeamHub.', { parts }),
+                        labelConfirm: t('teamhub', 'Remove team'),
+                        labelReject: t('teamhub', 'Cancel'),
+                        severity: 'warning',
+                    })
+                    if (!confirmed) return
                     ({ data } = await axios.post(url, { confirm: true }))
                 }
                 this.provisioningState = data
@@ -1926,6 +1748,12 @@ export default {
             this.roleResult = state.result?.handover?.owner ? { owner: state.result.handover.owner } : null
             this.appointedOwnerName = this.appointedOwner?.displayName || ''
             this.creationDone = true
+            // A completed workspace opens immediately; partial provisioning
+            // still shows the success/attention screen with recovery actions.
+            if (this.shouldOpenCreatedTeam()) {
+                showSuccess(t('teamhub', 'Team created'))
+                this.finish(null)
+            }
         },
 
         backToReview() {
@@ -2046,7 +1874,7 @@ export default {
             // collective on toggle-on, so a single PUT after team-create is
             // enough — no separate page-create step to schedule here.
             if (this.collectivesAvailable && this.form.modules.wiki) tasks.push({ label: t('teamhub', 'Enabling Collectives'), status: 'waiting' })
-            const hasModuleConfig = this.form.modules.presence || this.form.modules.decisions || !this.form.modules.timeline
+            const hasModuleConfig = this.presenceModuleEnabled || this.form.modules.decisions || !this.form.modules.timeline
             if (hasModuleConfig) tasks.push({ label: t('teamhub', 'Configuring team modules'), status: 'waiting' })
             if (this.form.teamType === 'project') tasks.push({ label: t('teamhub', 'Setting up project'), status: 'waiting' })
             // v4.8.7 — last step. Labelled for the handover when there is one,
@@ -2246,15 +2074,25 @@ export default {
                     } catch { this.setTask(i++, 'error') }
                 }
 
-                // v4.0.2 — persist the template label so the Team info widget
-                // and Browse Teams can render it. Fire-and-forget: a failure
-                // here shouldn't block team creation completion; the label
-                // just won't show until an admin re-saves the team type.
+                // v4.0.2 — persist the template, which is what the Team info
+                // widget and Browse Teams render the badge from.
                 // v4.6.13 — the optional expiration date rides this same call.
                 // It is only meaningful next to the template (Department teams
                 // never expire), the server re-checks that, and sending it here
                 // means one round trip instead of two. Blank is sent as blank
                 // and means "no end date".
+                //
+                // v4.13.28 — **this was `catch { /* non-fatal */ }` and it was
+                // not non-fatal.** The write is what gives the team a row in
+                // `teamhub_team_type`, and a team with no row has no template:
+                // `IntegrationStateService` answers `REASON_NO_TEMPLATE`, so
+                // every integration the template included is ineffective,
+                // Manage team lists no packages, no widget or tab renders, and
+                // the expiry above is dropped. The team still exists and is
+                // usable, which is why this does not fail creation — but the
+                // one person who can fix it is the one reading this screen, so
+                // it is reported here rather than discovered a day later.
+                // Same shape as the service claim below, for the same reason.
                 try {
                     await axios.put(
                         generateUrl(`/apps/teamhub/api/v1/teams/${team.id}/type`),
@@ -2263,7 +2101,11 @@ export default {
                             expiresOn: this.expiryAvailable ? (this.form.expiresOn || '') : '',
                         }
                     )
-                } catch { /* non-fatal */ }
+                } catch (e) {
+                    this.templateError = e?.response?.data?.error
+                        || t('teamhub', 'The team was created, but its template could not be saved. Integrations and the expiration date that come with the template will not apply until an administrator sets the template again.')
+                    console.error('[TeamHub][CreateTeamView] Saving the team template failed', e)
+                }
 
                 // 8c. Nextcloud Services (v4.10.23) — after the type call,
                 // because the claim route refuses a team that is not a
@@ -2327,6 +2169,13 @@ export default {
                 await new Promise(r => setTimeout(r, 600))
                 this.createdTeam = team
                 this.creationDone = true
+                // Successful creation should open the new dashboard without
+                // requiring an extra "Open team" click. Keep the review panel
+                // for partial failures, or if the creator left the team.
+                if (this.shouldOpenCreatedTeam()) {
+                    showSuccess(t('teamhub', 'Team created'))
+                    this.finish(null)
+                }
 
             } catch (error) {
                 if (i < this.progressTasks.length) this.setTask(i, 'error')
@@ -2373,7 +2222,20 @@ export default {
          * home. Kept as a parent-side concern because CreateTeamView doesn't
          * own routing.
          */
+        shouldOpenCreatedTeam() {
+            return shouldOpenCreatedTeam({
+                team: this.createdTeam,
+                creatorLeftTeam: this.creatorLeftTeam,
+                templateError: this.templateError,
+                serviceClaimError: this.serviceClaimError,
+                roleResult: this.roleResult,
+                progressTasks: this.isWorkspace ? [] : this.progressTasks,
+                provisioningState: this.isWorkspace ? this.provisioningState : null,
+            })
+        },
+
         finish(intent) {
+            if (!this.createdTeam?.id) return
             this.$emit('created', this.createdTeam, intent)
         },
 
@@ -2451,11 +2313,11 @@ export default {
 
         async saveModuleConfig(teamId) {
             const calls = []
-            if (this.form.modules.presence && this.presenceModuleEnabled) {
+            if (this.presenceModuleEnabled) {
                 calls.push(
                     axios.put(
                         generateUrl(`/apps/teamhub/api/v1/teams/${teamId}/presence/config`),
-                        { presence_enabled: 1 }
+                        { presence_enabled: this.form.modules.presence ? 1 : 0 }
                     )
                 )
             }
@@ -2634,7 +2496,7 @@ export default {
 
 .ctv__field { display: flex; flex-direction: column; gap: 8px; }
 
-.ctv__label { font-size: var(--th-font-body); font-weight: 600; }
+.ctv__label { font-size: var(--th-font-body); font-weight: var(--th-font-weight-regular); }
 .ctv__hint { font-size: var(--th-font-meta); color: var(--color-text-maxcontrast); margin: 0 0 4px; }
 
 /* v4.10.23 — Nextcloud Services: the sentence and its ? button on one row,
@@ -2669,8 +2531,8 @@ export default {
     flex-direction: column;
     font-size: var(--th-font-meta);
 }
-.ctv__services-list strong { font-size: var(--th-font-body); font-weight: 600; }
-.ctv__services-list span { color: var(--color-text-maxcontrast); line-height: 1.4; }
+.ctv__service-name { font-size: var(--th-font-body); font-weight: var(--th-font-weight-medium); }
+.ctv__service-desc { color: var(--color-text-maxcontrast); line-height: 1.4; }
 
 /* v4.8.4 — classification */
 .ctv__select {
@@ -2708,6 +2570,11 @@ export default {
     font-size: var(--th-font-body);
     color: var(--color-text-maxcontrast);
     cursor: pointer;
+    /* Nextcloud's server.css sets `font-weight: bold` on every
+       `button:not(.button-vue, …)`, so a raw-button carve-out hands 700 to
+       every child that does not set its own weight. Reset it here; the
+       active tab picks its weight back up. */
+    font-weight: var(--th-font-weight-regular);
 }
 
 .ctv__mode-tab:hover {
@@ -2823,13 +2690,6 @@ export default {
     margin: 4px 0 8px;
 }
 
-.ctv__setting-lock {
-    display: inline-flex;
-    vertical-align: middle;
-    margin-inline-start: 4px;
-    color: var(--color-text-maxcontrast);
-}
-
 /* v4.6.13 — optional expiration date */
 .ctv__label-optional {
     font-weight: var(--th-font-weight-regular);
@@ -2910,7 +2770,7 @@ export default {
     color: var(--color-primary-element-text);
 }
 
-.ctv__type-name { font-weight: 600; font-size: var(--th-font-body); }
+.ctv__type-name { font-weight: var(--th-font-weight-medium); font-size: var(--th-font-body); }
 .ctv__type-desc { font-size: var(--th-font-meta); color: var(--color-text-maxcontrast); line-height: 1.4; }
 .ctv__type--selected .ctv__type-desc { color: var(--color-primary-element-text); }
 
@@ -2955,7 +2815,7 @@ export default {
     color: var(--color-primary-element-text);
 }
 
-.ctv__mode-name { font-weight: 600; font-size: var(--th-font-body); }
+.ctv__mode-name { font-weight: var(--th-font-weight-medium); font-size: var(--th-font-body); }
 .ctv__mode-desc { font-size: var(--th-font-meta); line-height: 1.4; color: var(--color-text-maxcontrast); }
 .ctv__mode--selected .ctv__mode-desc { color: var(--color-primary-element-text); }
 
@@ -3019,12 +2879,6 @@ export default {
 
 .ctv__search-empty { margin-block-start: var(--th-space-sm); }
 
-.ctv__search-empty-headline {
-    margin: 0 0 var(--th-space-xs);
-    font-size: var(--th-font-meta);
-    font-weight: var(--th-font-weight-semibold);
-}
-
 .ctv__group-avatar {
     width: 32px;
     height: 32px;
@@ -3046,114 +2900,9 @@ export default {
     height: 24px;
 }
 
-.ctv__chips { display: flex; flex-wrap: wrap; gap: 8px; }
-
-.ctv__chip {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 4px 8px 4px 8px;
-    background: var(--color-background-dark);
-    border-radius: var(--border-radius-pill);
-    font-size: var(--th-font-meta);
-}
-
 .ctv__chip-remove {
     display: flex;
     align-items: center;
-}
-
-/* App options */
-.ctv__apps { display: flex; flex-direction: column; gap: 10px; }
-
-.ctv__app {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    padding: 16px 16px;
-    border: 1px solid var(--color-border);
-    border-radius: var(--border-radius-element);
-    cursor: pointer;
-    transition: background var(--animation-quick), border-color var(--animation-quick);
-}
-
-.ctv__app:hover { background: var(--color-background-hover); }
-/* v3.104.5: reverted 3.100.14's full-saturation treatment. The Apps
-   step is a MULTI-select (a project team ticks all four apps by
-   default), so all four tiles turn into solid dark-green blocks with
-   white text on them — the eye reads the whole card as a "primary
-   button" and the app name washes out. Reverted to the light-tint
-   background + dark border pattern used pre-3.100.14: the border tells
-   you it's selected, the light tint is a soft state cue, and both the
-   app name and description keep their normal (readable) text colours.
-   Same reasoning applied to .ctv__module below. */
-.ctv__app:has(.ctv__app-check:checked) {
-    border-color: var(--color-primary-element);
-    background: var(--color-primary-element-light);
-}
-
-/* v4.4.10 — parallels .ctv__module--disabled. Applied to the two toggle-
-   only app rows (Intravox, Collective) when their backing NC app isn't
-   installed. */
-.ctv__app--disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-.ctv__app--disabled:hover { background: transparent; }
-
-.ctv__app-check {
-    width: 18px;
-    height: 18px;
-    cursor: pointer;
-    accent-color: var(--color-primary-element);
-    flex-shrink: 0;
-}
-
-.ctv__app-icon { color: var(--color-primary-element); flex-shrink: 0; }
-.ctv__app-text { display: flex; flex-direction: column; gap: 2px; }
-.ctv__app-name { font-size: var(--th-font-body); font-weight: 600; }
-.ctv__app-desc { font-size: var(--th-font-meta); color: var(--color-text-maxcontrast); }
-
-/* Compact variant: header row with inline toggle, picker below only when needed */
-.ctv__app--compact {
-    display: flex;
-    flex-direction: column;
-    align-items: stretch;
-    gap: 0;
-    cursor: default;
-}
-
-.ctv__app-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.ctv__app-header {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    cursor: pointer;
-    flex: 1;
-    min-width: 0;
-}
-
-/* v4.4.15 — pair of NcButtons acting as a select. Flex so the two
-   buttons sit side by side, small gap so they read as related without
-   the segmented-pill look Justin flagged. No custom button styling —
-   NcButton owns the primary vs secondary variants that carry which
-   mode is active. */
-.ctv__app-mode {
-    display: flex;
-    flex-shrink: 0;
-    gap: 4px;
-}
-
-.ctv__app-picker {
-    margin-inline-start: 56px;
-    margin-top: 8px;
-    margin-bottom: 4px;
-    max-width: 360px;
 }
 
 /* Progress */
@@ -3217,6 +2966,10 @@ export default {
 
 .ctv__done-summary {
     margin: 16px 0 0;
+}
+
+.ctv__done-summary-text {
+    margin: 0;
     font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
 }
@@ -3226,15 +2979,6 @@ export default {
     flex-wrap: wrap;
     gap: 8px;
     margin-top: 8px;
-}
-
-.ctv__done-chip {
-    padding: 4px 8px;
-    border-radius: var(--th-radius-pill);
-    background: var(--color-background-dark);
-    color: var(--color-main-text);
-    font-size: var(--th-font-micro);
-    font-weight: var(--th-font-weight-medium);
 }
 
 .ctv__done-next-label {
@@ -3272,101 +3016,4 @@ export default {
 }
 
 .ctv__footer-right { display: flex; gap: 8px; }
-
-/* Team settings */
-.ctv__settings-groups {
-    display: flex;
-    flex-direction: column;
-    gap: 20px;
-}
-
-.ctv__settings-group {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-}
-
-.ctv__settings-group-label {
-    font-size: var(--th-font-meta);
-    font-weight: 700;
-    color: var(--color-text-maxcontrast);
-    margin-bottom: 8px;
-    display: block;
-}
-
-.ctv__setting {
-    display: flex;
-    align-items: flex-start;
-    gap: 12px;
-    padding: 8px 12px;
-    border-radius: var(--border-radius-element);
-    cursor: pointer;
-    transition: background var(--animation-quick);
-}
-
-.ctv__setting:hover { background: var(--color-background-hover); }
-
-.ctv__setting-name { font-size: var(--th-font-body); font-weight: 500; line-height: 1.3; display: block; }
-.ctv__setting-desc { font-size: var(--th-font-meta); color: var(--color-text-maxcontrast); line-height: 1.4; display: block; }
-
-/* Files — team folders hint */
-.ctv__app-hint {
-    font-size: var(--th-font-micro);
-    color: var(--color-text-maxcontrast);
-    display: block;
-    margin-top: 4px;
-}
-
-/* Team modules */
-.ctv__modules { display: flex; flex-direction: column; gap: 8px; }
-
-.ctv__module {
-    display: flex;
-    align-items: flex-start;
-    gap: 12px;
-    padding: 12px 16px;
-    border: 1px solid var(--color-border);
-    border-radius: var(--border-radius-element);
-    cursor: pointer;
-    transition: background var(--animation-quick), border-color var(--animation-quick);
-}
-
-.ctv__module:hover { background: var(--color-background-hover); }
-/* v3.104.5: reverted 3.100.14's full-saturation treatment — same
-   reasoning as .ctv__app above. Team modules is a multi-select and a
-   fully saturated selected state read as "everything is a primary
-   action" with unreadable module names in white on dark green.
-   Light-tint background + dark border is the correct pattern. */
-.ctv__module:has(.ctv__module-check:checked) {
-    border-color: var(--color-primary-element);
-    background: var(--color-primary-element-light);
-}
-
-.ctv__module--disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
-.ctv__module--disabled:hover { background: transparent; }
-
-.ctv__module-check {
-    width: 16px;
-    height: 16px;
-    margin-top: 4px;
-    accent-color: var(--color-primary-element);
-    flex-shrink: 0;
-    cursor: inherit;
-}
-
-.ctv__module-icon { color: var(--color-primary-element); flex-shrink: 0; margin-top: 1px; }
-.ctv__module--disabled .ctv__module-icon { color: var(--color-text-maxcontrast); }
-.ctv__module-text { display: flex; flex-direction: column; gap: 2px; }
-.ctv__module-name { font-size: var(--th-font-body); font-weight: 600; }
-.ctv__module-desc { font-size: var(--th-font-meta); color: var(--color-text-maxcontrast); }
-
-.ctv__module-unavailable {
-    font-size: var(--th-font-micro);
-    color: var(--color-warning-text);
-    margin-top: 4px;
-}
 </style>

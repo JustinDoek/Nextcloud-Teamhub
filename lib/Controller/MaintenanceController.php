@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace OCA\TeamHub\Controller;
 
+use OCA\TeamHub\Service\IntegrationRegisterService;
+use OCA\TeamHub\Service\AdminSettingsAuditService;
 use OCA\TeamHub\Service\MaintenanceService;
 use OCA\TeamHub\Service\MyWorkService;
 use OCA\TeamHub\Service\OpenProject\TeamOpenProjectLinkService;
@@ -39,6 +41,12 @@ class MaintenanceController extends Controller {
         private MaintenanceService $maintenanceService,
         private TeamExpiryService  $expiryService,
         private TelemetryService   $telemetryService,
+        // v4.13.17 — the integrations register, on the Compliance tab beside
+        // the other checks. Read-only over three tables that already exist.
+        private IntegrationRegisterService $integrationRegister,
+        // v4.13.17 - the telemetry switch is an admin setting, so its change
+        // belongs in the audit log like the rest of them.
+        private AdminSettingsAuditService $settingsAudit,
         private MyWorkService      $myWorkService,
         // v4.9.4 — the one route to removing a team's OpenProject link.
         private TeamOpenProjectLinkService $openProjectLinks,
@@ -168,10 +176,46 @@ class MaintenanceController extends Controller {
     #[AuthorizedAdminSetting(settings: \OCA\TeamHub\Settings\AdminSettings::class)]
     public function saveTelemetry(bool $enabled = true): JSONResponse {
         try {
-            $this->telemetryService->setEnabled($enabled);
+            $this->settingsAudit->recordAround(
+                'admin.telemetry',
+                fn () => $this->telemetryService->setEnabled($enabled),
+            );
             return new JSONResponse(['enabled' => $this->telemetryService->isEnabled()]);
         } catch (\Throwable $e) {
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    /**
+     * GET /api/v1/admin/integrations/register
+     *
+     * Where this instance's team data goes (v4.13.17, DESIGN §2.194). One row
+     * per integration, off-server ones first, plus the external hosts teams
+     * are connected to. The artefact an ISO 27001 A.5.19 supplier review asks
+     * for, assembled from the switches, the registry and the ledger.
+     */
+    #[AuthorizedAdminSetting(settings: \OCA\TeamHub\Settings\AdminSettings::class)]
+    #[NoCSRFRequired]
+    public function integrationRegister(): JSONResponse {
+        try {
+            return new JSONResponse($this->integrationRegister->register());
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Could not build the integrations register.');
+        }
+    }
+
+    /**
+     * GET /api/v1/admin/integrations/register/{appId}
+     *
+     * Which teams use one integration, with what and since when.
+     */
+    #[AuthorizedAdminSetting(settings: \OCA\TeamHub\Settings\AdminSettings::class)]
+    #[NoCSRFRequired]
+    public function integrationRegisterDetail(string $appId): JSONResponse {
+        try {
+            return new JSONResponse($this->integrationRegister->detail($appId));
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Could not read the integration detail.', ['appId' => $appId]);
         }
     }
 
@@ -318,6 +362,22 @@ class MaintenanceController extends Controller {
         try {
             $removed = $this->maintenanceService->repairDuplicateMember($teamId, $userId);
             return new JSONResponse(['success' => true, 'removed' => $removed]);
+        } catch (\Throwable $e) {
+            return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    /**
+     * POST /api/v1/admin/maintenance/repair-member-ids/{teamId}
+     * Give every member row of the team a `member_id` Circles accepts.
+     * Repairs the rows TeamHub's own raw-SQL inserts left too short, which
+     * stop the team federating (DESIGN 2.249).
+     */
+    #[AuthorizedAdminSetting(settings: \OCA\TeamHub\Settings\AdminSettings::class)]
+    public function repairInvalidMemberIds(string $teamId): JSONResponse {
+        try {
+            $repaired = $this->maintenanceService->repairInvalidMemberIds($teamId);
+            return new JSONResponse(['success' => true, 'repaired' => $repaired]);
         } catch (\Throwable $e) {
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_INTERNAL_SERVER_ERROR);
         }

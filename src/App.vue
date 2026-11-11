@@ -522,15 +522,44 @@
                     </template>
                 </NcEmptyContent>
 
+                <!-- v4.13.56 — the subline here can be written by a Nextcloud
+                     administrator (Admin → TeamHub → Team creation → Welcome
+                     page message). Only this branch: the one above is
+                     onboarding copy for somebody with no teams, and it
+                     explains the two buttons under it, so replacing it with
+                     an instance message would leave those buttons unexplained
+                     on the one screen where they matter most.
+
+                     `description` is left out when a message is set, because
+                     NcEmptyContent renders that prop as text and the message
+                     is markdown. The slot carries the rendered HTML instead;
+                     passing both would print the subline twice. -->
                 <NcEmptyContent
                     v-else
                     :name="t('teamhub', 'Welcome to TeamHub')"
-                    :description="t('teamhub', 'Select a team from the sidebar to get started')">
+                    :description="welcomeMessage ? '' : t('teamhub', 'Select a team from the sidebar to get started')">
                     <template #icon>
                         <AccountGroup :size="iconHero" />
                     </template>
+                    <template v-if="welcomeMessage" #description>
+                        <!-- Sanitised by `renderMarkdown`, the team-message
+                             renderer: DOMPurify with a fixed tag allowlist and
+                             an img-src hook. The author is a Nextcloud
+                             administrator, who can already run markdown
+                             through this app in a team message, so this adds
+                             no reach they did not have. -->
+                        <div class="th-welcome-message" v-html="renderedWelcomeMessage" />
+                    </template>
                 </NcEmptyContent>
             </template>
+
+            <!-- v4.14.15 - a team this server does not own. Before the
+                 TeamView branch, which would otherwise draw seven module tabs
+                 over data that lives on the owning instance. -->
+            <RemoteTeamView
+                v-else-if="currentTeamIsRemote"
+                :key="'remote-' + currentTeamId"
+                :team-id="currentTeamId" />
 
             <TeamView
                 v-else
@@ -538,6 +567,45 @@
                 @show-manage-team="showView('manage')"
                 @team-left="onTeamLeft" />
         </NcAppContent>
+
+        <!-- v4.13.2 — compliments (DESIGN §2.186). Both dialogs are mounted
+             here rather than in TeamView for the same reason the group picker
+             below is: the Compliment entry lives in Nextcloud's contacts
+             menu, which opens from an avatar anywhere in the app — a message
+             card, a Deck card, a decision, My Work — and the party popup is
+             not about a team at all. -->
+        <ComplimentComposeDialog
+            v-if="complimentTarget"
+            :open="!!complimentTarget"
+            :target="complimentTarget"
+            :team-id="currentTeamId || ''"
+            @update:open="onComplimentComposeOpen"
+            @sent="complimentTarget = null" />
+
+        <!-- v4.13.56 — the forced message to a Nextcloud administrator.
+             Mounted at the app root, not inside a view: it is about the
+             instance rather than about any team, and an administrator must
+             meet it whichever screen they land on. Above the party dialogs so
+             it is the one in front when both would fire on the same load. -->
+        <AnnouncementDialog
+            v-if="announcementPopup"
+            :key="announcementPopup"
+            :filename="announcementPopup"
+            @closed="onAnnouncementPopupClosed"
+            @dismissed="onAnnouncementPopupDismissed" />
+
+        <BirthdayPartyDialog :open="birthdayPartyOpen && !partyOpen" :display-name="birthdayPartyName"
+            @dismiss="dismissBirthdayParty" />
+        <AnniversaryPartyDialog
+            :open="!!anniversaryCelebrations.length && !partyOpen && !birthdayPartyOpen"
+            :celebration="anniversaryCelebrations[0] || null"
+            @dismiss="dismissAnniversaryParty" />
+
+        <ComplimentPartyDialog
+            :open="partyOpen"
+            :total="unseenCompliments.total"
+            :senders="unseenCompliments.senders"
+            @dismiss="dismissCompliments" />
 
         <!-- v4.7.15 — filing a team under a sidebar group. Mounted here
              rather than in TeamView because it is reached from any team's
@@ -573,6 +641,7 @@ import { translate as t, translatePlural as n } from '@nextcloud/l10n'
 import { emit } from '@nextcloud/event-bus'
 import { generateUrl } from '@nextcloud/router'
 import axios from '@nextcloud/axios'
+import logger from './logger.js'
 import { NcContent, NcAppNavigation, NcAppNavigationNew, NcAppNavigationItem, NcAppNavigationCaption, NcAppSettingsDialog, NcAppSettingsSection, NcAppContent, NcEmptyContent, NcCounterBubble, NcButton, NcNoteCard } from '@nextcloud/vue'
 import { showSuccess, showError, showWarning } from '@nextcloud/dialogs'
 import AccountGroup from 'vue-material-design-icons/AccountGroup.vue'
@@ -587,11 +656,25 @@ import Close from 'vue-material-design-icons/Close.vue'
 import EmailOutline from 'vue-material-design-icons/EmailOutline.vue'
 import ClipboardCheckOutline from 'vue-material-design-icons/ClipboardCheckOutline.vue'
 import { fileOpenUrl } from './lib/filesCollab.js'
+// v4.13.56 — the team-message renderer, for the welcome page's
+// admin-written subline. Not a second markdown pipeline: this is the
+// same sanitiser the message stream and the feed already use.
+import { renderMarkdown } from './lib/messageMarkdown.js'
 
 // v4.4.12 — session-scoped "user closed the Getting started callout" flag.
 // Wrapped because sessionStorage throws in Safari private mode and is absent
 // in SSR/test contexts; a storage failure must never take down the sidebar.
 const HINT_CLOSED_KEY = 'teamhub:getting-started-closed'
+
+/**
+ * The session key that keeps a cleared announcement popup closed until the
+ * next sign-in (v4.13.56). Per filename, and a filename is pinned to one app
+ * version by `announcements/registry.json`, so a new version's message is a
+ * new key and comes back as it should.
+ */
+function announcementAckKey(filename) {
+    return 'teamhub:announce-ack:' + filename
+}
 
 function readSessionFlag(key) {
     try {
@@ -609,11 +692,21 @@ function writeSessionFlag(key) {
     }
 }
 import TeamView from './components/TeamView.vue'
+// v4.14.15 - a team another server owns. Rendered instead of TeamView, never
+// inside it: every module in TeamView reads and writes TeamHub tables on this
+// instance, and a team owned elsewhere keeps its data on the owner's
+// (DESIGN 2.256).
+import RemoteTeamView from './components/RemoteTeamView.vue'
 import BrowseTeamsView from './components/BrowseTeamsView.vue'
 import ManageTeamView from './components/ManageTeamView.vue'
 import CreateTeamView from './components/CreateTeamView.vue'
 import WhatsHappeningView from './components/WhatsHappeningView.vue'
 import AnnouncementView from './components/AnnouncementView.vue'
+import AnnouncementDialog from './components/AnnouncementDialog.vue'
+import ComplimentComposeDialog from './components/ComplimentComposeDialog.vue'
+import ComplimentPartyDialog from './components/ComplimentPartyDialog.vue'
+import BirthdayPartyDialog from './components/BirthdayPartyDialog.vue'
+import AnniversaryPartyDialog from './components/AnniversaryPartyDialog.vue'
 import MyWorkView from './components/MyWorkView.vue'
 import ServiceCatalogueView from './components/ServiceCatalogueView.vue'
 import ViewGridOutline from 'vue-material-design-icons/ViewGridOutline.vue'
@@ -635,7 +728,8 @@ export default {
         AccountGroup, Plus, Magnify, Rss, HelpCircleOutlineIcon,
         CogOutline, Close, EmailOutline,
         ClipboardCheckOutline,
-        TeamView, BrowseTeamsView, ManageTeamView, CreateTeamView, WhatsHappeningView, AnnouncementView,
+        TeamView, RemoteTeamView, BrowseTeamsView, ManageTeamView, CreateTeamView, WhatsHappeningView, AnnouncementView, AnnouncementDialog,
+        ComplimentComposeDialog, ComplimentPartyDialog, BirthdayPartyDialog, AnniversaryPartyDialog,
         MyWorkView, ServiceCatalogueView, ViewGridOutline,
         TeamGroupPickerModal, TeamJoinView, TeamNavGroup, TeamNavItem,
         AccountMultiplePlusOutline, WorkflowStartDialog,
@@ -649,6 +743,19 @@ export default {
             // v4.7.15 — the team whose sidebar group is being picked, as
             // { teamId, teamName, groupId }. Null whenever the dialog is shut.
             groupPicker: null,
+            // v4.13.2 — the person being complimented, as
+            // { uid, displayName }, set by the contacts-menu entry. Null
+            // whenever the composer is shut.
+            complimentTarget: null,
+            // v4.13.2 — compliments waiting for this person, fetched once on
+            // mount. `partyOpen` is separate from `total > 0` so closing the
+            // popup does not depend on the payload having been cleared, and
+            // so the ids are still here when the "mark seen" call is made.
+            unseenCompliments: { total: 0, ids: [], senders: [] },
+            partyOpen: false,
+            birthdayPartyOpen: false,
+            birthdayPartyName: '',
+            anniversaryCelebrations: [],
             // v4.6.17 — team behind a shared ?team= link that the current user
             // is not in. Drives TeamJoinView; null at every other moment.
             joinTeamId: null,
@@ -710,6 +817,19 @@ export default {
             // Which announcement is currently open in the main canvas. `null`
             // when the announcement view is not active.
             announcementFilename: null,
+            // v4.13.56 — the welcome page's subline as a Nextcloud
+            // administrator wrote it, '' when none is set. Fetched on mount
+            // rather than when the welcome branch first renders: the fetch is
+            // one small GET and a lazy one would show the shipped line and
+            // then swap it, which looks like a glitch on the first screen a
+            // user sees.
+            welcomeMessage: '',
+            // v4.13.56 — the announcement being forced on a Nextcloud
+            // administrator, or null. A different surface from the canvas view
+            // above and they never run together: `role: 'admin'` announcements
+            // become this dialog, `role: 'everyone'` ones stay on the envelope.
+            // See AnnouncementDialog.vue for why.
+            announcementPopup: null,
             // v4.5.21 — Action Required count for the My Work sidebar badge.
             // Fetched once on mount and refreshed whenever the user leaves the
             // My Work view, deliberately NOT polled: the counts endpoint fans
@@ -723,6 +843,17 @@ export default {
     computed: {
         ...mapState(['teams', 'currentTeamId', 'loading', 'presenceModuleEnabled']),
         ...mapGetters(['currentTeam', 'sidebarTeamGroups']),
+
+        /**
+         * v4.14.15 - is the open team one another server owns? The server
+         * sets `is_remote` on those sidebar rows and on no others, so this is
+         * false on every instance that does not federate and on every local
+         * team. It decides which view renders; the store's `selectTeam`
+         * reads the same field to skip the module fetches.
+         */
+        currentTeamIsRemote() {
+            return this.currentTeam?.is_remote === true
+        },
 
         /**
          * v4.12.2 - which teams have their sub-team list open. Read straight
@@ -826,6 +957,19 @@ export default {
         },
 
         /**
+         * The welcome page's subline, rendered (v4.13.56).
+         *
+         * `renderMarkdown` with no member map: a notice written by a
+         * Nextcloud administrator has no team to resolve an `@name` against,
+         * and an empty map is the renderer's own default anyway. Its output is
+         * DOMPurify-sanitised, which is what makes `v-html` acceptable on
+         * this one.
+         */
+        renderedWelcomeMessage() {
+            return this.welcomeMessage ? renderMarkdown(this.welcomeMessage) : ''
+        },
+
+        /**
          * v4.4.12 — true when the content area is showing the "Welcome to
          * TeamHub" landing state rather than a team, the wizard, Browse or
          * the feed.
@@ -915,7 +1059,17 @@ export default {
             // behind each service team's name. Teams only, no queue: the
             // queue is read by the widget on the team's own home.
             this.$store.dispatch('serviceTeams/loadDesks'),
+            // v4.13.2 — compliments waiting since this person's last visit.
+            // In this batch and not after the deep link: the popup is about
+            // them, not about whichever team the URL happens to open.
+            this.fetchUnseenCompliments(),
         ])
+
+        // Birthday party waits until the compliments check has completed. If
+        // both exist, the compliments dialog is shown first, followed by the
+        // birthday greeting when it closes — never two modal dialogs at once.
+        await this.fetchBirthdayCelebration()
+        await this.fetchAnniversaryCelebrations()
 
         // v3.75.1 — consume ?team=…&decision=… deep link.
         // Used by approver-meeting descriptions and any future "open this
@@ -927,8 +1081,24 @@ export default {
         // Poll for new messages every 60s so the unread badge stays current
         // without requiring a page reload. Uses refreshUnreadCounts (silent —
         // no loading spinner) rather than fetchTeams to avoid UI flicker.
+        //
+        // v4.13.18 — and not while the tab is hidden. This fired once a minute
+        // for every open tab of every user for as long as the browser was
+        // running, including the dozen tabs nobody has looked at since
+        // Tuesday, and nothing reads a counter bubble that is not on screen.
+        // The `visibilitychange` handler below refreshes on the way back in,
+        // so a backgrounded tab costs nothing and is still current the moment
+        // it is looked at.
         this._unreadPollInterval = setInterval(() => {
+            if (document.visibilityState !== 'visible') return
             this.$store.dispatch('refreshUnreadCounts')
+            // v4.13.20 — and the open team's own stream, which until now was
+            // the one thing the badge pointed at and nothing refreshed. The
+            // action no-ops unless a team is open on page 1, so this costs a
+            // second GET only while somebody is actually reading a team.
+            if (this.activeView === 'team') {
+                this.$store.dispatch('refreshMessages')
+            }
         }, 60000)
 
         // v4.2.6 — one-shot license entitlements fetch for the sidebar
@@ -955,6 +1125,18 @@ export default {
             this.gettingStartedHint = false
         }
 
+        // v4.13.56 — the welcome page's admin-written subline. Its own
+        // endpoint because the preferences response above is per-user by
+        // contract and this value belongs to the instance; see
+        // PreferencesController::getWelcomeMessage(). An error leaves it ''
+        // and the page shows the line TeamHub ships.
+        try {
+            const { data } = await axios.get(generateUrl('/apps/teamhub/api/v1/welcome-message'))
+            this.welcomeMessage = String(data?.welcomeMessage || '')
+        } catch (e) {
+            this.welcomeMessage = ''
+        }
+
         // v4.4.17 — in-app announcements. Server filters by license state,
         // version, role, and per-user dismissals — a licensed instance
         // always gets []. Errors leave the envelope hidden.
@@ -974,8 +1156,21 @@ export default {
             // open tab of every user forever, and coming back to the tab is
             // exactly when the number starts being looked at.
             this._visibilityHandler = () => {
-                if (document.visibilityState === 'visible' && this.activeView !== 'mywork') {
+                if (document.visibilityState !== 'visible') return
+                if (this.activeView !== 'mywork') {
                     this.refreshMyWorkCount()
+                }
+                // v4.13.18 — the sidebar too, for the same reason the badge is
+                // here: teams are joined, and left, by other people while this
+                // page sits open. Without it the team list and its unread
+                // counts were only ever as fresh as the last 60s tick, and the
+                // tick no longer runs while the tab is hidden — so coming back
+                // to the tab is now the only thing that makes a backgrounded
+                // tab current, and it has to cover both.
+                this.$store.dispatch('refreshUnreadCounts')
+                // v4.13.20 — and the stream, for the same reason.
+                if (this.activeView === 'team') {
+                    this.$store.dispatch('refreshMessages')
                 }
             }
             document.addEventListener('visibilitychange', this._visibilityHandler)
@@ -1015,6 +1210,120 @@ export default {
         n,
         ...mapActions(['fetchTeams', 'fetchTeamGroups', 'selectTeam']),
         ...mapMutations(['SET_VIEW', 'SET_DECISIONS_TARGET', 'SET_DECISIONS_COMPOSE_PREFILL', 'SET_PENDING_TEAM_ACTION', 'SET_MESSAGE_TARGET']),
+
+        // ------------------------------------------------------------------
+        // v4.13.2 — compliments (DESIGN §2.186)
+        // ------------------------------------------------------------------
+
+        /**
+         * The contacts-menu entry was clicked. `main.js` registered the
+         * action with this method, so the click arrives here from anywhere
+         * in the app without an event bus.
+         *
+         * @param {object} person { uid, displayName }
+         */
+        openComplimentComposer(person) {
+            if (!person?.uid) return
+            this.complimentTarget = { uid: person.uid, displayName: person.displayName || person.uid }
+        },
+
+        /** Cancelling or sending closes the composer by clearing its target. */
+        onComplimentComposeOpen(isOpen) {
+            if (!isOpen) {
+                this.complimentTarget = null
+            }
+        },
+
+        /**
+         * What is waiting, asked once per app load. Silent on every failure:
+         * a compliment nobody can fetch is a missing party popup, not a
+         * reason to put an error in front of somebody.
+         */
+        async fetchUnseenCompliments() {
+            try {
+                const { data } = await axios.get(generateUrl('/apps/teamhub/api/v1/compliments/unseen'))
+                if (!data || !data.total) return
+                this.unseenCompliments = {
+                    total: Number(data.total) || 0,
+                    ids: Array.isArray(data.ids) ? data.ids : [],
+                    senders: Array.isArray(data.senders) ? data.senders : [],
+                }
+                this.partyOpen = this.unseenCompliments.total > 0
+            } catch (e) {
+                logger.debug('[TeamHub][compliments] could not load waiting compliments', { error: e })
+            }
+        },
+
+        /**
+         * Close the popup and mark exactly the ids it showed as seen.
+         *
+         * The order matters: the popup closes first, so a slow or failing
+         * request never leaves it on screen. And the marking is of the ids
+         * that were *shown*, not "everything unseen now" — a compliment that
+         * arrived while the popup was open is still waiting afterwards.
+         */
+        async fetchBirthdayCelebration() {
+            try {
+                const { data } = await axios.get(generateUrl('/apps/teamhub/api/v1/people/birthday/celebration'))
+                if (data?.celebrate && data.displayName) {
+                    this.birthdayPartyName = data.displayName
+                    this.birthdayPartyOpen = true
+                }
+            } catch (e) {
+                logger.debug('[TeamHub][people] birthday celebration lookup failed', { error: e })
+            }
+        },
+
+        async dismissBirthdayParty() {
+            this.birthdayPartyOpen = false
+            this.birthdayPartyName = ''
+            try {
+                await axios.post(generateUrl('/apps/teamhub/api/v1/people/birthday/acknowledge'))
+            } catch (e) {
+                logger.debug('[TeamHub][people] birthday celebration acknowledgement failed', { error: e })
+            }
+        },
+
+        async fetchAnniversaryCelebrations() {
+            try {
+                const { data } = await axios.get(generateUrl('/apps/teamhub/api/v1/people/anniversaries'))
+                this.anniversaryCelebrations = Array.isArray(data?.celebrations) ? data.celebrations : []
+            } catch (e) {
+                logger.debug('[TeamHub][people] anniversary celebration lookup failed', { error: e })
+            }
+        },
+
+        async dismissAnniversaryParty(celebration) {
+            // Validate the event payload: a modal close and its footer action
+            // can both emit dismiss before Vue has drawn the next item.
+            if (!celebration || this.anniversaryCelebrations[0]?.teamId !== celebration.teamId
+                || this.anniversaryCelebrations[0]?.years !== celebration.years) return
+            this.anniversaryCelebrations = this.anniversaryCelebrations.slice(1)
+            try {
+                await axios.post(generateUrl('/apps/teamhub/api/v1/people/anniversaries/acknowledge'), {
+                    teamId: celebration.teamId,
+                    years: celebration.years,
+                })
+            } catch (e) {
+                // An unacknowledged milestone will appear next visit; don't lose it.
+                logger.debug('[TeamHub][people] anniversary acknowledgement failed', { error: e })
+            }
+        },
+
+        async dismissCompliments() {
+            const ids = this.unseenCompliments.ids
+            this.partyOpen = false
+            this.unseenCompliments = { total: 0, ids: [], senders: [] }
+
+            if (!ids.length) return
+            try {
+                await axios.post(generateUrl('/apps/teamhub/api/v1/compliments/seen'), { ids })
+            } catch (e) {
+                // Left unseen on purpose: they will be shown again next time,
+                // which is far better than losing them silently.
+                logger.debug('[TeamHub][compliments] could not mark compliments as seen', { error: e })
+            }
+        },
 
         // ------------------------------------------------------------------
         // v4.7.3 — sidebar grouping
@@ -1448,6 +1757,20 @@ export default {
                 await this.selectTeam(teamId)
                 this.activeView = 'team'
 
+                // v4.13.68 — the link in the Talk message a colleague posts
+                // when asking to be replaced on a shift. It opens the team's
+                // Roster tab, where the shift carries the take-over button.
+                // The request id rides along so a later version can scroll to
+                // it; opening the right tab is what the link has to do today.
+                //
+                // v4.14.8 — `roster` does the same for the roster
+                // notifications and for the link inside a shift copied into a
+                // member's calendar (DESIGN §2.250).
+                if (params.has('shiftRequest') || params.has('roster')) {
+                    this.SET_VIEW('roster')
+                    return
+                }
+
                 if (params.has('propose')) {
                     // v4.11.42 — the Files ⋯ menu's *Propose a decision*. The
                     // entry deliberately opens the real composer here rather
@@ -1805,14 +2128,67 @@ export default {
             this.closeSidebarIfOverlay()
         },
 
-        // v4.4.17 — announcements.
-        async refreshAnnouncements() {
+        /**
+         * v4.4.17 — announcements.
+         *
+         * @param {boolean} force v4.13.56 — may this refresh open the forced
+         *   popup for an administrator? False after one has just been cleared:
+         *   a second admin announcement opening the instant the first is
+         *   dismissed reads as a dialog that will not go away. The next one
+         *   arrives with the next refresh, which in practice is the next
+         *   sign-in.
+         */
+        async refreshAnnouncements(force = true) {
             try {
                 const { data } = await axios.get(generateUrl('/apps/teamhub/api/v1/announcements'))
                 this.announcements = Array.isArray(data?.announcements) ? data.announcements : []
             } catch (e) {
                 this.announcements = []
             }
+            if (force) {
+                this.maybeForceAnnouncement()
+            }
+        },
+
+        /**
+         * v4.13.56 — put an administrator-targeted announcement in front of
+         * the administrator, rather than waiting for them to notice an
+         * envelope.
+         *
+         * Three conditions, all of them already decided elsewhere:
+         *
+         *  - the entry's role is `admin`. The server has already filtered the
+         *    list by licence, version, role and this user's dismissals, so an
+         *    `admin` entry reaching here means this user is an instance admin
+         *    and has not ticked the box. Nothing is re-checked client side.
+         *  - this browser session has not already had it cleared with OK.
+         *  - no popup is open, so a list with two admin entries shows them one
+         *    at a time rather than stacking two undismissable dialogs.
+         *
+         * `role: 'everyone'` entries are left to the sidebar envelope and the
+         * canvas view. A scroll gate in front of every member of every
+         * instance is not a thing a team app should do, and the envelope has
+         * always been the right surface for a message that is merely news.
+         */
+        maybeForceAnnouncement() {
+            if (this.announcementPopup) return
+            const forced = this.announcements.find(a =>
+                a?.role === 'admin' && !readSessionFlag(announcementAckKey(a.filename)))
+            this.announcementPopup = forced ? forced.filename : null
+        },
+
+        /** OK, box unticked: gone for this browser session, back at next login. */
+        onAnnouncementPopupClosed() {
+            if (this.announcementPopup) {
+                writeSessionFlag(announcementAckKey(this.announcementPopup))
+            }
+            this.announcementPopup = null
+        },
+
+        /** OK with the box ticked: the server row is written, so re-read. */
+        async onAnnouncementPopupDismissed() {
+            this.announcementPopup = null
+            await this.refreshAnnouncements(false)
         },
 
         openAnnouncement(filename) {
@@ -1910,15 +2286,48 @@ export default {
          * start where the team has never been opened this session.
          */
         async onTeamCreated(team, intent = null) {
-            await this.fetchTeams()
-            await this.selectTeam(team.id)
-            if (intent === 'manage') {
-                await this.openManageTeam(team.id)
-                return
+            if (!team?.id) return
+
+            // Creation returns the team's id before the sidebar list is
+            // refreshed. Seed that list immediately: otherwise a slow or
+            // eventually consistent GET /teams can leave the new dashboard
+            // without its team's name/metadata until the next refresh.
+            if (!this.teams.some(t => t.id === team.id)) {
+                this.$store.commit('SET_TEAMS', [...this.teams, team])
             }
-            this.activeView = 'team'
+
+            // selectTeam commits the id and Home tab synchronously, before
+            // its resource requests start. Switch views NOW instead of
+            // awaiting them: any slow integration endpoint must not strand
+            // the user in a completed creation wizard or on a blank page.
+            const selecting = this.selectTeam(team.id)
+            this.activeView = intent === 'manage' ? 'manage' : 'team'
             if (intent === 'invite') {
                 this.SET_PENDING_TEAM_ACTION('invite')
+            }
+            this.closeSidebarIfOverlay()
+
+            // Refresh server-authoritative team data independently of the
+            // dashboard transition. TeamView loads its own layout bundle on
+            // mount, so the selected template's layout is shown normally.
+            const refreshing = this.fetchTeams().then(() => {
+                // Freshly created Circles teams may not appear in the next
+                // membership-list response yet. Retain the created team in
+                // the sidebar until the server list catches up.
+                if (this.currentTeamId === team.id && !this.teams.some(t => t.id === team.id)) {
+                    this.$store.commit('SET_TEAMS', [...this.teams, team])
+                }
+            })
+
+            try {
+                await Promise.all([selecting, refreshing])
+                if (intent === 'manage' && this.currentTeamId === team.id) {
+                    await this.$store.dispatch('ensureTeamDashboardFacts', team.id)
+                }
+            } catch (error) {
+                // Navigation already succeeded; a failed secondary load must
+                // not bounce the user back to the wizard.
+                logger.error('[TeamHub] Loading a newly created team failed', { error })
             }
         },
 
@@ -1971,8 +2380,26 @@ export default {
          * per-team level badges and the tab set are both derived from it, and
          * both are now stale by exactly this transfer.
          */
+        /**
+         * The team was handed to somebody else, so this user is no longer its
+         * admin.
+         *
+         * v4.13.56 — the member list is refetched too. `fetchTeams` alone
+         * refreshed the sidebar, but every admin affordance on the team page
+         * (`TeamView.isTeamAdmin`, `TeamWidgetGrid.isTeamAdmin`) is derived
+         * from the store's `members`, which still held the level-9 row this
+         * user had a moment ago. So the Manage team entry and the edit
+         * controls stayed drawn on a team they now hold nothing on, until the
+         * next team switch or a page reload. Hand-over drops them to member
+         * (level 1), which makes the stale level the most misleading it can
+         * be.
+         */
         async onOwnershipTransferred() {
+            const teamId = this.currentTeamId
             await this.$store.dispatch('fetchTeams')
+            if (teamId) {
+                await this.$store.dispatch('fetchMembers', teamId)
+            }
             this.activeView = 'team'
         },
 
@@ -2258,6 +2685,37 @@ body.theme--dark .teamhub-brand-item {
     align-items: center;
     justify-content: center;
     gap: 8px;
+}
+
+/* v4.13.56 — the admin-written welcome message, in NcEmptyContent's
+   description slot. Centred like the subline it replaces, but left-aligned
+   inside the measure once it runs to more than a line: a centred paragraph of
+   several lines is harder to read than the one sentence this slot was built
+   for, and an administrator who writes a list wants a list. */
+.th-welcome-message {
+    max-width: 52ch;
+    margin: 0 auto;
+    text-align: start;
+    font-size: var(--th-font-body);
+    line-height: var(--th-line-height-relaxed);
+    color: var(--color-text-maxcontrast);
+}
+.th-welcome-message :deep(p) { margin: 0 0 var(--th-space-sm); }
+.th-welcome-message :deep(p:last-child) { margin-bottom: 0; }
+.th-welcome-message :deep(ul),
+.th-welcome-message :deep(ol) {
+    margin: 0 0 var(--th-space-sm);
+    padding-inline-start: var(--th-space-xl);
+    text-align: start;
+}
+.th-welcome-message :deep(a) {
+    color: var(--color-primary-element);
+    text-decoration: underline;
+}
+.th-welcome-message :deep(a:focus-visible) {
+    outline: 2px solid var(--color-primary-element);
+    outline-offset: 2px;
+    border-radius: var(--border-radius-small);
 }
 
 /* Admin-only pointer at the setup checklist. Width-capped so the sentence

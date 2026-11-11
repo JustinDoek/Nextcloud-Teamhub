@@ -1,6 +1,6 @@
 {
   "name": "teamhub",
-  "version": "4.13.0",
+  "version": "4.20.0",
   "description": "Team collaboration hub for Nextcloud",
   "scripts": {
     "clean:chunks": "node -e \"require('fs').rmSync('js/chunks',{recursive:true,force:true})\"",
@@ -17,12 +17,20 @@
     "check:migrations": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/check-migrations.js",
     "check:classes": "node scripts/check-classes.js",
     "check:vue-methods": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/check-vue-methods.js",
+    "check:dashes": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/check-dashes.js",
     "test:js": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./tests/js/register.mjs --test tests/js/*.test.mjs",
     "test:php": "node scripts/test-php.js",
     "test": "npm run test:js && npm run test:php",
     "scim:rig": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/scim-test-rig.js",
     "deploy:aio": "npm run build && node scripts/deploy-to-aio.js",
-    "publish:release": "npm run build && node scripts/publish-to-release.js"
+    "publish:release": "npm run build && node scripts/publish-to-release.js",
+    "check:nextcloud-basics": "node scripts/check-nextcloud-basics.js",
+    "check:release": "npm run check:l10n && npm run check:nextcloud-basics && npm run check:di && npm run check:dates && npm run check:migrations && npm run check:vue-methods && npm run check:dashes && npm run check:markdown-list && npm run test:js && npm run check:ui-native",
+    "lint:js": "node scripts/run-eslint-check.js",
+    "lint:php": "composer run cs:check",
+    "analyse:php": "composer run analyse:php",
+    "check:ui-native": "node scripts/check-nextcloud-ui.js",
+    "check:standards": "npm run lint:js && npm run lint:php && npm run analyse:php"
   },
   "browserslist": [
     "extends @nextcloud/browserslist-config"
@@ -54,12 +62,14 @@
   },
   "devDependencies": {
     "@nextcloud/browserslist-config": "^3.0.1",
+    "@nextcloud/eslint-config": "^9.0.1",
     "@nextcloud/vite-config": "^2.0.0",
+    "eslint": "^10.13.0",
     "sass": "^1.83.0"
   },
   "engines": {
-    "node": ">=18.0.0",
-    "npm": ">=8.0.0"
+    "node": "^22.14.0 || ^24.0.0",
+    "npm": ">=10.0.0"
   },
   "allowScripts": {
     "core-js@3.49.0": true,

@@ -225,7 +225,9 @@ class ResourceStateController extends Controller {
             return new JSONResponse(['status' => 'ok']);
         } catch (\Throwable $e) {
             $this->logger->error('[TeamHub][ResourceStateController] deleteResource failed', [
-                'teamId' => $teamId, 'app' => $app, 'resourceId' => $resourceId,
+                // 'app' is the logger's own channel key, so the resource's app has
+                // to travel under a different name or it is overwritten and lost.
+                'teamId' => $teamId, 'resourceApp' => $app, 'resourceId' => $resourceId,
                 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
             return new JSONResponse(['error' => 'Internal error'], Http::STATUS_INTERNAL_SERVER_ERROR);
@@ -268,7 +270,9 @@ class ResourceStateController extends Controller {
             return new JSONResponse(['status' => 'ok', 'aclStripped' => $result['aclStripped'] ?? false]);
         } catch (\Throwable $e) {
             $this->logger->error('[TeamHub][ResourceStateController] removeAccess failed', [
-                'teamId' => $teamId, 'app' => $app, 'resourceId' => $resourceId,
+                // 'app' is the logger's own channel key, so the resource's app has
+                // to travel under a different name or it is overwritten and lost.
+                'teamId' => $teamId, 'resourceApp' => $app, 'resourceId' => $resourceId,
                 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
             return new JSONResponse(['error' => 'Internal error'], Http::STATUS_INTERNAL_SERVER_ERROR);

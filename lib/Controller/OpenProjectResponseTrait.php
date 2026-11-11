@@ -25,6 +25,7 @@ use OCP\AppFramework\Http\JSONResponse;
  *   link made against another instance                              409
  *   OpenProject rate-limiting us                                    429
  *   OpenProject refused the input of a write (422 upstream)         400
+ *   the connection cannot send this method (PATCH, v4.13.4)         501
  *   unreachable, server error, unrecognised response                502
  *
  * A refused write carries OpenProject's own sentence as `error` when it
@@ -67,14 +68,25 @@ trait OpenProjectResponseTrait {
             OpenProjectException::INTEGRATION_NOT_INSTALLED,
             OpenProjectException::INTEGRATION_DISABLED,
             OpenProjectException::INTEGRATION_INCOMPATIBLE,
-            OpenProjectException::HOST_NOT_CONFIGURED => Http::STATUS_UNPROCESSABLE_ENTITY,
+            OpenProjectException::HOST_NOT_CONFIGURED,
+            // v4.13.5 — configured with a method TeamHub cannot perform.
+            // Same family as the other "an administrator must fix this".
+            OpenProjectException::AUTH_METHOD_UNSUPPORTED => Http::STATUS_UNPROCESSABLE_ENTITY,
             OpenProjectException::USER_NOT_CONNECTED,
             OpenProjectException::AUTH_FAILED         => Http::STATUS_PRECONDITION_FAILED,
             OpenProjectException::PERMISSION_DENIED   => Http::STATUS_FORBIDDEN,
             OpenProjectException::PROJECT_NOT_FOUND   => Http::STATUS_NOT_FOUND,
-            OpenProjectException::LINK_STALE          => Http::STATUS_CONFLICT,
+            OpenProjectException::LINK_STALE,
+            // v4.13.9 — a stale lockVersion. 409 is literally what
+            // OpenProject answered and what the word means.
+            OpenProjectException::EDIT_CONFLICT       => Http::STATUS_CONFLICT,
             OpenProjectException::RATE_LIMITED        => Http::STATUS_TOO_MANY_REQUESTS,
             OpenProjectException::VALIDATION_FAILED   => Http::STATUS_BAD_REQUEST,
+            // v4.13.4 — the OpenProject connection in force cannot send the
+            // method (PATCH through the official app). 501 and not 502:
+            // nothing failed upstream and a retry will never help, so it
+            // must not read as a transient gateway error in monitoring.
+            OpenProjectException::METHOD_UNSUPPORTED  => Http::STATUS_NOT_IMPLEMENTED,
             default                                   => Http::STATUS_BAD_GATEWAY,
         };
         return new JSONResponse($this->describeOpenProjectCode($code, $e->getUpstreamMessage()), $status);

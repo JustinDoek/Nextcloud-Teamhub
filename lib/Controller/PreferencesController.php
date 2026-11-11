@@ -71,6 +71,42 @@ class PreferencesController extends Controller {
     }
 
     /**
+     * GET /api/v1/welcome-message
+     *
+     * The welcome page's subline, as a Nextcloud administrator wrote it, or
+     * '' when none is set — in which case the page uses the line TeamHub
+     * ships (v4.13.56).
+     *
+     * **Its own endpoint, and not a field on `getPreferences()` above.** That
+     * method's contract is in this class's docblock: every value it returns is
+     * scoped to the calling user's own account. This one is an instance-wide
+     * setting and belongs to nobody, so putting it there would make that
+     * sentence false for the next person who reads it.
+     *
+     * **And not on `/api/v1/admin/settings`**, which is where the value is
+     * written. That endpoint is NC-admin gated, so every ordinary user would
+     * get a 403 and silently fall back to the shipped line — exactly the bug
+     * v4.11.33 fixed for the create-team dialog's own admin-written sentence
+     * (`PolicyService::templatesForWizard()` carries that note).
+     *
+     * #[NoAdminRequired]: the value is shown to every user by design, so
+     * every authenticated user may read it. Nothing about it is secret and
+     * nothing here reveals who wrote it.
+     *
+     * @return JSONResponse{welcomeMessage: string}
+     */
+    #[NoAdminRequired]
+    public function getWelcomeMessage(): JSONResponse {
+        if ($this->userSession->getUser() === null) {
+            return new JSONResponse(['error' => 'Not authenticated'], Http::STATUS_UNAUTHORIZED);
+        }
+
+        return new JSONResponse([
+            'welcomeMessage' => $this->config->getAppValue(Application::APP_ID, 'welcomeMessage', ''),
+        ]);
+    }
+
+    /**
      * PUT /api/v1/preferences
      * Body: { gettingStartedHint: bool }
      *

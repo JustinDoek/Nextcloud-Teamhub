@@ -7,7 +7,7 @@
                 :display-name="member.displayName"
                 :hide-status="true"
                 :disable-menu="false"
-                :size="32" />
+                :size="AVATAR_MD" />
         </div>
 
         <!-- Name -->
@@ -23,14 +23,14 @@
                 class="th-presence-row__pill"
                 :class="morning ? '' : 'th-presence-row__pill--empty'"
                 :style="pillStyle(morning)"
-                :title="pillTitle(morning, 'morning')">
+                :title="pillTitle(morning, 'morning', morningAvailability)">
                 {{ pillLabel(morning) }}
             </span>
             <span
                 class="th-presence-row__pill"
                 :class="afternoon ? '' : 'th-presence-row__pill--empty'"
                 :style="pillStyle(afternoon)"
-                :title="pillTitle(afternoon, 'afternoon')">
+                :title="pillTitle(afternoon, 'afternoon', afternoonAvailability)">
                 {{ pillLabel(afternoon) }}
             </span>
         </div>
@@ -40,16 +40,21 @@
 <script>
 import { translate as t } from '@nextcloud/l10n'
 import { NcAvatar } from '@nextcloud/vue'
+import { AVATAR_MD } from '../../constants/uiTokens.js'
 
 export default {
     name: 'MemberPresenceRow',
 
     components: { NcAvatar },
 
+    data() { return { AVATAR_MD } },
+
     props: {
         member:    { type: Object, required: true },
         morning:   { type: Object, default: null }, // slot or null
         afternoon: { type: Object, default: null }, // slot or null
+        morningAvailability: { type: Boolean, default: null },
+        afternoonAvailability: { type: Boolean, default: null },
     },
 
     methods: {
@@ -57,8 +62,9 @@ export default {
 
         /**
          * Pill background colour comes from the slot's own colour (set on
-         * the presence type by the admin). For empty slots — no schedule —
-         * the pill renders with the empty modifier (faint neutral) instead.
+         * the presence type by the admin). A half-day with no workplace on
+         * it is time the member does not work, and the pill renders with
+         * the empty modifier (faint neutral) instead of a type colour.
          */
         pillStyle(slot) {
             if (!slot || !slot.color) return {}
@@ -70,17 +76,20 @@ export default {
         },
 
         pillLabel(slot) {
-            // TRANSLATORS: shown on a presence pill when no schedule is set
-            if (!slot) return t('teamhub', 'No schedule')
+            // TRANSLATORS: a half-day of the week with no workplace on it — the member does not work then
+            if (!slot) return t('teamhub', 'Not working')
             return slot.label || ''
         },
 
-        pillTitle(slot, half) {
+        pillTitle(slot, half, available) {
             // TRANSLATORS: tooltip on the morning presence pill — N is the scheduled label
-            const morningTpl   = t('teamhub', 'Tomorrow morning: {label}', { label: slot?.label || t('teamhub', 'No schedule') })
+            const morningTpl   = t('teamhub', 'Tomorrow morning: {label}', { label: slot?.label || t('teamhub', 'Not working') })
             // TRANSLATORS: tooltip on the afternoon presence pill — N is the scheduled label
-            const afternoonTpl = t('teamhub', 'Tomorrow afternoon: {label}', { label: slot?.label || t('teamhub', 'No schedule') })
-            return half === 'morning' ? morningTpl : afternoonTpl
+            const afternoonTpl = t('teamhub', 'Tomorrow afternoon: {label}', { label: slot?.label || t('teamhub', 'Not working') })
+            const sample = half === 'morning' ? '10:00–11:00' : '14:00–15:00'
+            const verdict = available === true ? t('teamhub', 'free')
+                : available === false ? t('teamhub', 'unavailable') : t('teamhub', 'unknown')
+            return (half === 'morning' ? morningTpl : afternoonTpl) + ` · ${sample}: ${verdict}`
         },
 
         /**

@@ -136,7 +136,7 @@
                 <NcButton
                     variant="tertiary"
                     :aria-label="t('teamhub', 'Insert link from Smart Picker')"
-                    :title="t('teamhub', 'Smart Picker — type / in the editor, or click here')"
+                    :title="t('teamhub', 'Smart Picker: type / in the editor, or click here')"
                     @click="openSmartPicker">
                     <template #icon><LinkVariant :size="ICON_BODY" /></template>
                 </NcButton>
@@ -146,7 +146,7 @@
                     variant="tertiary"
                     :disabled="uploading"
                     :aria-label="t('teamhub', 'Attach a file')"
-                    :title="t('teamhub', 'Attach file — uploads to your Files and inserts a link')"
+                    :title="t('teamhub', 'Attach file: uploads to your Files and inserts a link')"
                     @click="triggerFilePicker">
                     <template #icon>
                         <NcLoadingIcon v-if="uploading" :size="ICON_BODY" />
@@ -1250,7 +1250,7 @@ export default {
         async uploadFile(file) {
             const uid = getCurrentUser()?.uid
             if (!uid) {
-                showError(t('teamhub', 'Cannot upload — not logged in'))
+                showError(t('teamhub', 'Cannot upload: not logged in'))
                 return
             }
 
@@ -1637,9 +1637,9 @@ export default {
                 const status = e?.response?.status
                 const isHtml = (e?.response?.headers?.['content-type'] ?? '').includes('text/html')
                 if (isHtml && (status === 500 || status === 403)) {
-                    showError(t('teamhub', 'Session expired — please reload the page and try again'))
+                    showError(t('teamhub', 'Session expired: please reload the page and try again'))
                 } else {
-                    showError(t('teamhub', 'Failed to post — server error {status}', { status: status ?? '?' }))
+                    showError(t('teamhub', 'Failed to post: server error {status}', { status: status ?? '?' }))
                 }
             } finally {
                 this.submitting = false

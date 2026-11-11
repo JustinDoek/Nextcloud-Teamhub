@@ -1431,9 +1431,14 @@ class MessageService {
         $to            = (int)($filters['to'] ?? 0);
         $teamFilter    = is_array($filters['teamIds'] ?? null) ? array_values($filters['teamIds']) : [];
         $typeFilter    = is_array($filters['messageTypes'] ?? null) ? array_values($filters['messageTypes']) : [];
-        // v4.9.7 — OpenProject news, its own Show switch (default on), with
-        // a project list of its own.
-        $includeOpenProject = $filters['includeOpenProject'] ?? true;
+        // v4.9.7 — OpenProject news, with a project list of its own.
+        // v4.13.31 — it has no Show switch any more: a news item is a team
+        // message (the mirror writes it into the team's stream as one), so
+        // `$includeTeam` governs it. The parameter is still honoured on top
+        // of that, for an API caller that wants the messages without this
+        // source's live HTTP read — the same courtesy `includeSystem` keeps
+        // after losing its switch in 4.5.31.
+        $includeOpenProject = $includeTeam && ($filters['includeOpenProject'] ?? true);
         $projectFilter      = is_array($filters['projectIds'] ?? null) ? array_values($filters['projectIds']) : [];
 
         $mapperFilters = [
@@ -2022,10 +2027,15 @@ class MessageService {
             // would turn "show me only mentions" into "hide my mentions".
             'includeMentions' => (bool)($stored['includeMentions'] ?? true),
             'includeDecisions' => (bool)($stored['includeDecisions'] ?? true),
-            // v4.9.7 — OpenProject news: its Show switch (default on) and
-            // the projects to keep ([] = all), validated to a bounded id
-            // shape so a hand-edited blob cannot widen anything.
-            'includeOpenProject' => (bool)($stored['includeOpenProject'] ?? true),
+            // v4.9.7 — OpenProject news: the projects to keep ([] = all),
+            // validated to a bounded id shape so a hand-edited blob cannot
+            // widen anything.
+            // v4.13.31 — no `includeOpenProject`, the same reasoning as
+            // `includeSystem` above: its switch is gone (news is a team
+            // message and the Team switch governs it), so a stored `false`
+            // would keep the source off with nothing left to turn it back
+            // on. Ignored on read, dropped on the next save; the query
+            // parameter still works for API callers.
             'projectIds'         => $this->sanitiseProjectIds($stored['projectIds'] ?? []),
             'period'        => $period,
             // Only meaningful when period === 'custom'; kept regardless so
@@ -2073,8 +2083,9 @@ class MessageService {
                 || !empty($prefs['includeMentions']),
             'includeDecisions' => !array_key_exists('includeDecisions', $prefs)
                 || !empty($prefs['includeDecisions']),
-            'includeOpenProject' => !array_key_exists('includeOpenProject', $prefs)
-                || !empty($prefs['includeOpenProject']),
+            // v4.13.31 — no `includeOpenProject`: dropped from the blob with
+            // its switch, so a saved `false` cannot outlive the control that
+            // set it. See feedPreferences().
             'projectIds'       => $this->sanitiseProjectIds($prefs['projectIds'] ?? []),
             'period'        => $period,
             'customFrom'    => $from,
@@ -2388,15 +2399,23 @@ class MessageService {
      */
     private function buildSourceCounts(array $merged, array $userTeamIds, string $viewerUid): array {
         $teamIdSet = array_flip($userTeamIds);
-        $counts = ['all' => 0, 'team' => 0, 'public' => 0, 'talk' => 0, 'mentions' => 0, 'decisions' => 0, 'openproject' => 0];
+        $counts = ['all' => 0, 'team' => 0, 'public' => 0, 'talk' => 0, 'mentions' => 0, 'decisions' => 0];
 
         foreach ($merged as $row) {
             $counts['all']++;
             $source = (string)($row['source'] ?? '');
-            // v4.9.7 — an OpenProject row counts under its own tab and
-            // nowhere else: it is not a message, so neither Team nor Public.
+            // v4.13.31 — an OpenProject news row counts under **Team**, and
+            // there is no `openproject` key any more. 4.9.7 gave it a tab of
+            // its own on the reasoning that "it is not a message"; it is one
+            // (Justin, 2026-10-26) — the mirror writes every item into the
+            // team's stream as a team message, so one news item was being
+            // counted under two headings. A news row only ever resolves
+            // through a link on a team the viewer is in (`usableLinks()`
+            // takes their team ids), so Team is right by construction and
+            // the team_id test below is not needed. It is not a mention and
+            // not a decision, so it stops here.
             if ($source === 'openproject') {
-                $counts['openproject']++;
+                $counts['team']++;
                 continue;
             }
             // v4.5.33 — a Talk mention counts under Mentions and nowhere else.

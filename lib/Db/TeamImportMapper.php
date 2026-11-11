@@ -191,6 +191,68 @@ class TeamImportMapper {
             ->executeStatement();
     }
 
+    /**
+     * Deletes every run that is over, and their rows (v4.13.58).
+     *
+     * "Over" is the complement of the one live status rather than a list of
+     * finished ones: a run that is `running` is in flight, and anything else —
+     * `completed`, `failed`, `cancelled`, `validated`, or a status a later
+     * version adds — is history. Written that way so a new terminal status
+     * cannot quietly become unclearable.
+     *
+     * `validated` is cleared too, which it was not when this was written
+     * (v4.13.58): a validated run is a preview waiting to be confirmed, and an
+     * admin who uploads a file and walks away leaves one behind that nothing in
+     * the panel can reach again — only a `running` run is offered for
+     * resumption. Those were exactly what filled the list, and the button they
+     * disabled was the one meant to empty it. The panel never shows *Clear
+     * list* while a preview is open on that screen (the history is in the idle
+     * stage only), so this can only take a preview a *different* admin left or
+     * has open elsewhere; {@see startImport()} is conditional on
+     * `status = 'validated'`, so their confirm then fails cleanly instead of
+     * importing half a vanished file.
+     *
+     * Rows first, like {@see deleteImport()}, so a failure between the two
+     * statements leaves rows whose import is still there rather than orphans.
+     * The sub-select is the same `NOT IN` on both MySQL and Postgres.
+     *
+     * @return int How many runs went.
+     */
+    public function deleteFinishedImports(): int {
+        $live = ['running'];
+
+        $idQb = $this->db->getQueryBuilder();
+        $idQb->select('id')
+            ->from('teamhub_team_imports')
+            ->where($idQb->expr()->notIn('status', $idQb->createNamedParameter($live, IQueryBuilder::PARAM_STR_ARRAY)));
+        $result = $idQb->executeQuery();
+        $ids    = [];
+        while ($row = $result->fetch()) {
+            $ids[] = (int)$row['id'];
+        }
+        $result->closeCursor();
+
+        if ($ids === []) {
+            return 0;
+        }
+
+        // Chunked rather than one statement: a bound IN list is a placeholder
+        // per value, and both backends cap how many a statement may carry.
+        foreach (array_chunk($ids, 500) as $chunk) {
+            $rowQb = $this->db->getQueryBuilder();
+            $rowQb->delete('teamhub_team_import_rows')
+                ->where($rowQb->expr()->in('import_id', $rowQb->createNamedParameter($chunk, IQueryBuilder::PARAM_INT_ARRAY)))
+                ->executeStatement();
+
+            $impQb = $this->db->getQueryBuilder();
+            $impQb->delete('teamhub_team_imports')
+                ->where($impQb->expr()->in('id', $impQb->createNamedParameter($chunk, IQueryBuilder::PARAM_INT_ARRAY)))
+                ->executeStatement();
+        }
+
+        return count($ids);
+    }
+
     /** Deletes the run and its rows. Rows first, so a failure never orphans them. */
     public function deleteImport(int $importId): void {
         $rowQb = $this->db->getQueryBuilder();

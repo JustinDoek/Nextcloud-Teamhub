@@ -11,7 +11,15 @@ use OCA\TeamHub\Listener\GroupMembershipChangedListener;
 use OCA\TeamHub\Listener\UnifiedSearchStyleListener;
 use OCA\TeamHub\Listener\UserStatusListener;
 use OCA\TeamHub\Listener\UserDeletedListener;
+use OCA\TeamHub\Listener\PeopleAccountCreatedListener;
+use OCA\TeamHub\Integration\CapabilityType;
+use OCA\TeamHub\Integration\IntegrationRegistry;
+use OCA\TeamHub\Integration\ITeamHubIntegrationRegistry;
+use OCA\TeamHub\Integration\MyWorkCapabilityDefinition;
+use OCA\TeamHub\MyWork\IWorkProvider;
+use OCA\TeamHub\MyWork\Provider\PackageWorkProvider;
 use OCA\TeamHub\Notification\Notifier;
+use OCA\TeamHub\Service\IntegrationPackageService;
 use OCA\TeamHub\Service\IntegrationService;
 use OCP\App\Events\AppDisabledEvent;
 use OCP\AppFramework\App;
@@ -42,6 +50,7 @@ use OCA\TeamHub\Db\TeamServiceMapper;
 use OCA\TeamHub\Workflow\WorkflowDefinitionRegistry;
 use OCA\TeamHub\Search\DecisionSearchProvider;
 use OCA\TeamHub\Search\MessageSearchProvider;
+use OCA\TeamHub\Search\PeopleSearchProvider;
 use OCA\TeamHub\Search\ServiceRequestSearchProvider;
 use OCA\TeamHub\Search\ServiceSearchProvider;
 use OCA\TeamHub\Search\TeamSearchProvider;
@@ -56,6 +65,7 @@ use OCP\Group\Events\UserAddedEvent;
 use OCP\Group\Events\UserRemovedEvent;
 use OCP\User\Events\UserChangedEvent;
 use OCP\User\Events\BeforeUserDeletedEvent;
+use OCP\User\Events\UserCreatedEvent;
 
 class Application extends App implements IBootstrap {
     public const APP_ID = 'teamhub';
@@ -65,14 +75,48 @@ class Application extends App implements IBootstrap {
     }
 
     public function register(IRegistrationContext $context): void {
+        // The collaboration profile is rendered INTO the Nextcloud profile page
+        // (v4.13.52, Justin's call) rather than linked from it, so the link
+        // action is gone: two entry points to the same fields on the same page
+        // is clutter. `/apps/teamhub/people/{userId}` still serves the
+        // standalone page for anyone holding the URL.
+        $context->registerEventListener(
+            \OCP\Profile\BeforeTemplateRenderedEvent::class,
+            \OCA\TeamHub\Listener\PeopleProfileSectionListener::class,
+        );
+
         // Register notification notifier.
         $context->registerNotifierService(Notifier::class);
+
+        // ── Integration package registry (v4.13.23) ──────────────────────
+        //
+        // Registered explicitly, and the `shared` default is the whole point:
+        // the registry holds the packages apps hand it during boot() in an
+        // in-memory map, and that map *is* what `registered` means. An
+        // autowired class is resolved fresh on every injection in NC's
+        // container, so every caller would get an empty registry and no
+        // package would ever be effective.
+        //
+        // The alias is what an external app resolves. It asks the server
+        // container for the interface; NC routes an `OCA\TeamHub\…` name to
+        // this app's container, which is the same mechanism the single-widget
+        // API has always used.
+        $context->registerService(IntegrationRegistry::class, function (IContainer $c): IntegrationRegistry {
+            return new IntegrationRegistry(
+                $c->get(IntegrationPackageService::class),
+                $c->get(\Psr\Log\LoggerInterface::class),
+            );
+        });
+        $context->registerServiceAlias(ITeamHubIntegrationRegistry::class, IntegrationRegistry::class);
 
         // Auto-deregister any integration whose app is disabled or removed.
         $context->registerEventListener(AppDisabledEvent::class, AppDisabledListener::class);
 
         // Flag / clear risk_status when a resource owner is disabled or re-enabled.
         $context->registerEventListener(UserChangedEvent::class, UserStatusListener::class);
+
+        // Capture genuine creation dates for new accounts (older accounts have no guaranteed timestamp).
+        $context->registerEventListener(UserCreatedEvent::class, PeopleAccountCreatedListener::class);
 
         // Attempt ownership transfer before a resource owner's account is deleted.
         $context->registerEventListener(BeforeUserDeletedEvent::class, UserDeletedListener::class);
@@ -153,6 +197,11 @@ class Application extends App implements IBootstrap {
         // extra sections in the search drawer.
         $context->registerSearchProvider(ServiceSearchProvider::class);
         $context->registerSearchProvider(ServiceRequestSearchProvider::class);
+        // v4.13.63 — collaboration profiles. The People module collected
+        // Expertise, Ask me about and Languages and gave nobody a way to query
+        // them; this is that way. Gated inside PeopleDirectoryService, so an
+        // instance with People off gets no section rather than an empty one.
+        $context->registerSearchProvider(PeopleSearchProvider::class);
         // v4.10.4 — the results' icon class lives in css/search.css, which has
         // to be on every page the search can open on (Talk's pattern).
         $context->registerEventListener(
@@ -200,6 +249,8 @@ class Application extends App implements IBootstrap {
                 $c->get(\OCA\TeamHub\Db\BuildingMapper::class),
                 $c->get(\OCP\IConfig::class),
                 $c->get(\OCA\TeamHub\Service\TimezoneService::class),
+                $c->get(\OCA\TeamHub\Service\NextcloudAvailabilityService::class),
+                $c->get(\OCA\TeamHub\Db\HolidayMapper::class),
                 $c->get(\Psr\Log\LoggerInterface::class),
                 [],
             );
@@ -288,6 +339,86 @@ class Application extends App implements IBootstrap {
                         ['provider' => $providerClass, 'exception' => $e, 'app' => self::APP_ID],
                     );
                 }
+            }
+
+            // ── Integration packages (v4.13.23) ──────────────────────────
+            //
+            // The same extension point, opened to other apps. Each registered
+            // `my_work_provider` capability is wrapped in a
+            // PackageWorkProvider, which narrows every query to the teams
+            // where its package is effective and isolates the delegate's
+            // failures. Built-in providers are registered first, so a package
+            // cannot shadow one: the source key is `<app_id>_<capability_key>`,
+            // which no built-in id can collide with, and the registry's
+            // last-wins rule therefore never fires.
+            //
+            // Read from the database rather than from the in-process registry
+            // because this factory can run before another app's boot() has
+            // registered anything. The row is the durable shadow of that
+            // registration; whether the app registered *this* request is
+            // checked by IntegrationStateService at fetch time, so a package
+            // whose app is currently disabled is wrapped here and reports
+            // itself unavailable rather than contributing.
+            try {
+                $capabilityMapper = $c->get(\OCA\TeamHub\Db\IntegrationCapabilityMapper::class);
+                $packageMapper    = $c->get(\OCA\TeamHub\Db\IntegrationPackageMapper::class);
+                $stateService     = $c->get(\OCA\TeamHub\Service\IntegrationStateService::class);
+                $logger           = $c->get(\Psr\Log\LoggerInterface::class);
+
+                $rows     = $capabilityMapper->findRegisteredByType(CapabilityType::MY_WORK_PROVIDER);
+                $packages = $packageMapper->findByIds(array_map(
+                    static fn (array $row): int => (int)$row['pkg_id'],
+                    $rows,
+                ));
+
+                foreach ($rows as $capabilityRow) {
+                    $packageRow = $packages[(int)$capabilityRow['pkg_id']] ?? null;
+                    if ($packageRow === null) {
+                        continue;
+                    }
+                    $providerClass = (string)($capabilityRow['provider_class'] ?? '');
+                    if ($providerClass === '') {
+                        continue;
+                    }
+
+                    try {
+                        $delegate = $c->get($providerClass);
+                        if (!$delegate instanceof IWorkProvider) {
+                            continue;
+                        }
+
+                        $registry->register(new PackageWorkProvider(
+                            $delegate,
+                            $packageRow,
+                            $capabilityRow,
+                            MyWorkCapabilityDefinition::sourceKeyFor(
+                                (string)$packageRow['app_id'],
+                                (string)$capabilityRow['capability_key'],
+                            ),
+                            $stateService,
+                            $logger,
+                        ));
+                    } catch (\Throwable $e) {
+                        // One package's unconstructable provider must not cost
+                        // the whole registry — the same contract the built-in
+                        // loop above applies.
+                        $logger->error('[TeamHub][MyWork] Integration provider could not be constructed', [
+                            'app_id'          => (string)$packageRow['app_id'],
+                            'integration_key' => (string)$packageRow['integration_key'],
+                            'capability_key'  => (string)$capabilityRow['capability_key'],
+                            'error_class'     => get_class($e),
+                            'exception'       => $e,
+                            'app'             => self::APP_ID,
+                        ]);
+                    }
+                }
+            } catch (\Throwable $e) {
+                // The integration tables are missing (an upgrade that has not
+                // run yet) or unreadable. My Work keeps its built-in sources.
+                $c->get(\Psr\Log\LoggerInterface::class)->warning(
+                    '[TeamHub][MyWork] Could not read integration My Work providers',
+                    ['error_class' => get_class($e), 'exception' => $e, 'app' => self::APP_ID],
+                );
             }
 
             return $registry;

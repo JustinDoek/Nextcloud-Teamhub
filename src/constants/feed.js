@@ -19,23 +19,24 @@ export const FEED_TAB_PUBLIC = 'public'
 export const FEED_TAB_TALK = 'talk'
 export const FEED_TAB_MENTIONS = 'mentions'
 export const FEED_TAB_DECISIONS = 'decisions'
-// v4.9.7 — OpenProject news. Its own source, its own tab: a news item is
-// not a TeamHub message, and hiding it under Team would blur the one thing
-// the feed must keep clear — where a row comes from.
-export const FEED_TAB_OPENPROJECT = 'openproject'
+// v4.13.31 — there is no OpenProject tab. v4.9.7 gave news a source of its
+// own on the reasoning that "a news item is not a TeamHub message"; it is
+// one (Justin, 2026-10-26). The mirror has written every item into the
+// team's stream as a team message since 4.9.7, so a separate tab asked the
+// reader to look in two places for the same thing. News rows are counted
+// and filtered under Team; where the row came from is the card's job (the
+// OpenProject project pill, the author line, Open in OpenProject).
 
 /**
- * Note that these do not partition the feed. Team / Public / Talk /
- * OpenProject do, but Mentions and Decisions are lenses over the same rows —
- * a decision is also a team message. The counts are therefore not expected
- * to sum to All.
+ * Note that these do not partition the feed. Team / Public / Talk do, but
+ * Mentions and Decisions are lenses over the same rows — a decision is also
+ * a team message. The counts are therefore not expected to sum to All.
  */
 export const FEED_TABS = [
 	FEED_TAB_ALL,
 	FEED_TAB_TEAM,
 	FEED_TAB_PUBLIC,
 	FEED_TAB_TALK,
-	FEED_TAB_OPENPROJECT,
 	FEED_TAB_DECISIONS,
 	FEED_TAB_MENTIONS,
 ]
@@ -52,6 +53,12 @@ export const FEED_TABS = [
  * Null when there is nothing to say (`ok`, `skipped`, or simply switched
  * off).
  *
+ * A connection the viewer never made, or one OpenProject stopped accepting,
+ * is not a notice here (removed 2026-10-23): What's new is a feed, and a
+ * line asking for an account the reader may not want belongs in personal
+ * settings, not above everybody else's news. Only a source that was asked
+ * and answered badly says anything.
+ *
  * @param {object} status { state, code, message, covered, skipped }
  * @return {{text: string, action: string|null}|null}
  */
@@ -61,15 +68,7 @@ export function openProjectSourceNotice(status) {
 	}
 	switch (status.state) {
 	case 'not_connected':
-		return {
-			text: t('teamhub', 'Connect your OpenProject account to see project news here.'),
-			action: 'connect',
-		}
 	case 'auth_required':
-		return {
-			text: t('teamhub', 'OpenProject no longer accepts your connection. Reconnect your OpenProject account in your personal settings.'),
-			action: 'connect',
-		}
 	case 'unavailable':
 		return null
 	case 'partial':
@@ -100,9 +99,6 @@ export function feedTabLabel(id) {
 		return t('teamhub', 'Team messages')
 	case FEED_TAB_PUBLIC:
 		return t('teamhub', 'Public messages')
-	case FEED_TAB_OPENPROJECT:
-		// TRANSLATORS: feed tab showing OpenProject work-package activity
-		return t('teamhub', 'OpenProject')
 	case FEED_TAB_TALK:
 		return t('teamhub', 'Talk polls & threads')
 	case FEED_TAB_MENTIONS:
@@ -208,15 +204,17 @@ export function feedItemKind(item) {
 }
 
 /**
- * The All tab without the same news item twice (v4.9.9).
+ * The page without the same news item twice (v4.9.9).
  *
  * A news item read live from OpenProject and the team message the mirror
- * wrote for it are the same thing said twice, and on a tab that lists
- * both sources they would sit a few rows apart. The live card stays — it
- * is the one with the project link and the author — and the mirrored
- * message goes, but only when its news item is on the same page: the
- * mirrored post is a message like any other on the Team tab, and on All
- * when the news source is switched off or the card is on another page.
+ * wrote for it are the same thing said twice, and they would sit a few rows
+ * apart. The live card stays — it is the one with the project link and the
+ * author — and the mirrored message goes, but only when its news item is on
+ * the same page: with the news source switched off, or the card on another
+ * page, the mirrored post is a message like any other.
+ *
+ * v4.13.31 — applied to every tab, not only All. News rows now land under
+ * Team, so Team is the other tab that can hold both halves of the pair.
  *
  * @param {Array<object>} items the page as the server sent it
  * @return {Array<object>} the same rows, minus the mirrored duplicates
@@ -256,9 +254,10 @@ export function feedKindLabel(kind) {
 	case 'talk-mention':
 		// TRANSLATORS: badge on a feed card for a Talk chat message that names you
 		return t('teamhub', 'Talk mention')
-	case 'openproject':
-		// TRANSLATORS: badge on a feed card for a news item from OpenProject
-		return t('teamhub', 'OpenProject news')
+	// v4.13.31 — no case for 'openproject': a news item is a team message
+	// and wears the same badge as one. What it does *not* share with a
+	// plain post (no thread here, a project pill, Open in OpenProject)
+	// still keys on the kind — the kind stayed, only the category went.
 	case 'system':
 		// TRANSLATORS: badge on a feed card for a message posted automatically by TeamHub, not by a person
 		return t('teamhub', 'System')
@@ -289,8 +288,8 @@ export function feedKindTone(kind) {
 	case 'talk-thread':
 	case 'talk-mention':
 		return 'talk'
-	case 'openproject':
-		return 'openproject'
+	// v4.13.31 — no tone of its own either: a news row scans as the team
+	// message it is, same glyph chip as the post beside it.
 	case 'system':
 		return 'system'
 	case 'question':

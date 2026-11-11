@@ -42,6 +42,7 @@ use Psr\Log\LoggerInterface;
  *   "builtin_integrations": {"files": 30, "calendar": 20, "deck": 12, "talk": 8},
  *   "presence_module":      true,
  *   "link_domains":         {"github.com": 12, "trello.com": 5, "notion.so": 3},
+ *   "announcement_popup":   {"feedback.md": {"shown": 3, "read": 2, "ack": 2, "optout": 1}},
  *   "event":                "daily_report" | "installed" | "uninstalled"
  * }
  */
@@ -245,6 +246,19 @@ class TelemetryService {
             'decisions_by_status'         => $this->countDecisionsByStatus(),
             'decision_categories_count'   => $this->countDecisionCategoriesTotal(),
             'suggest_wizard_uses'  => (int)$this->config->getAppValue(Application::APP_ID, 'suggest_wizard_uses', '0'),
+            // v4.13.56 — the in-app announcement popup, per announcement:
+            // how many administrators were shown it, scrolled it to the end,
+            // pressed OK, and ticked "do not show again". Counts only, no user
+            // and no content; the per-user ledger that stops one person
+            // reloading from reading as twenty instances lives in
+            // AnnouncementService.
+            //
+            // Read from the config value rather than through
+            // AnnouncementService: that service constructs LicenseService, and
+            // this one already cannot inject LicenseService without a cycle
+            // (see isEnabled()). The value is this payload's own shape, so a
+            // decode here costs nothing a getter would save.
+            'announcement_popup'   => $this->getAnnouncementPopupStats(),
             'link_domains'         => $this->getLinkDomains(),
         ];
         return $stats;
@@ -253,6 +267,44 @@ class TelemetryService {
     // -------------------------------------------------------------------------
     // Private helpers
     // -------------------------------------------------------------------------
+
+    /**
+     * The announcement popup's counters (v4.13.56).
+     *
+     * Shape: `{ "<filename>": { shown: n, read: n, ack: n, optout: n } }`.
+     * Empty array when nothing has been recorded, which is also what an
+     * instance that has never had an announcement reports.
+     *
+     * Every value is cast rather than trusted. The config string is written
+     * only by AnnouncementService, but it is still a config string, and a
+     * hand edit on an instance must not be able to put an object or a string
+     * into the stats payload.
+     *
+     * @return array<string,array<string,int>>
+     */
+    private function getAnnouncementPopupStats(): array {
+        $raw = $this->config->getAppValue(Application::APP_ID, 'announce_popup_stats', '');
+        if ($raw === '') {
+            return [];
+        }
+        $decoded = json_decode($raw, true);
+        if (!is_array($decoded)) {
+            return [];
+        }
+        $out = [];
+        foreach ($decoded as $filename => $events) {
+            if (!is_string($filename) || !is_array($events)) {
+                continue;
+            }
+            $out[$filename] = [
+                'shown'  => (int)($events['shown']  ?? 0),
+                'read'   => (int)($events['read']   ?? 0),
+                'ack'    => (int)($events['ack']    ?? 0),
+                'optout' => (int)($events['optout'] ?? 0),
+            ];
+        }
+        return $out;
+    }
 
     private function send(string $event): void {
         $payload = array_merge($this->collectStats(), ['event' => $event]);

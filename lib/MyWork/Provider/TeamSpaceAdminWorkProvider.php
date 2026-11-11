@@ -625,7 +625,7 @@ class TeamSpaceAdminWorkProvider implements IWorkProvider {
             $this->l->t('Ask the team owner to open Files, select everything in the shared folder "%1$s" and move it into the team space "%2$s".', [$shared, $space]),
         ];
         if (!$spaceConnected) {
-            $steps[] = $this->l->t('In Manage team → Modules & integrations → Files, the owner connects the team space with "+ Connect team folder" — it is already listed.');
+            $steps[] = $this->l->t('In Manage team → Modules & integrations → Files, the owner connects the team space with "+ Connect team folder": it is already listed.');
         }
         $steps[] = $this->l->t('The owner then disconnects the shared folder "%s" in the same section. The folder itself stays in their Files; only the team\'s access to it ends.', [$shared]);
         $steps[] = $this->l->t('This item clears itself once the shared folder is disconnected. Nothing is deleted at any step.');

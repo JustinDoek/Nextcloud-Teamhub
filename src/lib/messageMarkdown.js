@@ -228,6 +228,32 @@ export function renderMarkdown(text, membersMap = {}) {
         return `<ul>${items}</ul>\n`
     })
 
+    // 6c. Numbered lists - added v4.13.57.
+    //
+    // `ol` and `li` have been on ALLOWED_TAGS since this renderer was written
+    // and **nothing emitted an `ol`**, so `1. first` rendered as the literal
+    // text "1. first" followed by a line break. The three message toolbars
+    // have had a Numbered list button the whole time (`buildList(text, true)`
+    // writes exactly this syntax), so that button has always produced text
+    // that looks like a list in the composer and not like one in the post.
+    // Found while giving the welcome-page message a toolbar of its own.
+    //
+    // Deliberately mirrors 6b rather than generalising it: one shared
+    // block-list helper would have to carry the marker pattern, the strip
+    // pattern and the wrapper tag as arguments, which is longer than the
+    // second copy and leaves both harder to read.
+    //
+    // The author's own numbers are not preserved: `<ol>` numbers itself from
+    // 1, so a list written 3. 4. 5. renders 1. 2. 3. That is what every other
+    // markdown renderer does, and keeping them needs a `start` attribute on
+    // the allowlist.
+    html = html.replace(/((?:^\d+\. .+(?:\n|$))+)/gm, (block) => {
+        const items = block.trimEnd().split('\n')
+            .map(line => `<li>${line.replace(/^\d+\. /, '')}</li>`)
+            .join('')
+        return `<ol>${items}</ol>\n`
+    })
+
     // 7. Remaining newlines → <br>
     html = html.replace(/\n/g, '<br>')
 

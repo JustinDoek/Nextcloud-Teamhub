@@ -8,11 +8,13 @@ use OCA\TeamHub\Constants\CirclesConfig;
 use OCA\TeamHub\Constants\PolicyField;
 use OCA\TeamHub\Constants\TeamApps;
 use OCA\TeamHub\Constants\TeamTemplates;
+use OCA\TeamHub\Db\LayoutDefaultMapper;
 use OCA\TeamHub\Db\PolicyObservationMapper;
 use OCA\TeamHub\Db\PolicyProfileMapper;
 use OCA\TeamHub\Db\PolicyValueMapper;
 use OCA\TeamHub\Db\TeamAppPresenceMapper;
 use OCA\TeamHub\Db\TeamPolicyMapper;
+use OCA\TeamHub\Db\IntegrationTemplateMapper;
 use OCA\TeamHub\Db\TeamTemplateMapper;
 use OCA\TeamHub\Db\TeamTypeMapper;
 use OCA\TeamHub\Exception\AccessDeniedException;
@@ -106,6 +108,13 @@ class PolicyService {
         // `teamhub_team_type.type` is where a team's template key has lived
         // since v4.0.2; `teamhub_template` holds only the definitions.
         private TeamTypeMapper      $teamTypeMapper,
+        // v4.13.24 — only `deleteTemplate()` touches this, to drop the
+        // inclusions that pointed at a template key that is going away. A Db
+        // mapper, so it injects no TeamHub service and keeps this constructor
+        // clear of the shape `npm run check:di` exists to refuse.
+        private IntegrationTemplateMapper $integrationTemplates,
+        // v4.13.34 — a deleted template's default home layout goes with it.
+        private LayoutDefaultMapper $layoutDefaults,
         // v4.8.24 — `confidential_tag`. Both are leaves in the DI graph (neither
         // injects a TeamHub service), so this stays clear of the shape that took
         // the app down in 4.8.7; `npm run check:di` is what proves it.
@@ -448,6 +457,12 @@ class PolicyService {
             'apps'           => TeamTemplates::APPS,
             'modules'        => TeamTemplates::MODULES,
             'managedBits'    => CirclesConfig::MANAGED_BITS,
+            // v4.13.24 — teams per template key, one grouped query. Context
+            // for the delete confirmation: the first thing an administrator
+            // wants to know about deleting a template is what happens to the
+            // teams made from it. A key with no teams is absent, so the
+            // panel reads it as 0.
+            'teamsByTemplate' => $this->teamTypeMapper->countByType(),
         ];
     }
 
@@ -485,6 +500,211 @@ class PolicyService {
     }
 
     /**
+     * Create a template — v4.13.24.
+     *
+     * Any Nextcloud administrator. Until now there was no create path at all:
+     * `teamhub_template` only ever gained rows from the seed, so the five
+     * shipped kinds of team were the only kinds an estate could have, and
+     * `update()` without `insert()` meant the admin screen could rename the
+     * shipped set and nothing more. An estate whose teams are "practice",
+     * "case" or "cohort" had to pick the nearest shipped label.
+     *
+     * No migration is behind this. `template_key` is the table's primary key
+     * and the create-team wizard, the CSV importer and the exporter all read
+     * this table live (`liveAtCreation`), so a template created here is
+     * offered the moment it is saved.
+     *
+     * Everything is validated exactly as {@see updateTemplate()} validates
+     * it, through the same helpers: one rule, not a create-shaped copy of it.
+     *
+     * @param list<string> $apps
+     * @param list<string> $modules
+     * @return array<string,mixed> the stored template
+     */
+    public function createTemplate(
+        string  $templateKey,
+        string  $label,
+        ?string $description,
+        array   $apps,
+        array   $modules,
+        bool    $expiryEnabled,
+        int     $expiryDefaultDays,
+        int     $preselectConfig,
+        int     $sortIndex,
+        ?string $defaultProfileKey = null,
+    ): array {
+        $actor = $this->requireNcAdmin();
+        $now   = time();
+
+        $templateKey = strtolower(trim($templateKey));
+        $this->assertValidKey($templateKey);
+        if ($this->templateMapper->exists($templateKey)) {
+            throw new ValidationException('A template with that key already exists.');
+        }
+        // A key that matches a retired shipped one would be re-seeded on the
+        // next upgrade and silently merge with what the administrator built
+        // here. Refused, so the collision is theirs to resolve now rather
+        // than Nextcloud's to resolve during an occ upgrade.
+        if (in_array($templateKey, TeamTemplates::TEMPLATES, true)) {
+            throw new ValidationException(
+                'That key belongs to one of the templates TeamHub ships. Choose another.',
+            );
+        }
+
+        $defaultProfileKey = $this->normaliseDefaultProfileKey($defaultProfileKey);
+        $label             = $this->assertValidLabel($label);
+        $description       = $this->normaliseDescription($description);
+        $sortIndex         = $this->assertValidSortIndex($sortIndex);
+        $apps              = $this->filterToVocabulary($apps, TeamTemplates::APPS, 'app');
+        $modules           = $this->filterToVocabulary($modules, TeamTemplates::MODULES, 'module');
+        $preselectConfig  &= CirclesConfig::MANAGED_BITS;
+        $expiryDefaultDays = $this->normaliseExpiryDays($expiryEnabled, $expiryDefaultDays);
+
+        $this->templateMapper->insert(
+            $templateKey,
+            $label,
+            $description,
+            $apps,
+            $modules,
+            $expiryEnabled,
+            $expiryDefaultDays,
+            $preselectConfig,
+            $sortIndex,
+            $defaultProfileKey,
+            $actor,
+            $now,
+        );
+
+        $this->auditInstance('policy.template_created', $actor, $templateKey, [
+            'label'   => $label,
+            'apps'    => $apps,
+            'modules' => $modules,
+        ]);
+
+        $created = $this->templateMapper->find($templateKey);
+
+        return $created ?? [];
+    }
+
+    /**
+     * Delete a template — v4.13.24.
+     *
+     * Three refusals, each because the alternative is worse than the
+     * inconvenience:
+     *
+     *  - **A seeded template.** `SeedTemplatesAndProfiles` re-inserts the
+     *    shipped set on every upgrade, so a deleted one would come back at
+     *    the next `occ upgrade` with its edits gone. Refusing says no once;
+     *    allowing it says yes and then quietly undoes itself.
+     *  - **The last template.** The create-team wizard needs one, so an
+     *    instance with none could not create a team at all. The same promise
+     *    `deleteProfile()` keeps, in the same place and for the same reason.
+     *  - Nothing else. In particular **teams created from it do not stop it**:
+     *    `teamhub_team_type.type` keeps the key, so those teams keep every
+     *    app, module and setting they were created with. A template describes
+     *    what a team is made with, not what it is — which is exactly why the
+     *    key is never renamed either (see `TeamTemplateMapper::update()`).
+     *
+     * What a team of a deleted template loses is its *future* relationship to
+     * the definition: a policy propagation has no template to push, and the
+     * integration packages the template included stop being effective for it,
+     * because inclusion is read live. That second one is why this method
+     * reports the team count — the administrator should see it before
+     * confirming, and the controller passes it back so the panel can.
+     *
+     * @return array{template_key: string, label: string, teams_affected: int,
+     *               inclusions_removed: int}
+     */
+    public function deleteTemplate(string $templateKey): array {
+        $actor = $this->requireNcAdmin();
+
+        $existing = $this->templateMapper->find($templateKey);
+        if ($existing === null) {
+            throw new NotFoundException('No such template.');
+        }
+
+        if ($existing['isSeeded']) {
+            throw new ValidationException(
+                'This is one of the templates TeamHub ships. It can be edited but not deleted — '
+                . 'an upgrade would restore it.',
+            );
+        }
+
+        if (count($this->templateMapper->findAll()) <= 1) {
+            throw new ValidationException(
+                'This is the only template. Teams cannot be created without one, so it cannot be deleted.',
+            );
+        }
+
+        $teamIds = $this->teamTypeMapper->findTeamsByType($templateKey);
+
+        // The inclusions have to go: their key will name nothing, and a
+        // template later created with the same key would switch integrations
+        // on for teams nobody asked. Per-team shown/hidden preferences and
+        // ordering are untouched — those hang off the capability and the
+        // team, not the template.
+        $inclusionsRemoved = $this->integrationTemplates->removeTemplate($templateKey);
+
+        // v4.13.34 — and the default home layout for this kind of team, for
+        // exactly the reason above: a template created later with the same key
+        // would hand its teams a layout somebody chose for a template that no
+        // longer exists. The mapper rather than LayoutDefaultService because
+        // this is a plain delete and the service's audit entry would claim an
+        // administrator cleared a default they actually deleted a template.
+        $this->layoutDefaults->delete(LayoutDefaultMapper::SCOPE_TEMPLATE, $templateKey);
+
+        $this->templateMapper->delete($templateKey);
+
+        $this->auditInstance('policy.template_deleted', $actor, $templateKey, [
+            'label'              => $existing['label'],
+            'teams_affected'     => count($teamIds),
+            'inclusions_removed' => $inclusionsRemoved,
+        ]);
+
+        return [
+            'template_key'       => $templateKey,
+            'label'              => (string)$existing['label'],
+            'teams_affected'     => count($teamIds),
+            'inclusions_removed' => $inclusionsRemoved,
+        ];
+    }
+
+    /**
+     * v4.13.24 — the shared half of create's and update's validation, so the
+     * two cannot drift. Empty means none, which is what every template ships
+     * with.
+     */
+    private function normaliseDefaultProfileKey(?string $defaultProfileKey): ?string {
+        $key = $defaultProfileKey === null ? '' : trim($defaultProfileKey);
+        if ($key !== '' && !$this->profileMapper->exists($key)) {
+            throw new ValidationException('No such profile.');
+        }
+
+        return $key === '' ? null : $key;
+    }
+
+    /**
+     * v4.13.24 — whole days, bounded, and cleared when the template cannot
+     * expire. 0 means "no default" and is the shipped value. The cap is ten
+     * years: a default longer than that is a typo, and the picker it feeds
+     * has to land on a real date.
+     *
+     * A default period on a template that cannot expire is a value nothing
+     * reads. Cleared rather than refused — unticking the box is a normal
+     * edit, and refusing the save would make the administrator clear a field
+     * they can no longer see.
+     */
+    private function normaliseExpiryDays(bool $expiryEnabled, int $expiryDefaultDays): int {
+        if ($expiryDefaultDays < 0 || $expiryDefaultDays > self::EXPIRY_DAYS_MAX) {
+            throw new ValidationException(
+                'The default expiration period must be between 0 and ' . self::EXPIRY_DAYS_MAX . ' days.',
+            );
+        }
+
+        return $expiryEnabled ? $expiryDefaultDays : 0;
+    }
+
+    /**
      * @param list<string> $apps
      * @param list<string> $modules
      * @return array<string,mixed>
@@ -509,13 +729,10 @@ class PolicyService {
             throw new NotFoundException('No such template.');
         }
 
-        // v4.8.5 — the policy new teams of this kind start from. Empty means
-        // none, which is what every template ships with.
-        $defaultProfileKey = $defaultProfileKey === null ? '' : trim($defaultProfileKey);
-        if ($defaultProfileKey !== '' && !$this->profileMapper->exists($defaultProfileKey)) {
-            throw new ValidationException('No such profile.');
-        }
-        $defaultProfileKey = $defaultProfileKey === '' ? null : $defaultProfileKey;
+        // v4.8.5 — the policy new teams of this kind start from.
+        // v4.13.24 — shared with createTemplate(); see
+        // `normaliseDefaultProfileKey()`.
+        $defaultProfileKey = $this->normaliseDefaultProfileKey($defaultProfileKey);
 
         $label       = $this->assertValidLabel($label);
         $description = $this->normaliseDescription($description);
@@ -531,21 +748,10 @@ class PolicyService {
         // unwritable through Circles' own API (DESIGN §2.4 / v4.5.35).
         $preselectConfig &= CirclesConfig::MANAGED_BITS;
 
-        // Whole days, and bounded. 0 means "no default" and is the shipped
-        // value. The cap is ten years: a default longer than that is a typo,
-        // and the picker it feeds has to land on a real date.
-        if ($expiryDefaultDays < 0 || $expiryDefaultDays > self::EXPIRY_DAYS_MAX) {
-            throw new ValidationException(
-                'The default expiration period must be between 0 and ' . self::EXPIRY_DAYS_MAX . ' days.',
-            );
-        }
-        // A default period on a template that cannot expire is a value nothing
-        // reads. Cleared rather than refused — unticking the box is a normal
-        // edit, and refusing the save would make the admin clear a field they
-        // can no longer see.
-        if (!$expiryEnabled) {
-            $expiryDefaultDays = 0;
-        }
+        // v4.13.24 — shared with createTemplate(); see `normaliseExpiryDays()`
+        // for the bound, and for why a stale period is cleared rather than
+        // refused.
+        $expiryDefaultDays = $this->normaliseExpiryDays($expiryEnabled, $expiryDefaultDays);
 
         // v4.8.27 — the plan, computed before the write for the same reason the
         // profile's is: compliance is "does this team still have what the
@@ -1028,6 +1234,23 @@ class PolicyService {
      * @return array{profileKey: string, label: string, isSeeded: bool, values: array<string,mixed>}|null
      *         null for an unclassified team.
      */
+    /**
+     * When this team's policy profile was assigned, or null when it carries
+     * none (v4.13.17).
+     *
+     * One number out of the assignment row, exposed because the membership
+     * recertification clock needs an anchor for a team that has never been
+     * reviewed and *classification* is the honest one — see
+     * `MemberReviewService::dueAt()` for why creation would be wrong. Ungated
+     * on the same terms as `governanceFor()`.
+     */
+    public function classifiedAtFor(string $teamId): ?int {
+        $assignment = $this->teamPolicyMapper->findByTeam($teamId);
+        $at         = (int)($assignment['assignedAt'] ?? 0);
+
+        return $at > 0 ? $at : null;
+    }
+
     public function governanceSummaryFor(string $teamId): ?array {
         $assignment = $this->teamPolicyMapper->findByTeam($teamId);
         if ($assignment === null) {

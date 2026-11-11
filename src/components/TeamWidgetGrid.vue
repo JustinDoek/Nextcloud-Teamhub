@@ -14,28 +14,97 @@
         <div v-if="editMode && !isMobile && !isTablet" class="teamhub-edit-banner">
             <ViewDashboardEdit :size="ICON_BODY" />
             <span class="teamhub-edit-banner-text">{{ t('teamhub', 'Drag widgets to rearrange. Use the resize icon in the bottom-right corner of each widget to resize.') }}</span>
-            <!-- Default layout actions — always shown in edit mode so they are always discoverable -->
+            <!-- Default layout actions — always shown in edit mode so they are
+                 always discoverable.
+
+                 v4.13.34 — a menu rather than two icon buttons.
+
+                 v4.13.35 — three entries, not five. The two that set
+                 instance-wide and per-template defaults are gone from here and
+                 live in Admin -> TeamHub -> Policy, with an editor of their
+                 own. Justin, 2026-10-28: Nextcloud admin tasks belong in
+                 Admin -> TeamHub rather than inside a team, because nothing
+                 guarantees a Nextcloud administrator is a member of one. That
+                 was the hole in capture-from-the-home: it needed the
+                 administrator to be in a team of the very kind they were
+                 configuring.
+
+                 What stays is what belongs to somebody who is *in* the team:
+                 their default for this template, and this team's layout if they administer
+                 it. `closeMenuThen` closes the menu on the way out, which
+                 clicking an action does not do on its own.
+
+                 `canSetTeamDefault` is answered by the server, so the team
+                 entry is hidden rather than disabled (CLAUDE.md) and the route
+                 checks again anyway. -->
             <div class="teamhub-edit-banner-actions">
-                <NcButton
-                    variant="tertiary"
-                    :title="t('teamhub', 'Save as the default layout for all teams')"
-                    :aria-label="t('teamhub', 'Save as the default layout for all teams')"
-                    @click="$emit('set-as-default')">
+                <template v-if="editingTeamPreset">
+                    <NcButton variant="primary" :disabled="layoutActionBusy" @click="$emit('publish-team-layout')">
+                        {{ t('teamhub', 'Publish team layout') }}
+                    </NcButton>
+                    <NcButton variant="secondary" :disabled="layoutActionBusy" @click="$emit('cancel-team-layout')">
+                        {{ t('teamhub', 'Cancel') }}
+                    </NcButton>
+                    <!-- Unlock retains the last published team layout, NOT the unsaved draft.
+                         Only a team admin can enter this enforced-preset editor. -->
+                    <NcButton
+                        v-if="canSetTeamDefault && teamPreset?.mode === 'enforce'"
+                        variant="tertiary"
+                        :disabled="layoutActionBusy"
+                        @click="$emit('unlock-team-layout')">
+                        {{ t('teamhub', 'Unlock layout') }}
+                    </NcButton>
+                </template>
+                <NcActions v-else
+                    :open="layoutMenuOpen"
+                    :aria-label="t('teamhub', 'Layout defaults')"
+                    :title="t('teamhub', 'Layout defaults')"
+                    @update:open="layoutMenuOpen = $event">
                     <template #icon>
                         <ContentSaveAll :size="ICON_BODY" />
                     </template>
-                </NcButton>
-                <NcButton
-                    variant="tertiary"
-                    :title="t('teamhub', 'Reset to the default layout')"
-                    :aria-label="t('teamhub', 'Reset to the default layout')"
-                    @click="$emit('reset-to-default')">
-                    <template #icon>
-                        <Restore :size="ICON_BODY" />
-                    </template>
-                </NcButton>
+                    <NcActionButton v-if="canSaveTypeDefault"
+                        :title="t('teamhub', 'Use this layout for your other teams based on the same template.')"
+                        @click="closeMenuThen('set-as-default')">
+                        <template #icon><ContentSaveAll :size="ICON_BODY" /></template>
+                        {{ t('teamhub', 'Save as my type default') }}
+                    </NcActionButton>
+                    <NcActionButton v-if="canSetTeamDefault" @click="closeMenuThen('set-as-team-default')">
+                        <template #icon><AccountGroup :size="ICON_BODY" /></template>
+                        {{ t('teamhub', 'Save as the layout for this team') }}
+                    </NcActionButton>
+                    <NcActionButton @click="closeMenuThen('reset-to-default')">
+                        <template #icon><Restore :size="ICON_BODY" /></template>
+                        {{ t('teamhub', 'Reset to template') }}
+                    </NcActionButton>
+                </NcActions>
             </div>
         </div>
+
+        <!-- v4.13.34 — the team has a layout and is offering it rather than
+             applying it (`suggest`). A notice and a button, in edit mode and
+             out of it, because a member who has never opened edit mode is
+             exactly the one who would want to take the team's arrangement.
+
+             Dismissal is per viewer and per team and lives in localStorage:
+             it is a convenience, not a decision, and nothing else needs to
+             know it. A read that throws (private window, blocked site data)
+             shows the notice, which is the safe way round for an offer. -->
+        <NcNoteCard
+            v-if="showTeamPresetOffer"
+            type="info"
+            class="teamhub-team-preset-note">
+            <p>{{ t('teamhub', 'This team has a suggested home layout.') }}</p>
+            <div class="teamhub-team-preset-note__actions">
+                <NcButton variant="secondary" @click="$emit('apply-team-preset')">
+                    <template #icon><ViewDashboardOutline :size="ICON_BODY" /></template>
+                    {{ t('teamhub', 'Use the team layout') }}
+                </NcButton>
+                <NcButton variant="tertiary" @click="dismissTeamPresetOffer">
+                    {{ t('teamhub', 'No thanks') }}
+                </NcButton>
+            </div>
+        </NcNoteCard>
 
         <!-- v4.6.1 — vertical-compact is back ON. It was previously false, with
              TeamView.applySnap() standing in as a hand-rolled reflow. That
@@ -97,6 +166,7 @@
                             </template>
                         </NcButton>
                         <WidgetCollapseButton
+                            v-if="teamPreset?.mode !== 'enforce' || editingTeamPreset"
                             :collapsed="isCollapsed('msgstream')"
                             :widget-name="t('teamhub', 'Team messages')"
                             @toggle="toggleCollapse('msgstream')" />
@@ -136,84 +206,20 @@
                              Team info widget can be hidden by the owner without
                              stranding them. -->
                         <WidgetCollapseButton
+                            v-if="teamPreset?.mode !== 'enforce' || editingTeamPreset"
                             :collapsed="isCollapsed('widget-teaminfo')"
                             :widget-name="t('teamhub', 'Team info')"
                             @toggle="toggleCollapse('widget-teaminfo')" />
                     </div>
 
-                    <!-- Resource warning strip — directly under header, matches DeckWidget unassigned pattern -->
-                    <div
-                        v-if="isTeamAdmin && resourceWarningTotal > 0"
-                        class="teamhub-resource-warning"
-                        role="alert"
-                        aria-live="polite">
-                        <AlertCircle :size="ICON_INLINE" class="teamhub-resource-warning__icon" aria-hidden="true" />
-                        <span class="teamhub-resource-warning__text">
-                            <!-- TRANSLATORS: N is the number of connected resources that need review -->
-                            {{ n('teamhub', '%n resource needs review.', '%n resources need review.', resourceWarningTotal, { n: resourceWarningTotal }) }}
-                        </span>
-                        <NcButton
-                            class="teamhub-resource-warning__link"
-                            :aria-label="t('teamhub', 'Open modules & integrations to review resources')"
-                            :title="t('teamhub', 'Open modules & integrations to review resources')"
-                            @click="openSettingsAtRisk"
-                            variant="tertiary">
-                            <template #icon>
-                                <ChevronRightIcon :size="ICON_BODY" aria-hidden="true" />
-                            </template>
-                        </NcButton>
-                    </div>
-
-                    <!-- v4.6.13 — expiration strip. Same shape as the resource
-                         warning above, and admin-only for the same reason: the
-                         only thing to do about it is request an extension, and
-                         that is a team-admin action (SKILLS.md § Permissions —
-                         hide what a member cannot do rather than disable it).
-                         Only appears inside the warning window or after the
-                         date has passed; a team expiring in eight months has
-                         nothing to say here. -->
-                    <div
-                        v-if="isTeamAdmin && expiryBannerVisible"
-                        class="teamhub-resource-warning"
-                        :class="{ 'teamhub-resource-warning--expired': teamExpiry.expired }"
-                        role="status"
-                        aria-live="polite">
-                        <AlertCircle :size="ICON_INLINE" class="teamhub-resource-warning__icon" aria-hidden="true" />
-                        <span class="teamhub-resource-warning__text">
-                            <template v-if="teamExpiry.expired">
-                                {{ t('teamhub', 'This team passed its expiration date on {date}.', { date: teamExpiry.expiresOn }) }}
-                            </template>
-                            <template v-else>
-                                <!-- TRANSLATORS: N is a whole number of days until this team's expiration date -->
-                                {{ n('teamhub',
-                                     'This team expires in %n day.',
-                                     'This team expires in %n days.',
-                                     teamExpiry.daysRemaining,
-                                     { n: teamExpiry.daysRemaining }) }}
-                            </template>
-                        </span>
-                        <NcButton
-                            class="teamhub-resource-warning__link"
-                            :aria-label="t('teamhub', 'Open team maintenance to request an extension')"
-                            :title="t('teamhub', 'Open team maintenance to request an extension')"
-                            @click="openMaintenanceForExpiry"
-                            variant="tertiary">
-                            <template #icon>
-                                <ChevronRightIcon :size="ICON_BODY" aria-hidden="true" />
-                            </template>
-                        </NcButton>
-                    </div>
-
-                    <!-- v4.9.6 — a workspace whose provisioning is not finished says
-                         so here, to every member; the details and the actions are
-                         for the creator, an administrator and the team's admins.
-                         Never hidden while a required step failed. -->
-                    <ProvisioningBanner
-                        v-if="provisioning && !provisioning.complete"
-                        :provisioning="provisioning"
-                        :is-team-admin="isTeamAdmin"
-                        @changed="$emit('provisioning-changed')" />
-
+                    <!-- v4.13.1 — the resource-review, expiry and unfinished-
+                         provisioning strips used to live here, between this
+                         widget's header and its body. They moved to
+                         TeamNotices, above the grid: this widget is hidden by
+                         default since the banner carries the team's name and
+                         description, and a warning that only shows while a
+                         switched-off widget is on screen is not a warning
+                         (DESIGN §2.185). Do not bring them back here. -->
                     <div v-show="!isCollapsed('widget-teaminfo')" class="teamhub-widget-content teamhub-widget-content--teaminfo">
                         <div class="teamhub-teaminfo-body">
                             <img
@@ -233,16 +239,25 @@
                                 {{ label.text }}
                             </span>
                         </div>
-                        <div v-if="teamOwner" class="teamhub-team-owner">
-                            <span class="teamhub-info-label">{{ t('teamhub', 'Owner') }}</span>
-                            <div class="teamhub-owner-row">
+                        <!-- v4.13.56 — was a single "Owner" row (DESIGN §2.223).
+                             A team shows its team admins, and the person who
+                             holds the team is simply first among them. Which
+                             also fixes what the one-person row was bad at: on
+                             a team with four admins it named the one member
+                             nobody is expected to go to. -->
+                        <div v-if="teamAdmins.length" class="teamhub-team-owner">
+                            <span class="teamhub-info-label">{{ t('teamhub', 'Team admins') }}</span>
+                            <div
+                                v-for="admin in teamAdmins"
+                                :key="admin.userId || admin.displayName"
+                                class="teamhub-owner-row">
                                 <NcAvatar
-                                    v-if="teamOwner.userId"
-                                    :user="teamOwner.userId"
-                                    :display-name="teamOwner.displayName"
+                                    v-if="admin.userId"
+                                    :user="admin.userId"
+                                    :display-name="admin.displayName"
                                     :hide-status="true"
                                     :size="24" />
-                                <span class="teamhub-owner-name">{{ teamOwner.displayName }}</span>
+                                <span class="teamhub-owner-name">{{ admin.displayName }}</span>
                             </div>
                         </div>
                     </div><!-- end teamhub-widget-content -->
@@ -283,12 +298,44 @@
                             </template>
                         </NcButton>
                         <WidgetCollapseButton
+                            v-if="teamPreset?.mode !== 'enforce' || editingTeamPreset"
                             :collapsed="isCollapsed('widget-members')"
                             :widget-name="t('teamhub', 'Members')"
                             @toggle="toggleCollapse('widget-members')" />
                     </div>
                     <div v-show="!isCollapsed('widget-members')" class="teamhub-widget-content teamhub-widget-content--notoppad">
                         <MembersWidget @view-presence-calendar="$emit('set-view', 'presence')" />
+                    </div>
+                </div>
+            </grid-item>
+
+            <!-- Department birthdays; visibility and coordinates are governed
+                 by the central active-widget set, like every other card. -->
+            <grid-item
+                v-if="getGridItem('widget-birthdays')"
+                v-bind="getGridItem('widget-birthdays')"
+                class="teamhub-grid-item"
+                :class="{ 'teamhub-grid-item--editing': editMode }">
+                <div class="teamhub-widget-card">
+                    <div v-if="editMode" class="teamhub-widget-drag-handle" tabindex="0"
+                        :aria-label="t('teamhub', 'Birthdays') + ' — ' + t('teamhub', 'use arrow keys to move')"
+                        @keydown.up.prevent="moveWidget('widget-birthdays', 'up')"
+                        @keydown.down.prevent="moveWidget('widget-birthdays', 'down')"
+                        @keydown.left.prevent="moveWidget('widget-birthdays', 'left')"
+                        @keydown.right.prevent="moveWidget('widget-birthdays', 'right')">
+                        <DragVariant :size="ICON_BODY" /><span aria-hidden="true">{{ t('teamhub', 'Birthdays') }}</span>
+                    </div>
+                    <div class="teamhub-widget-header">
+                        <CakeVariant :size="ICON_LARGE" />
+                        <h2 class="teamhub-widget-title">{{ t('teamhub', 'Birthdays') }}</h2>
+                        <WidgetCollapseButton
+                            v-if="teamPreset?.mode !== 'enforce' || editingTeamPreset"
+                            :collapsed="isCollapsed('widget-birthdays')"
+                            :widget-name="t('teamhub', 'Birthdays')"
+                            @toggle="toggleCollapse('widget-birthdays')" />
+                    </div>
+                    <div v-show="!isCollapsed('widget-birthdays')" class="teamhub-widget-content teamhub-widget-content--notoppad">
+                        <BirthdaysWidget />
                     </div>
                 </div>
             </grid-item>
@@ -326,6 +373,7 @@
                             </NcActionButton>
                         </NcActions>
                         <WidgetCollapseButton
+                            v-if="teamPreset?.mode !== 'enforce' || editingTeamPreset"
                             :collapsed="isCollapsed('widget-calendar')"
                             :widget-name="t('teamhub', 'Upcoming events')"
                             @toggle="toggleCollapse('widget-calendar')" />
@@ -375,12 +423,14 @@
                             </NcActionButton>
                         </NcActions>
                         <WidgetCollapseButton
+                            v-if="teamPreset?.mode !== 'enforce' || editingTeamPreset"
                             :collapsed="isCollapsed('widget-deck')"
                             :widget-name="t('teamhub', 'Upcoming tasks')"
                             @toggle="toggleCollapse('widget-deck')" />
                     </div>
                     <div v-show="!isCollapsed('widget-deck')" class="teamhub-widget-content">
-                        <DeckWidget ref="deckWidget" @openproject-actions="openProjectWorkActions = $event" />
+                        <DeckWidget ref="deckWidget" @openproject-actions="openProjectWorkActions = $event"
+                            @edit-openproject-work-package="$emit('edit-openproject-work-package', $event)" />
                     </div>
                 </div>
             </grid-item>
@@ -408,6 +458,7 @@
                         <ClockOutline :size="ICON_LARGE" />
                         <h2 class="teamhub-widget-title">{{ t('teamhub', 'Team activity') }}</h2>
                         <WidgetCollapseButton
+                            v-if="teamPreset?.mode !== 'enforce' || editingTeamPreset"
                             :collapsed="isCollapsed('widget-activity')"
                             :widget-name="t('teamhub', 'Team activity')"
                             @toggle="toggleCollapse('widget-activity')" />
@@ -451,13 +502,30 @@
                              beyond create still belongs in Collectives'
                              own UI — one click on a page link opens the
                              full editor there. -->
-                        <NcActions v-if="isTeamModerator && !editMode && (resources.intravox || collectivesConfig?.collectives_enabled)" class="teamhub-widget-actions">
-                            <NcActionButton v-if="resources.intravox" @click="$emit('create-page')">
+                        <!-- v4.13.62 — the two Intranet actions are a team
+                             admin's, which is the gate their endpoints have
+                             always had (`createIntravoxPage`,
+                             `deleteIntravoxPage`, and now
+                             `createIntravoxSubPage`). They were shown to
+                             moderators and refused, which is the thing
+                             CLAUDE.md's "hidden, not disabled, not left to
+                             fail" rule exists to stop; Justin chose the admin
+                             gate for the sub-page too (2026-10-31).
+
+                             Per button, not on the menu: *Create Collectives
+                             page* beside them is a moderator's and keeps its
+                             own gate. The menu's own condition is the OR of
+                             what is inside it, so a moderator on a team with
+                             only the Intranet module gets no empty menu. An
+                             admin is a moderator (level 8 ≥ 4), so the
+                             Collectives entry needs no second check. -->
+                        <NcActions v-if="!editMode && ((isTeamAdmin && resources.intravox) || (isTeamModerator && collectivesConfig?.collectives_enabled))" class="teamhub-widget-actions">
+                            <NcActionButton v-if="isTeamAdmin && resources.intravox" @click="$emit('create-page')">
                                 <template #icon><FilePlus :size="ICON_BODY" /></template>
                                 {{ t('teamhub', 'Create Intranet page') }}
                             </NcActionButton>
                             <NcActionButton
-                                v-if="resources.intravox"
+                                v-if="isTeamAdmin && resources.intravox"
                                 :disabled="!pagesData.teamPage"
                                 @click="$emit('delete-page')">
                                 <template #icon><TrashCan :size="ICON_BODY" /></template>
@@ -469,6 +537,7 @@
                             </NcActionButton>
                         </NcActions>
                         <WidgetCollapseButton
+                            v-if="teamPreset?.mode !== 'enforce' || editingTeamPreset"
                             :collapsed="isCollapsed('widget-pages')"
                             :widget-name="t('teamhub', 'Pages')"
                             @toggle="toggleCollapse('widget-pages')" />
@@ -523,6 +592,7 @@
                             </template>
                         </NcButton>
                         <WidgetCollapseButton
+                            v-if="teamPreset?.mode !== 'enforce' || editingTeamPreset"
                             :collapsed="isCollapsed('widget-files-center')"
                             :widget-name="t('teamhub', 'File center')"
                             @toggle="toggleCollapse('widget-files-center')" />
@@ -565,6 +635,7 @@
                             </template>
                         </NcButton>
                         <WidgetCollapseButton
+                            v-if="teamPreset?.mode !== 'enforce' || editingTeamPreset"
                             :collapsed="isCollapsed('widget-decisions')"
                             :widget-name="t('teamhub', 'Decisions')"
                             @toggle="toggleCollapse('widget-decisions')" />
@@ -600,6 +671,7 @@
                         <ViewDashboard :size="ICON_LARGE" />
                         <h2 class="teamhub-widget-title">{{ t('teamhub', 'Project health') }}</h2>
                         <WidgetCollapseButton
+                            v-if="teamPreset?.mode !== 'enforce' || editingTeamPreset"
                             :collapsed="isCollapsed('widget-project-health')"
                             :widget-name="t('teamhub', 'Project health')"
                             @toggle="toggleCollapse('widget-project-health')" />
@@ -681,6 +753,7 @@
                             </NcActionButton>
                         </NcActions>
                         <WidgetCollapseButton
+                            v-if="teamPreset?.mode !== 'enforce' || editingTeamPreset"
                             :collapsed="isCollapsed('widget-openproject')"
                             :widget-name="t('teamhub', 'Project info')"
                             @toggle="toggleCollapse('widget-openproject')" />
@@ -718,6 +791,7 @@
                         <LifebuoyIcon :size="ICON_LARGE" />
                         <h2 class="teamhub-widget-title">{{ t('teamhub', 'Service requests') }}</h2>
                         <WidgetCollapseButton
+                            v-if="teamPreset?.mode !== 'enforce' || editingTeamPreset"
                             :collapsed="isCollapsed('widget-service-queue')"
                             :widget-name="t('teamhub', 'Service requests')"
                             @toggle="toggleCollapse('widget-service-queue')" />
@@ -750,6 +824,7 @@
                         <ChartBoxOutline :size="ICON_LARGE" />
                         <h2 class="teamhub-widget-title">{{ t('teamhub', 'Statistics') }}</h2>
                         <WidgetCollapseButton
+                            v-if="teamPreset?.mode !== 'enforce' || editingTeamPreset"
                             :collapsed="isCollapsed('widget-service-stats')"
                             :widget-name="t('teamhub', 'Statistics')"
                             @toggle="toggleCollapse('widget-service-stats')" />
@@ -784,6 +859,7 @@
                         <AccountMultipleCheckOutline :size="ICON_LARGE" />
                         <h2 class="teamhub-widget-title">{{ t('teamhub', 'Teams made outside TeamHub') }}</h2>
                         <WidgetCollapseButton
+                            v-if="teamPreset?.mode !== 'enforce' || editingTeamPreset"
                             :collapsed="isCollapsed('widget-team-adoption')"
                             :widget-name="t('teamhub', 'Teams made outside TeamHub')"
                             @toggle="toggleCollapse('widget-team-adoption')" />
@@ -794,6 +870,124 @@
                 </div>
             </grid-item>
 
+
+            <!-- Integration-package widgets (v4.13.23) — keyed by capability
+                 id, so the grid position a team gives one survives the owning
+                 app being disabled and re-enabled. The card itself is the same
+                 IntegrationWidget as the legacy one: it reads `cap_id` and
+                 talks to the package endpoints. Hidden capabilities are not in
+                 this list at all, so no hidden widget's provider is called to
+                 render the home view. -->
+            <grid-item
+                v-for="widget in packageWidgets"
+                :key="'grid-cap-' + widget.cap_id"
+                v-bind="getOrCreateIntegrationItem('cap-' + widget.cap_id, isCanvasWidget(widget))"
+                class="teamhub-grid-item"
+                :class="{ 'teamhub-grid-item--editing': editMode }">
+                <div class="teamhub-widget-card">
+                    <div
+                        v-if="editMode"
+                        class="teamhub-widget-drag-handle"
+                        tabindex="0"
+                        :aria-label="(widget.title || t('teamhub', 'Widget')) + ' — ' + t('teamhub', 'use arrow keys to move')"
+                        @keydown.up.prevent="moveWidget('widget-int-cap-' + widget.cap_id, 'up')"
+                        @keydown.down.prevent="moveWidget('widget-int-cap-' + widget.cap_id, 'down')"
+                        @keydown.left.prevent="moveWidget('widget-int-cap-' + widget.cap_id, 'left')"
+                        @keydown.right.prevent="moveWidget('widget-int-cap-' + widget.cap_id, 'right')">
+                        <DragVariant :size="ICON_BODY" />
+                        <span aria-hidden="true">{{ widget.title || t('teamhub', 'Widget') }}</span>
+                    </div>
+                    <div class="teamhub-widget-header">
+                        <img
+                            v-if="widget.app_id"
+                            :src="appIconUrl(widget.app_id)"
+                            :alt="widget.app_id"
+                            class="teamhub-widget-app-icon"
+                            @error="onAppIconError($event)" />
+                        <Puzzle v-else :size="ICON_LARGE" />
+                        <h2 class="teamhub-widget-title">{{ widget.title }}</h2>
+                        <!-- v4.13.29 — both kinds of package widget can put
+                             items here now. They come from different places
+                             and behave differently, which is why the two
+                             branches rather than one loop:
+
+                             a row widget's actions arrive from its provider
+                             at render time and open a TeamHub modal built
+                             from `getActionForm()`;
+
+                             a canvas widget's are declared at registration
+                             and are links only — there is no channel into the
+                             frame, so TeamHub can send the person to a
+                             destination it knew in advance but can never act
+                             on what the frame is currently showing. That
+                             restriction is what makes a header menu on a
+                             canvas safe; see
+                             IframeWidgetCapabilityDefinition. -->
+                        <NcActions
+                            v-if="headerActionsFor(widget).length"
+                            class="teamhub-widget-actions">
+                            <template v-if="isCanvasWidget(widget)">
+                                <NcActionLink
+                                    v-for="action in headerActionsFor(widget)"
+                                    :key="action.label"
+                                    :href="action.url"
+                                    target="_blank">
+                                    <template #icon>
+                                        <component
+                                            :is="resolveWidgetActionIcon(action.icon)"
+                                            :size="ICON_BODY" />
+                                    </template>
+                                    {{ action.label }}
+                                </NcActionLink>
+                            </template>
+                            <template v-else>
+                                <NcActionButton
+                                    v-for="action in headerActionsFor(widget)"
+                                    :key="action.label"
+                                    @click="triggerWidgetAction('cap-' + widget.cap_id, action)">
+                                    <template #icon>
+                                        <component
+                                            :is="resolveWidgetActionIcon(action.icon)"
+                                            :size="ICON_BODY" />
+                                    </template>
+                                    {{ action.label }}
+                                </NcActionButton>
+                            </template>
+                        </NcActions>
+                        <WidgetCollapseButton
+                            v-if="teamPreset?.mode !== 'enforce' || editingTeamPreset"
+                            :collapsed="isCollapsed('widget-int-cap-' + widget.cap_id)"
+                            :widget-name="widget.title"
+                            @toggle="toggleCollapse('widget-int-cap-' + widget.cap_id)" />
+                    </div>
+                    <div v-show="!isCollapsed('widget-int-cap-' + widget.cap_id)" class="teamhub-widget-content">
+                        <!-- v4.13.24 — two kinds of card body. A `widget`
+                             capability names a PHP class and gets the row list
+                             back; a `widget_iframe` names a URL and draws its
+                             own interior. The card around them is identical,
+                             which is the whole point of the second type: a team
+                             arranges, collapses, shows and hides both the same
+                             way and does not have to know which is which. -->
+                        <!-- v4.13.32 — `arranging` makes the frame take no
+                             pointer events while the layout is being edited.
+                             Without it the frame swallows the `pointermove`
+                             that interact.js is listening for on the
+                             document, and a drag or resize that crosses the
+                             card body stops dead; the component's own
+                             "pointer contract" comment has the mechanism. -->
+                        <IntegrationCanvasWidget
+                            v-if="isCanvasWidget(widget)"
+                            :integration="widget"
+                            :arranging="editMode" />
+                        <IntegrationWidget
+                            v-else
+                            :ref="'intWidget-cap-' + widget.cap_id"
+                            :integration="widget"
+                            :team-id="currentTeamId"
+                            @actions-loaded="onWidgetActionsLoaded" />
+                    </div>
+                </div>
+            </grid-item>
 
             <!-- External integration widgets -->
             <grid-item
@@ -840,6 +1034,7 @@
                             </NcActionButton>
                         </NcActions>
                         <WidgetCollapseButton
+                            v-if="teamPreset?.mode !== 'enforce' || editingTeamPreset"
                             :collapsed="isCollapsed('widget-int-' + widget.registry_id)"
                             :widget-name="widget.title"
                             @toggle="toggleCollapse('widget-int-' + widget.registry_id)" />
@@ -882,7 +1077,7 @@
                 <!-- Team info -->
                 <div v-if="getGridItem('widget-teaminfo')" class="teamhub-tablet-widget">
                     <div class="teamhub-tablet-widget__header">
-                        <button type="button" class="teamhub-tablet-widget__collapse" :aria-expanded="String(!isCollapsed('widget-teaminfo'))" @click="toggleCollapse('widget-teaminfo')">
+                        <button v-if="teamPreset?.mode !== 'enforce'" type="button" class="teamhub-tablet-widget__collapse" :aria-expanded="String(!isCollapsed('widget-teaminfo'))" @click="toggleCollapse('widget-teaminfo')">
                             <InformationOutline :size="ICON_BODY" />
                             <span>{{ t('teamhub', 'Team info') }}</span>
                             <ChevronDown :size="ICON_BODY" class="teamhub-tablet-widget__chevron" :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-teaminfo') }" />
@@ -901,7 +1096,7 @@
                 <!-- Members -->
                 <div v-if="getGridItem('widget-members')" class="teamhub-tablet-widget">
                     <div class="teamhub-tablet-widget__header">
-                        <button type="button" class="teamhub-tablet-widget__collapse" :aria-expanded="String(!isCollapsed('widget-members'))" @click="toggleCollapse('widget-members')">
+                        <button v-if="teamPreset?.mode !== 'enforce'" type="button" class="teamhub-tablet-widget__collapse" :aria-expanded="String(!isCollapsed('widget-members'))" @click="toggleCollapse('widget-members')">
                             <AccountGroup :size="ICON_BODY" />
                             <span>{{ t('teamhub', 'Members') }} ({{ effectiveMemberCount }})</span>
                             <ChevronDown :size="ICON_BODY" class="teamhub-tablet-widget__chevron" :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-members') }" />
@@ -923,10 +1118,29 @@
                     </div>
                 </div>
 
+                <!-- Department birthdays -->
+                <div v-if="getGridItem('widget-birthdays')" class="teamhub-tablet-widget">
+                    <div class="teamhub-tablet-widget__header">
+                        <button v-if="teamPreset?.mode !== 'enforce'" type="button"
+                            class="teamhub-tablet-widget__collapse"
+                            :aria-expanded="String(!isCollapsed('widget-birthdays'))"
+                            @click="toggleCollapse('widget-birthdays')">
+                            <CakeVariant :size="ICON_BODY" />
+                            <span>{{ t('teamhub', 'Birthdays') }}</span>
+                            <ChevronDown :size="ICON_BODY" class="teamhub-tablet-widget__chevron"
+                                :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-birthdays') }" />
+                        </button>
+                        <span v-else>{{ t('teamhub', 'Birthdays') }}</span>
+                    </div>
+                    <div v-if="!isCollapsed('widget-birthdays')" class="teamhub-tablet-widget__body">
+                        <BirthdaysWidget />
+                    </div>
+                </div>
+
                 <!-- Calendar -->
                 <div v-if="getGridItem('widget-calendar') && resources.calendar && resources.calendar.length > 0" class="teamhub-tablet-widget">
                     <div class="teamhub-tablet-widget__header">
-                        <button type="button" class="teamhub-tablet-widget__collapse" :aria-expanded="String(!isCollapsed('widget-calendar'))" @click="toggleCollapse('widget-calendar')">
+                        <button v-if="teamPreset?.mode !== 'enforce'" type="button" class="teamhub-tablet-widget__collapse" :aria-expanded="String(!isCollapsed('widget-calendar'))" @click="toggleCollapse('widget-calendar')">
                             <Calendar :size="ICON_BODY" />
                             <span>{{ t('teamhub', 'Upcoming events') }}</span>
                             <ChevronDown :size="ICON_BODY" class="teamhub-tablet-widget__chevron" :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-calendar') }" />
@@ -950,7 +1164,7 @@
                 <!-- Tasks / Deck -->
                 <div v-if="getGridItem('widget-deck') && showTasksWidget" class="teamhub-tablet-widget">
                     <div class="teamhub-tablet-widget__header">
-                        <button type="button" class="teamhub-tablet-widget__collapse" :aria-expanded="String(!isCollapsed('widget-deck'))" @click="toggleCollapse('widget-deck')">
+                        <button v-if="teamPreset?.mode !== 'enforce'" type="button" class="teamhub-tablet-widget__collapse" :aria-expanded="String(!isCollapsed('widget-deck'))" @click="toggleCollapse('widget-deck')">
                             <CardText :size="ICON_BODY" />
                             <span>{{ t('teamhub', 'Upcoming tasks') }}</span>
                             <ChevronDown :size="ICON_BODY" class="teamhub-tablet-widget__chevron" :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-deck') }" />
@@ -973,14 +1187,15 @@
                         </NcActions>
                     </div>
                     <div v-if="!isCollapsed('widget-deck')" class="teamhub-tablet-widget__body">
-                        <DeckWidget ref="deckWidgetTablet" @openproject-actions="openProjectWorkActions = $event" />
+                        <DeckWidget ref="deckWidgetTablet" @openproject-actions="openProjectWorkActions = $event"
+                            @edit-openproject-work-package="$emit('edit-openproject-work-package', $event)" />
                     </div>
                 </div>
 
                 <!-- Activity — no actions -->
                 <div v-if="getGridItem('widget-activity')" class="teamhub-tablet-widget">
                     <div class="teamhub-tablet-widget__header">
-                        <button type="button" class="teamhub-tablet-widget__collapse" :aria-expanded="String(!isCollapsed('widget-activity'))" @click="toggleCollapse('widget-activity')">
+                        <button v-if="teamPreset?.mode !== 'enforce'" type="button" class="teamhub-tablet-widget__collapse" :aria-expanded="String(!isCollapsed('widget-activity'))" @click="toggleCollapse('widget-activity')">
                             <ClockOutline :size="ICON_BODY" />
                             <span>{{ t('teamhub', 'Team activity') }}</span>
                             <ChevronDown :size="ICON_BODY" class="teamhub-tablet-widget__chevron" :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-activity') }" />
@@ -994,19 +1209,21 @@
                 <!-- Pages (Intranet + Wiki) — tablet (v4.3.7 unified) -->
                 <div v-if="getGridItem('widget-pages') && (resources.intravox || collectivesConfig?.collectives_enabled)" class="teamhub-tablet-widget">
                     <div class="teamhub-tablet-widget__header">
-                        <button type="button" class="teamhub-tablet-widget__collapse" :aria-expanded="String(!isCollapsed('widget-pages'))" @click="toggleCollapse('widget-pages')">
+                        <button v-if="teamPreset?.mode !== 'enforce'" type="button" class="teamhub-tablet-widget__collapse" :aria-expanded="String(!isCollapsed('widget-pages'))" @click="toggleCollapse('widget-pages')">
                             <FileDocumentOutline :size="ICON_BODY" />
                             <span>{{ t('teamhub', 'Pages') }}</span>
                             <ChevronDown :size="ICON_BODY" class="teamhub-tablet-widget__chevron" :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-pages') }" />
                         </button>
                         <!-- Actions menu (v4.3.9) — same shape as desktop grid. -->
-                        <NcActions v-if="isTeamModerator && (resources.intravox || collectivesConfig?.collectives_enabled)" class="teamhub-tablet-widget__actions">
-                            <NcActionButton v-if="resources.intravox" @click="$emit('create-page')">
+                        <!-- v4.13.62 — the admin gate, as on the desktop grid
+                             above; the reasoning is there. -->
+                        <NcActions v-if="(isTeamAdmin && resources.intravox) || (isTeamModerator && collectivesConfig?.collectives_enabled)" class="teamhub-tablet-widget__actions">
+                            <NcActionButton v-if="isTeamAdmin && resources.intravox" @click="$emit('create-page')">
                                 <template #icon><FilePlus :size="ICON_BODY" /></template>
                                 {{ t('teamhub', 'Create Intranet page') }}
                             </NcActionButton>
                             <NcActionButton
-                                v-if="resources.intravox"
+                                v-if="isTeamAdmin && resources.intravox"
                                 :disabled="!pagesData.teamPage"
                                 @click="pagesData.teamPage && $emit('delete-page')">
                                 <template #icon><TrashCan :size="ICON_BODY" /></template>
@@ -1029,7 +1246,7 @@
                 <!-- Files Center — tabbed widget -->
                 <div v-if="getGridItem('widget-files-center') && resources.files" class="teamhub-tablet-widget">
                     <div class="teamhub-tablet-widget__header">
-                        <button type="button" class="teamhub-tablet-widget__collapse" :aria-expanded="String(!isCollapsed('widget-files-center'))" @click="toggleCollapse('widget-files-center')">
+                        <button v-if="teamPreset?.mode !== 'enforce'" type="button" class="teamhub-tablet-widget__collapse" :aria-expanded="String(!isCollapsed('widget-files-center'))" @click="toggleCollapse('widget-files-center')">
                             <Folder :size="ICON_BODY" />
                             <span>{{ t('teamhub', 'File center') }}</span>
                             <ChevronDown :size="ICON_BODY" class="teamhub-tablet-widget__chevron" :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-files-center') }" />
@@ -1043,7 +1260,7 @@
                 <!-- Decisions widget — tablet layout -->
                 <div v-if="showDecisionsWidget && getGridItem('widget-decisions')" class="teamhub-tablet-widget">
                     <div class="teamhub-tablet-widget__header">
-                        <button type="button" class="teamhub-tablet-widget__collapse" :aria-expanded="String(!isCollapsed('widget-decisions'))" @click="toggleCollapse('widget-decisions')">
+                        <button v-if="teamPreset?.mode !== 'enforce'" type="button" class="teamhub-tablet-widget__collapse" :aria-expanded="String(!isCollapsed('widget-decisions'))" @click="toggleCollapse('widget-decisions')">
                             <GavelIcon :size="ICON_BODY" />
                             <span>{{ t('teamhub', 'Decisions') }}</span>
                             <ChevronDown :size="ICON_BODY" class="teamhub-tablet-widget__chevron" :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-decisions') }" />
@@ -1058,7 +1275,7 @@
                      Raw <button>: the tablet collapse-row carve-out. -->
                 <div v-if="showServiceDeskWidgets && getGridItem('widget-service-queue')" class="teamhub-tablet-widget">
                     <div class="teamhub-tablet-widget__header">
-                        <button type="button" class="teamhub-tablet-widget__collapse" :aria-expanded="String(!isCollapsed('widget-service-queue'))" @click="toggleCollapse('widget-service-queue')">
+                        <button v-if="teamPreset?.mode !== 'enforce'" type="button" class="teamhub-tablet-widget__collapse" :aria-expanded="String(!isCollapsed('widget-service-queue'))" @click="toggleCollapse('widget-service-queue')">
                             <LifebuoyIcon :size="ICON_BODY" />
                             <span>{{ t('teamhub', 'Service requests') }}</span>
                             <ChevronDown :size="ICON_BODY" class="teamhub-tablet-widget__chevron" :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-service-queue') }" />
@@ -1071,7 +1288,7 @@
 
                 <div v-if="showServiceDeskWidgets && getGridItem('widget-service-stats')" class="teamhub-tablet-widget">
                     <div class="teamhub-tablet-widget__header">
-                        <button type="button" class="teamhub-tablet-widget__collapse" :aria-expanded="String(!isCollapsed('widget-service-stats'))" @click="toggleCollapse('widget-service-stats')">
+                        <button v-if="teamPreset?.mode !== 'enforce'" type="button" class="teamhub-tablet-widget__collapse" :aria-expanded="String(!isCollapsed('widget-service-stats'))" @click="toggleCollapse('widget-service-stats')">
                             <ChartBoxOutline :size="ICON_BODY" />
                             <span>{{ t('teamhub', 'Statistics') }}</span>
                             <ChevronDown :size="ICON_BODY" class="teamhub-tablet-widget__chevron" :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-service-stats') }" />
@@ -1086,7 +1303,7 @@
                 <div v-if="showAdoptionWidget && getGridItem('widget-team-adoption')" class="teamhub-tablet-widget">
                     <div class="teamhub-tablet-widget__header">
                         <!-- Raw button: tablet collapse row header (ui-standards carve-out). -->
-                        <button type="button" class="teamhub-tablet-widget__collapse" :aria-expanded="String(!isCollapsed('widget-team-adoption'))" @click="toggleCollapse('widget-team-adoption')">
+                        <button v-if="teamPreset?.mode !== 'enforce'" type="button" class="teamhub-tablet-widget__collapse" :aria-expanded="String(!isCollapsed('widget-team-adoption'))" @click="toggleCollapse('widget-team-adoption')">
                             <AccountMultipleCheckOutline :size="ICON_BODY" />
                             <span>{{ t('teamhub', 'Teams made outside TeamHub') }}</span>
                             <ChevronDown :size="ICON_BODY" class="teamhub-tablet-widget__chevron" :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-team-adoption') }" />
@@ -1101,7 +1318,7 @@
                 <!-- Project Health widget — tablet layout (v3.97.0) -->
                 <div v-if="showProjectHealthWidget && getGridItem('widget-project-health')" class="teamhub-tablet-widget">
                     <div class="teamhub-tablet-widget__header">
-                        <button type="button" class="teamhub-tablet-widget__collapse" :aria-expanded="String(!isCollapsed('widget-project-health'))" @click="toggleCollapse('widget-project-health')">
+                        <button v-if="teamPreset?.mode !== 'enforce'" type="button" class="teamhub-tablet-widget__collapse" :aria-expanded="String(!isCollapsed('widget-project-health'))" @click="toggleCollapse('widget-project-health')">
                             <ViewDashboard :size="ICON_BODY" />
                             <span>{{ t('teamhub', 'Project health') }}</span>
                             <ChevronDown :size="ICON_BODY" class="teamhub-tablet-widget__chevron" :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-project-health') }" />
@@ -1116,7 +1333,7 @@
                      links as the desktop header, from the same event. -->
                 <div v-if="showOpenProjectWidgets && getGridItem('widget-openproject')" class="teamhub-tablet-widget">
                     <div class="teamhub-tablet-widget__header">
-                        <button type="button" class="teamhub-tablet-widget__collapse" :aria-expanded="String(!isCollapsed('widget-openproject'))" @click="toggleCollapse('widget-openproject')">
+                        <button v-if="teamPreset?.mode !== 'enforce'" type="button" class="teamhub-tablet-widget__collapse" :aria-expanded="String(!isCollapsed('widget-openproject'))" @click="toggleCollapse('widget-openproject')">
                             <BriefcaseOutline :size="ICON_BODY" />
                             <span>{{ t('teamhub', 'Project info') }}</span>
                             <ChevronDown :size="ICON_BODY" class="teamhub-tablet-widget__chevron" :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-openproject') }" />
@@ -1169,13 +1386,44 @@
                     </div>
                 </div>
 
+                <!-- Integration-package widgets (v4.13.23) — no standard actions -->
+                <div
+                    v-for="cap in packageWidgets"
+                    :key="'tablet-cap-' + cap.cap_id"
+                    class="teamhub-tablet-widget">
+                    <div class="teamhub-tablet-widget__header">
+                        <button v-if="teamPreset?.mode !== 'enforce'" type="button" class="teamhub-tablet-widget__collapse" :aria-expanded="String(!isCollapsed('widget-int-cap-' + cap.cap_id))" @click="toggleCollapse('widget-int-cap-' + cap.cap_id)">
+                            <Puzzle :size="ICON_BODY" />
+                            <span>{{ cap.title || t('teamhub', 'Widget') }}</span>
+                            <ChevronDown :size="ICON_BODY" class="teamhub-tablet-widget__chevron" :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-int-cap-' + cap.cap_id) }" />
+                        </button>
+                    </div>
+                    <div
+                        v-if="!isCollapsed('widget-int-cap-' + cap.cap_id)"
+                        class="teamhub-tablet-widget__body"
+                        :class="{ 'teamhub-tablet-widget__body--frame': isCanvasWidget(cap) }">
+                        <!-- v4.13.24 — same split as the desktop grid.
+                             v4.13.26 — and the same split decides the body's
+                             height: the frame one needs one, the row one must
+                             not have one. -->
+                        <IntegrationCanvasWidget
+                            v-if="isCanvasWidget(cap)"
+                            :integration="cap" />
+                        <IntegrationWidget
+                            v-else
+                            :integration="cap"
+                            :team-id="currentTeamId"
+                            @actions-loaded="$emit('widget-actions-loaded', $event)" />
+                    </div>
+                </div>
+
                 <!-- External integration widgets — no standard actions -->
                 <div
                     v-for="ext in teamWidgets"
                     :key="'tablet-int-' + ext.registry_id"
                     class="teamhub-tablet-widget">
                     <div class="teamhub-tablet-widget__header">
-                        <button type="button" class="teamhub-tablet-widget__collapse" :aria-expanded="String(!isCollapsed('widget-int-' + ext.registry_id))" @click="toggleCollapse('widget-int-' + ext.registry_id)">
+                        <button v-if="teamPreset?.mode !== 'enforce'" type="button" class="teamhub-tablet-widget__collapse" :aria-expanded="String(!isCollapsed('widget-int-' + ext.registry_id))" @click="toggleCollapse('widget-int-' + ext.registry_id)">
                             <Puzzle :size="ICON_BODY" />
                             <span>{{ ext.title || t('teamhub', 'Widget') }}</span>
                             <ChevronDown :size="ICON_BODY" class="teamhub-tablet-widget__chevron" :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-int-' + ext.registry_id) }" />
@@ -1202,7 +1450,7 @@
             v-if="isMobile && layoutLoaded"
             ref="mobileView"
             :team-labels="teamLabels"
-            :team-owner="teamOwner"
+            :team-admins="teamAdmins"
             :is-team-admin="isTeamAdmin"
             :is-team-moderator="isTeamModerator"
             :show-tasks-widget="showTasksWidget"
@@ -1217,6 +1465,7 @@
             @add-deck-task="$emit('add-deck-task')"
             @add-personal-task="$emit('add-personal-task')"
             @add-openproject-work-package="$emit('add-openproject-work-package')"
+            @edit-openproject-work-package="$emit('edit-openproject-work-package', $event)"
             @create-page="$emit('create-page')"
             @delete-page="$emit('delete-page')"
             @create-wiki-page="$emit('create-wiki-page')"
@@ -1230,12 +1479,14 @@
 
 <script>
 import { translate as t, translatePlural as n } from '@nextcloud/l10n'
+import { templateDisplayName } from '../constants/policy.js'
 import { generateUrl } from '@nextcloud/router'
 import { getCurrentUser } from '@nextcloud/auth'
-import { mapState, mapGetters, mapMutations } from 'vuex'
-import { NcAvatar, NcActions, NcActionButton, NcActionLink, NcButton } from '@nextcloud/vue'
+import { mapState, mapGetters } from 'vuex'
+import { NcAvatar, NcActions, NcActionButton, NcActionLink, NcButton, NcNoteCard } from '@nextcloud/vue'
 import { GridLayout, GridItem } from 'grid-layout-plus'
-import { computeActiveWidgetIds, isProjectHealthActive } from '../lib/activeWidgets.js'
+import { computeActiveWidgetIds, isProjectHealthActive, isCanvasCapability } from '../lib/activeWidgets.js'
+import { packVisible, samePlacement, H_ROW, H_CANVAS } from '../lib/packLayout.js'
 import ServiceQueueWidget from './ServiceQueueWidget.vue'
 import ServiceStatsWidget from './ServiceStatsWidget.vue'
 import TeamAdoptionGrid from './admin/TeamAdoptionGrid.vue'
@@ -1259,6 +1510,8 @@ import CardText from 'vue-material-design-icons/CardText.vue'
 import CheckboxMarkedOutline from 'vue-material-design-icons/CheckboxMarkedOutline.vue'
 import InformationOutline from 'vue-material-design-icons/InformationOutline.vue'
 import AccountGroup from 'vue-material-design-icons/AccountGroup.vue'
+import CakeVariant from 'vue-material-design-icons/CakeVariant.vue'
+import BirthdaysWidget from './BirthdaysWidget.vue'
 import ClockOutline from 'vue-material-design-icons/ClockOutline.vue'
 import FileDocumentOutline from 'vue-material-design-icons/FileDocumentOutline.vue'
 import ContentCopy from 'vue-material-design-icons/ContentCopy.vue'
@@ -1287,7 +1540,6 @@ import FileDocument from 'vue-material-design-icons/FileDocument.vue'
 // that used it were extracted into WidgetCollapseButton. ChevronDown stays
 // because it is still used inline in the tablet layout below.
 import ChevronDown from 'vue-material-design-icons/ChevronDown.vue'
-import ChevronRightIcon from 'vue-material-design-icons/ChevronRight.vue'
 import Delete from 'vue-material-design-icons/Delete.vue'
 import AlertCircle from 'vue-material-design-icons/AlertCircle.vue'
 import ArrowRight from 'vue-material-design-icons/ArrowRight.vue'
@@ -1298,6 +1550,7 @@ import FilePlus from 'vue-material-design-icons/FilePlus.vue'
 import TrashCan from 'vue-material-design-icons/TrashCan.vue'
 import ContentSaveAll from 'vue-material-design-icons/ContentSaveAll.vue'
 import Restore from 'vue-material-design-icons/Restore.vue'
+import ViewDashboardOutline from 'vue-material-design-icons/ViewDashboardOutline.vue'
 import ClipboardPlusOutline from 'vue-material-design-icons/ClipboardPlusOutline.vue'
 import BriefcaseOutline from 'vue-material-design-icons/BriefcaseOutline.vue'
 // v4.9.5 — the Project info header menu: the links into OpenProject.
@@ -1313,6 +1566,9 @@ import CalendarWidget from './CalendarWidget.vue'
 import IntravoxWidget from './IntravoxWidget.vue'
 import ActivityWidget from './ActivityWidget.vue'
 import IntegrationWidget from './IntegrationWidget.vue'
+// v4.13.24 — the blank-canvas widget's body: the owning app's own
+// iframe inside a card TeamHub still owns.
+import IntegrationCanvasWidget from './IntegrationCanvasWidget.vue'
 import FilesWidget          from './FilesWidget.vue'
 import DecisionsWidget      from './DecisionsWidget.vue'
 import MembersWidget        from './MembersWidget.vue'
@@ -1324,14 +1580,12 @@ import MobileWidgetView from './MobileWidgetView.vue'
 // v3.100.14: shared chevron toggle for every desktop widget header.
 // See gui.md § 6 — this replaces 12 copies of the same 5-line button.
 import WidgetCollapseButton from './WidgetCollapseButton.vue'
-// v4.9.6 — the incomplete-provisioning strip in the Team info widget.
-import ProvisioningBanner from './ProvisioningBanner.vue'
 
 export default {
     name: 'TeamWidgetGrid',
 
     components: {
-        NcAvatar, NcActions, NcActionButton, NcActionLink, NcButton,
+        NcAvatar, NcActions, NcActionButton, NcActionLink, NcButton, NcNoteCard,
         // v4.10.27 — the service team's queue and statistics.
         ServiceQueueWidget, ServiceStatsWidget, LifebuoyIcon, ChartBoxOutline,
         TeamAdoptionGrid, AccountMultipleCheckOutline,
@@ -1340,20 +1594,19 @@ export default {
         CheckboxMarkedOutline, InformationOutline, AccountGroup,
         ClockOutline, FileDocumentOutline, ContentCopy, AccountPlus, PlusIcon,
         Cog, Puzzle, GavelIcon, ViewDashboardEdit, DragVariant,
-        ChartBar, Bell, ViewDashboard, CheckCircle, FileDocument,
-        ChevronDown, ChevronRightIcon, Delete, AlertCircle, ArrowRight, LocationExit,
+        ChartBar, Bell, ViewDashboard, CheckCircle, FileDocument, CakeVariant, BirthdaysWidget,
+        ChevronDown, Delete, AlertCircle, ArrowRight, LocationExit,
         FormatListBulleted, Minus, FilePlus, TrashCan,
-        ContentSaveAll, Restore,
+        ContentSaveAll, Restore, ViewDashboardOutline,
         ClipboardPlusOutline, BriefcaseOutline,
         OpenInNew, FormatListChecks, PlusBoxOutline, FolderOutline, Refresh,
         MessageStream, DeckWidget, CalendarWidget, IntravoxWidget,
-        ActivityWidget, IntegrationWidget,
+        ActivityWidget, IntegrationWidget, IntegrationCanvasWidget,
         FilesWidget, DecisionsWidget, MembersWidget,
         ProjectHealthWidget,
         OpenProjectOverviewWidget,
         MobileWidgetView,
         WidgetCollapseButton,
-        ProvisioningBanner,
     },
 
     props: {
@@ -1362,9 +1615,31 @@ export default {
         editMode:      { type: Boolean, default: false },
         pagesData:     { type: Object,  default: () => ({ teamPage: null, subPages: [], teamhubRoot: null, allPages: [] }) },
         widgetDynamicActions: { type: Object, default: () => ({}) },
-        // True when the current team's layout differs from the user's personal default.
+        // True when this team's layout differs from the user's personal template-type default.
         // Controls visibility of the "Set as default" / "Reset to default" buttons.
         layoutDiffersFromDefault: { type: Boolean, default: false },
+        // v4.13.33 — true when this layout came from the cascade (a template
+        // or instance default, the member's personal default, or the system
+        // one) rather than from an arrangement of their own. Only a cascaded
+        // layout is packed: a saved arrangement is the member's, holes and
+        // all. The server decides this; see LayoutController::resolveTeamLayout.
+        layoutIsDefault: { type: Boolean, default: false },
+        // v4.13.35 — whether this viewer administers this team, and may
+        // therefore set its layout. Answered by the server (the layout
+        // bundle), never derived from a role here: the entry is absent for
+        // everybody else, and the route checks again regardless.
+        canSetTeamDefault: { type: Boolean, default: false },
+        canSaveTypeDefault: { type: Boolean, default: false },
+        editingTeamPreset: { type: Boolean, default: false },
+        layoutActionBusy: { type: Boolean, default: false },
+        // v4.13.34 — this team's own default layout and what it is doing:
+        // { mode: 'suggest'|'apply_once'|'enforce'|null, layout, updatedAt }.
+        // Only `suggest` carries a layout, because it is the only mode that
+        // asks the member to choose.
+        teamPreset: {
+            type: Object,
+            default: () => ({ mode: null, layout: null, updatedAt: null }),
+        },
         // True when the viewport is ≤ 768px. Switches rendering to the
         // MobileWidgetView (single canvas + icon bar) instead of the
         // vue-grid-layout. Edit-mode banner is also hidden in this mode.
@@ -1376,22 +1651,33 @@ export default {
     },
 
     emits: [
-        'layout-updated', 'layout-autofit', 'manage-team', 'copy-link', 'invite',
+        'layout-updated', 'layout-arranged', 'manage-team', 'copy-link', 'invite',
+        // v4.13.34 — this team's own layout, beside 'set-as-default' (the
+        // member's own) further down this list. The instance and per-template
+        // defaults left this component in v4.13.35 for Admin -> TeamHub.
+        'set-as-team-default', 'apply-team-preset', 'publish-team-layout', 'cancel-team-layout', 'unlock-team-layout',
         'schedule-meeting', 'add-event', 'add-meeting', 'add-deck-task', 'add-personal-task',
         // v4.9.15 — the Upcoming tasks header's "Create work package" (labelled without "OpenProject" since v4.9.18).
         'add-openproject-work-package',
+        // v4.13.9 — `{ workPackageId }`, raised by a row's pencil.
+        'edit-openproject-work-package',
         'create-page', 'delete-page', 'create-wiki-page', 'pages-loaded', 'collective-loaded', 'set-view',
         'widget-actions-loaded',
         'set-as-default',
         'reset-to-default',
         'propose-decision',
-        // v4.9.6 — a provisioning operation reached a resting state from the
-        // banner's dialog; the view reloads the bundle.
-        'provisioning-changed',
     ],
 
     data() {
         return {
+            // v4.13.34 — this viewer has waved away the team's suggested
+            // layout on this team. Read from localStorage on mount; see
+            // showTeamPresetOffer.
+            teamPresetDismissed: false,
+            // v4.13.35 — NcActions does not close when an action runs, and a
+            // menu left hanging over the grid the action just rearranged reads
+            // as a click that did nothing. Justin, 2026-10-28.
+            layoutMenuOpen: false,
             ICON_BODY,
             ICON_INLINE,
             ICON_LARGE,
@@ -1410,8 +1696,7 @@ export default {
         ...mapState([
             'currentTeamId', 'resources', 'members',
             'effectiveMemberCount',
-            'teamWidgets', 'isCurrentUserDirectMember',
-            'resourceWarnings',
+            'teamWidgets', 'packageWidgets', 'isCurrentUserDirectMember',
             'messageTarget',
             'presenceModuleEnabled', 'presenceConfig',
             'decisionsModuleEnabled', 'decisionsConfig',
@@ -1429,12 +1714,15 @@ export default {
             // Team-wide dashboard customization — hidden_widgets removes widgets
             // from every member's grid; default_tab is consumed on team open.
             'dashboardConfig',
-            // v4.0.2 — team template label from CreateTeamView. Renders as the
+            // v4.0.2 — team template from CreateTeamView. Renders as the
             // leading badge in the Team info widget's labels row.
-            'teamType',
-            // v4.6.13 — optional expiration date; drives the Team info strip.
-            // Null for every team that has none, which is most of them.
-            'teamExpiry',
+            //
+            // v4.13.28 — `teamTemplate`, not the bare `teamType` key this
+            // mapped before: the badge needs the label and whether the
+            // template is seeded, because an administrator can create and
+            // rename one. The key is still on the store for other readers;
+            // this component has no use for it on its own.
+            'teamTemplate', 'teamType',
             // v3.97.0 — gate for the project-health widget. Both flags are
             // precomputed on the layout bundle; project.mode + phase come
             // with the same bundle. The widget also self-checks the payload,
@@ -1442,8 +1730,6 @@ export default {
             'budgetConfig', 'timeConfig', 'project',
             // v4.9.3 — OpenProject link facts; gate for both OpenProject widgets.
             'openProjectConfig',
-            // v4.9.6 — is this workspace's provisioning finished; the banner reads it.
-            'provisioning',
             // v4.10.27 — the service desk facts; gate for the queue and statistics.
             'serviceDeskConfig',
         ]),
@@ -1476,8 +1762,19 @@ export default {
          * v3.104.1 — per-team Messages toggle. Default true, so a team that
          * never touches the setting keeps its stream.
          */
+        /**
+         * v4.13.35 — the team's Messages switch, read from the one place that
+         * now owns it (`src/lib/activeWidgets.js`) rather than tested a second
+         * time here.
+         *
+         * The tablet column below still needs the answer as a boolean of its
+         * own, so this stays — but it is now the *same* answer the packer and
+         * the grid filter use, which is the whole point. A second test of
+         * `messages_enabled` here is what put a nine-column hole at the top of
+         * every team that had Messages off (DESIGN §2.208).
+         */
         showMessagesWidget() {
-            return this.messagesConfig?.messages_enabled !== false
+            return this.activeWidgetIds.has('msgstream')
         },
 
         /**
@@ -1552,6 +1849,24 @@ export default {
             return this.visibleLayout.map(item => item.i).sort().join(',')
         },
 
+        /**
+         * v4.13.34 — whether to offer this team's suggested layout.
+         *
+         * Only in `suggest` mode, only with a layout behind it, only on the
+         * desktop grid (the mobile and tablet views are not arrangeable, so an
+         * offer to rearrange them is an offer of nothing), and only until this
+         * viewer waves it away.
+         */
+        showTeamPresetOffer() {
+            return !this.isMobile
+                && !this.isTablet
+                && this.layoutLoaded
+                && this.teamPreset?.mode === 'suggest'
+                && Array.isArray(this.teamPreset?.layout)
+                && this.teamPreset.layout.length > 0
+                && !this.teamPresetDismissed
+        },
+
         // v4.6.25 — `teamFolderUrl()` removed with the <a target="_blank"> it
         // fed. The team folder now opens in TeamHub's own Files tab, whose URL
         // `TeamView::filesUrl` already builds; a second copy of that
@@ -1587,34 +1902,25 @@ export default {
             const labels = []
 
             // v4.0.2 — template label from CreateTeamView. Leading position
-            // so it reads as the team's identity. Legacy teams (teamType=null)
-            // render no template badge — legacyFallback picked by Justin.
-            if (this.teamType === 'collaboration') {
+            // so it reads as the team's identity. Legacy teams
+            // (teamTemplate=null) render no template badge — legacyFallback
+            // picked by Justin.
+            //
+            // v4.13.28 — one label from the server's facts, where this was a
+            // four-arm `if` chain over the seeded keys. That chain had no arm
+            // for `service` (shipped v4.10.23) and none for a template an
+            // administrator created (possible since v4.13.24), so a team of
+            // either showed no badge at all. `templateDisplayName()` is the
+            // rule the admin panels already use for exactly this question.
+            const templateText = this.teamTemplate?.key
+                ? templateDisplayName(this.teamTemplate.key, this.teamTemplate.label, this.teamTemplate.isSeeded)
+                : ''
+            if (templateText) {
                 labels.push({
-                    key: 'type-collab',
-                    text: t('teamhub', 'Collaboration'),
-                    tooltip: t('teamhub', 'Created from the Collaboration template.'),
-                    tone: 'primary',
-                })
-            } else if (this.teamType === 'project') {
-                labels.push({
-                    key: 'type-project',
-                    text: t('teamhub', 'Project'),
-                    tooltip: t('teamhub', 'Created from the Project template.'),
-                    tone: 'primary',
-                })
-            } else if (this.teamType === 'department') {
-                labels.push({
-                    key: 'type-department',
-                    text: t('teamhub', 'Department'),
-                    tooltip: t('teamhub', 'Created from the Department template.'),
-                    tone: 'primary',
-                })
-            } else if (this.teamType === 'openproject') {
-                labels.push({
-                    key: 'type-openproject',
-                    text: t('teamhub', 'OpenProject project'),
-                    tooltip: t('teamhub', 'Created from the OpenProject project template.'),
+                    key: 'type-template',
+                    text: templateText,
+                    // TRANSLATORS: {template} is the name of the team template, e.g. "Collaboration"
+                    tooltip: t('teamhub', 'Created from the {template} template.', { template: templateText }),
                     tone: 'primary',
                 })
             }
@@ -1683,9 +1989,25 @@ export default {
             return labels
         },
 
-        teamOwner() {
-            if (!this.members || !Array.isArray(this.members)) return null
-            return this.members.find(m => m.level >= 9) || null
+        /**
+         * The team's admins for the Team info card (v4.13.56), level 9 first.
+         *
+         * Level 9 is included and not labelled: it is a team admin like the
+         * others as far as anything inside a team says. Sorted so the person
+         * who holds the team heads the list, which is the only trace of the
+         * distinction left on this surface and costs nothing to read.
+         *
+         * Groups and nested teams cannot hold a level-8 row, so every entry
+         * here is a person. `members` can be absent while the team loads, so
+         * the guard stays.
+         */
+        teamAdmins() {
+            if (!this.members || !Array.isArray(this.members)) return []
+            return this.members
+                .filter(m => m.level >= 8)
+                .slice()
+                .sort((a, b) => (b.level - a.level)
+                    || String(a.displayName || '').localeCompare(String(b.displayName || '')))
         },
 
         isTeamAdmin() {
@@ -1694,26 +2016,6 @@ export default {
             if (!uid) return false
             const m = this.members.find(m => m.userId === uid)
             return m && m.level >= 8
-        },
-
-        /**
-         * Combined count of pending + at-risk resources.
-         * Used by the Teaminfo warning block (admin-only).
-         */
-        resourceWarningTotal() {
-            const w = this.resourceWarnings || {}
-            return (w.pending || 0) + (w.atRisk || 0)
-        },
-
-        /**
-         * v4.6.13 — the expiration strip appears only once the date is close
-         * or has passed. `warning` is computed server-side against the
-         * instance's configured window, so the banner, the My Work item and
-         * the admin table all agree on what "close" means.
-         */
-        expiryBannerVisible() {
-            const e = this.teamExpiry
-            return !!e && (e.expired || e.warning)
         },
 
         isTeamModerator() {
@@ -1739,40 +2041,55 @@ export default {
         },
 
         /**
-         * v4.0.8 — first time the layout is fully hydrated after team open,
-         * run the auto-fit pass so any widget flagged autoFit (DEFAULT_LAYOUT
-         * items on a fresh team, or newly-added widgets) grows h to fit its
-         * rendered content instead of showing a scrollbar. immediate:true
-         * catches the case where layoutLoaded was already true when this
-         * component mounted (e.g. a team switch while the previous layout
-         * was cached).
+         * v4.13.33 — the layout is hydrated, so arrange it.
+         *
+         * immediate:true catches the case where layoutLoaded was already true
+         * when this component mounted (e.g. a team switch while the previous
+         * layout was cached).
+         *
+         * This replaces v4.0.8's auto-fit pass, which measured every widget
+         * here and grew the ones whose content overflowed. It could never have
+         * worked: the node it measured, `.teamhub-widget-card`, carries
+         * `overflow: hidden` and the scrolling lives on its
+         * `.teamhub-widget-content` child, so `scrollHeight` always equalled
+         * `clientHeight` and nothing ever grew. What the pass did instead was
+         * save a layout row on first open — which took the member off the
+         * default cascade for that team, permanently. See DESIGN §2.206.
          */
         layoutLoaded: {
             immediate: true,
             handler(newVal) {
-                if (newVal) {
-                    this.$nextTick(() => this.runAutoFitPass())
-                }
+                if (newVal) this.arrangeLayout()
             },
         },
 
         /**
-         * v4.1.0 — also re-run the auto-fit pass whenever the visible-widget
-         * set changes. Fixes widgets that were hidden on team open (e.g.
-         * Project Health only shows in Planning/Execution) — layoutLoaded had
-         * already flipped to true by the time they appeared, so the original
-         * watcher never fired for them. The pass itself is idempotent (skips
-         * items without autoFit), so extra invocations from unrelated widget
-         * toggles are cheap.
+         * v4.13.34 — a team switch re-reads whether this viewer has waved away
+         * that team's suggested layout. Per team, not per session: waving away
+         * one team's suggestion says nothing about another's.
+         */
+        currentTeamId: {
+            immediate: true,
+            handler() {
+                this.teamPresetDismissed = this.readTeamPresetDismissed()
+            },
+        },
+
+        /**
+         * v4.1.0 — rearrange whenever the visible-widget set changes. A widget
+         * can appear long after the layout loaded: Project Health when a phase
+         * advances, an integration package's widget when its request lands, a
+         * widget an admin un-hides. Each of those changes which columns are
+         * free, which is the whole input to the pack.
          *
          * Watching a joined id string rather than the array reference so we
          * fire only when the SET of visible widgets actually changes — Vue's
          * default deep-watch on visibleLayout would fire on every h/w mutation
-         * from the grid library itself and spam the pass during drag/resize.
+         * from the grid library itself and repack during a drag.
          */
         visibleWidgetIds: {
             handler() {
-                this.$nextTick(() => this.runAutoFitPass())
+                this.arrangeLayout()
             },
         },
     },
@@ -1801,31 +2118,6 @@ export default {
 
         t, n,
 
-        ...mapMutations(['SET_RESOURCE_WARNING_FOCUS', 'SET_MANAGE_TEAM_DEEP_LINK']),
-
-        /**
-         * Called from the warning block's chevron button.
-         *
-         * Order matters and is load-bearing: the flag is committed first, then
-         * the emit makes App.vue render ManageTeamView, which reads the flag in
-         * its own mounted() hook (v4.5.36). Committing after the emit would be
-         * too late.
-         */
-        openSettingsAtRisk() {
-            this.SET_RESOURCE_WARNING_FOCUS(true)
-            this.$emit('manage-team')
-        },
-
-        /**
-         * v4.6.13 — open Manage team on the Maintenance tab, where the
-         * expiration panel and the request form live. Uses the same deep-link
-         * mutation the Project Compass uses, so ManageTeamView lands on the
-         * right tab whether it is already mounted or not.
-         */
-        openMaintenanceForExpiry() {
-            this.SET_MANAGE_TEAM_DEEP_LINK({ tab: 'danger', section: 'expiry' })
-            this.$emit('manage-team')
-        },
 
         /**
          * v4.0.0 — desktop Messages widget header + button. Delegates to
@@ -1865,6 +2157,20 @@ export default {
             this.$emit('leave-team')
         },
 
+        /**
+         * Whether this capability draws its own card body — v4.13.24.
+         *
+         * v4.13.26: the test itself moved to `src/lib/activeWidgets.js`, so
+         * the mobile canvas and this grid cannot disagree about what a frame
+         * is. Kept as a method because three places in the template ask it.
+         *
+         * @param {object} widget a capability descriptor from packageWidgets
+         * @return {boolean}
+         */
+        isCanvasWidget(widget) {
+            return isCanvasCapability(widget)
+        },
+
         getGridItem(id) {
             // v4.2.3 — source from visibleLayout, not gridLayout. visibleLayout
             // already drops widgets whose resource gate is false OR that the
@@ -1876,7 +2182,7 @@ export default {
             return this.visibleLayout.find(item => item.i === id) || null
         },
 
-        getOrCreateIntegrationItem(registryId) {
+        getOrCreateIntegrationItem(registryId, isCanvas = false) {
             const id = 'widget-int-' + registryId
             const existing = this.gridLayout.find(item => item.i === id)
             if (existing) return existing
@@ -1894,90 +2200,157 @@ export default {
                     return Math.max(acc, y + (item.h || 3))
                 }, 0,
             )
+            // v4.13.26 — a blank canvas is four columns and H_CANVAS rows; a
+            // row-listing widget is three columns and H_ROW, the same height
+            // every other list gets. Both are stated rather than measured: the
+            // canvas because its iframe reports whatever height it is given,
+            // and the rest because measuring never worked (DESIGN §2.206).
+            //
+            // v4.13.33 — H_ROW rather than the three rows this used to take.
+            // An integration's list had one row less than TeamHub's own, for
+            // no reason anybody chose.
+            const size = isCanvas
+                ? { w: 4, h: H_CANVAS, minW: 2, minH: 3, hSaved: H_CANVAS }
+                : { w: 3, h: H_ROW, minW: 2, minH: 1, hSaved: H_ROW }
             const newItem = {
                 i: id,
+                // A placeholder: on a cascaded layout `arrangeLayout()` packs
+                // this card into the first space that fits it. On a layout the
+                // member arranged, the bottom of the right-hand column is
+                // where a new card belongs — beside the others, below what is
+                // already there.
                 x: 9, y: maxBottom,
-                w: 3, h: 3,
-                minW: 2, minH: 1,
                 isResizable: true,
                 collapsed: false,
-                hSaved: 3,
-                // v4.0.8 — auto-fit on next mount so the newly-appearing widget
-                // opens with all content visible instead of a scrollbar. Cleared
-                // by runAutoFitPass once the fit runs.
-                autoFit: true,
+                ...size,
             }
             this.gridLayout.push(newItem)
-            this.$nextTick(() => this.runAutoFitPass())
+            this.$nextTick(() => this.arrangeLayout())
             return newItem
         },
 
         /**
-         * v4.0.8 — walk any item flagged autoFit, measure its rendered content
-         * vs allocated grid space, and grow h until content fits (capped at 8
-         * rows to keep runaway lists from stretching the whole page). After
-         * fitting, strip the autoFit flag and persist.
+         * v4.13.33 — arrange the home grid for the widgets this team shows.
          *
-         * Triggers:
-         *  1. Watcher on layoutLoaded — first team open with DEFAULT_LAYOUT.
-         *  2. getOrCreateIntegrationItem — user enables an integration in
-         *     Manage Team and its widget shows up on the home for the first time.
+         * Two things, in this order, and both are rules rather than
+         * measurements:
          *
-         * Idempotent: items without autoFit are skipped; a re-run does nothing.
+         *  1. **Heights.** A canvas card is brought up to the canvas size if it
+         *     was created before that size existed. Everything else already
+         *     carries the height the default states.
+         *  2. **Positions.** A *cascaded* layout is packed (src/lib/packLayout.js)
+         *     so the widgets the team actually has fill the grid. A layout the
+         *     member arranged is left exactly as they left it.
+         *
+         * Runs on every load and on every change of the visible set, and is
+         * idempotent: with nothing to change it emits nothing, so a repack
+         * that produces the arrangement already on screen is free.
          */
-        async runAutoFitPass() {
-            // Two nextTicks + a small settle timeout give the browser time to
-            // finish the initial layout AND for widget bodies that fetch data
-            // asynchronously (calendar, deck, files) to have their first paint.
-            // We accept that widgets whose content lands after the settle
-            // window will still show a scrollbar the first time — the flag is
-            // cleared so they won't grow spuriously on later loads.
-            await this.$nextTick()
-            await new Promise(r => setTimeout(r, 250))
+        arrangeLayout() {
+            // An enforced team layout is a deliberately positioned grid, not
+            // a recipe. Packing it again would undo the team admin's work.
+            if (this.teamPreset?.mode === 'enforce' && !this.editingTeamPreset) return
+            let next = this.normaliseCanvasItems(this.gridLayout)
 
-            const rowHeight = 80
-            const margin    = 12
-            const maxH      = 8
-            let changed     = false
+            if (this.layoutIsDefault) {
+                const packed = packVisible(next, this.activeWidgetIds)
+                if (!samePlacement(packed, next)) next = packed
+            }
 
-            // Match rendered .vue-grid-item nodes to visibleLayout by index —
-            // vue-grid-layout renders items in the same order the array holds.
-            const nodes = this.$el?.querySelectorAll?.('.vue-grid-item') || []
-            const visible = this.visibleLayout
-            if (nodes.length !== visible.length) return
+            if (next !== this.gridLayout) {
+                // `layout-arranged`, not `layout-updated`: TeamView gates the
+                // latter on edit mode, and this is not an edit. Nothing here
+                // is saved either — a packed default is recomputed on every
+                // load, which is the whole reason a member can be given a new
+                // one. See TeamView.onLayoutArranged.
+                this.$emit('layout-arranged', next)
+            }
+        },
 
-            visible.forEach((visItem, idx) => {
-                const fullItem = this.gridLayout.find(g => g.i === visItem.i)
-                if (!fullItem || !fullItem.autoFit) return
+        /**
+         * v4.13.26 — bring a canvas card saved before 4.13.26 up to the
+         * canvas defaults, once.
+         *
+         * The canvas default in `getOrCreateIntegrationItem()` only reaches a
+         * card the first time it appears, and every canvas card that existed
+         * when 4.13.26 shipped was created by the row-widget branch: three
+         * rows, floor of one. Leaving those alone would have meant the fix was
+         * invisible on exactly the teams that already had the widget — the
+         * report it answered came from one of them.
+         *
+         * A canvas is the one card no rule about content can size, because its
+         * body is an iframe at `height: 100%`: it reports exactly the space it
+         * is given, whatever the embedded document does inside it.
+         *
+         * `minH === 1` is the mark of that provenance and the reason this is
+         * safe to run on every load: a card created since carries a floor of
+         * 3, so it is skipped, and so is this one on its next load. Height is
+         * only ever raised. A collapsed card keeps its single row and gets the
+         * new height in `hSaved`, so it expands to the right size.
+         *
+         * v4.13.33 — returns a new array rather than mutating and emitting, so
+         * the pack can run on its result in the same pass. Returns the array it
+         * was given, unchanged, when there is nothing to normalise.
+         *
+         * @param {Array<object>} layout
+         * @return {Array<object>}
+         */
+        normaliseCanvasItems(layout) {
+            const grown = new Map()
+            ;(this.packageWidgets || [])
+                .filter(cap => isCanvasCapability(cap))
+                .forEach(cap => {
+                    const item = layout.find(g => g.i === 'widget-int-cap-' + cap.cap_id)
+                    if (!item || item.minH !== 1) return
+                    const next = { ...item, minW: Math.max(item.minW || 2, 2), minH: 3 }
+                    if (!next.collapsed && (next.h || 3) < H_CANVAS) next.h = H_CANVAS
+                    next.hSaved = Math.max(next.hSaved || 0, H_CANVAS)
+                    grown.set(item.i, next)
+                })
 
-                const card = nodes[idx].querySelector('.teamhub-widget-card')
-                if (!card) { delete fullItem.autoFit; changed = true; return }
+            if (grown.size === 0) return layout
+            return layout.map(item => grown.get(item.i) || item)
+        },
 
-                // scrollHeight reflects the space the content wants; clientHeight
-                // is what the grid gave us. 4 px tolerance avoids single-pixel
-                // rounding growth.
-                const needed    = card.scrollHeight
-                const allocated = card.clientHeight
-                if (needed > allocated + 4) {
-                    const extraPx     = needed - allocated
-                    const rowStridePx = rowHeight + margin
-                    const extraRows   = Math.ceil(extraPx / rowStridePx)
-                    const newH        = Math.min(maxH, (fullItem.h || 3) + extraRows)
-                    if (newH !== fullItem.h) {
-                        fullItem.h      = newH
-                        fullItem.hSaved = newH
-                        this.gridLayout[this.gridLayout.indexOf(fullItem)] = { ...fullItem, autoFit: undefined }
-                    }
-                }
-                delete fullItem.autoFit
-                changed = true
-            })
+        /**
+         * v4.13.34 — the storage key for "this viewer does not want this
+         * team's suggested layout". Per team so each is answered once.
+         */
+        teamPresetDismissKey() {
+            return 'teamhub.teamPresetDismissed.' + (this.currentTeamId || '') + '.' + (this.teamPreset?.updatedAt ?? 'unknown')
+        },
 
-            if (changed) {
-                // Route through onLayoutUpdated so inactive items are preserved,
-                // then emit a distinct event that TeamView saves unconditionally
-                // (regular layout-updated is gated on editMode).
-                this.$emit('layout-autofit', this.gridLayout)
+        /**
+         * Wrapped because localStorage is not guaranteed to be there: a private
+         * window, blocked site data, or a thumbnail capture can make the read
+         * throw rather than return nothing. An offer nobody can dismiss is a
+         * smaller problem than a home that will not render, so a failed read
+         * reads as "not dismissed".
+         */
+        readTeamPresetDismissed() {
+            try {
+                return window.localStorage.getItem(this.teamPresetDismissKey()) === '1'
+            } catch (e) {
+                return false
+            }
+        },
+
+        /**
+         * Close the layout menu, then emit. Both, in that order, because the
+         * emitted action can replace the whole grid underneath the open menu.
+         */
+        closeMenuThen(event) {
+            this.layoutMenuOpen = false
+            this.$emit(event)
+        },
+
+        dismissTeamPresetOffer() {
+            this.teamPresetDismissed = true
+            try {
+                window.localStorage.setItem(this.teamPresetDismissKey(), '1')
+            } catch (e) {
+                // The notice is gone for this visit either way; it will come
+                // back on the next one, which is the acceptable failure.
             }
         },
 
@@ -2011,6 +2384,7 @@ export default {
         },
 
         toggleCollapse(id) {
+            if (this.teamPreset?.mode === 'enforce' && !this.editingTeamPreset) return
             const item = this.gridLayout.find(g => g.i === id)
             if (!item) return
             if (item.collapsed) {
@@ -2037,6 +2411,7 @@ export default {
          * @param {'up'|'down'|'left'|'right'} direction
          */
         moveWidget(id, direction) {
+            if (this.teamPreset?.mode === 'enforce' && !this.editingTeamPreset) return
             const idx = this.gridLayout.findIndex(g => g.i === id)
             if (idx === -1) return
             const item = { ...this.gridLayout[idx] }
@@ -2085,6 +2460,25 @@ export default {
             } else {
                 img.style.display = 'none'
             }
+        },
+
+        /**
+         * What goes in a package widget's 3-dot header menu — v4.13.29.
+         *
+         * One question, one answer, rather than the `v-if` chain the template
+         * would otherwise carry: a canvas widget's actions ride on the
+         * capability payload (declared at registration, validated and
+         * team-id-stamped by `IntegrationPresentationService`), a row
+         * widget's arrive later over `actions-loaded` from its provider.
+         *
+         * Returns an array either way, so the template asks `.length` once
+         * and never has to know which kind it is holding.
+         */
+        headerActionsFor(widget) {
+            if (this.isCanvasWidget(widget)) {
+                return Array.isArray(widget.actions) ? widget.actions : []
+            }
+            return this.widgetDynamicActions['cap-' + widget.cap_id] || []
         },
 
         triggerWidgetAction(registryId, action) {
@@ -2166,6 +2560,7 @@ export default {
     display: flex;
     align-items: center;
     gap: 8px;
+    flex-wrap: wrap;
     padding: 8px 12px;
     margin-bottom: 8px;
     background: var(--color-background-info, var(--color-background-hover));
@@ -2176,20 +2571,32 @@ export default {
 }
 
 .teamhub-edit-banner-text {
-    flex: 1;
+    flex: 1 1 280px;
+    min-width: 0;
 }
 
 .teamhub-edit-banner-actions {
     display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
     align-items: center;
     gap: 4px;
-    flex-shrink: 0;
+    margin-inline-start: auto;
 }
 
 /* v3.100.15: .teamhub-layout-default-btn was the CSS for the two raw
    <button>s in the edit-mode banner that are now NcButtons; NcButton
    owns the sizing, hover, focus, and cursor behaviour, so the block is
    retired. */
+
+.teamhub-team-preset-note { margin: 0 0 12px; }
+
+.teamhub-team-preset-note__actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-block-start: 8px;
+}
 
 .teamhub-grid-item { touch-action: none; }
 .teamhub-grid-item--editing { cursor: move; }
@@ -2386,42 +2793,8 @@ export default {
    retired in favour of the fill + border pair using --color-warning /
    --color-warning-text. Also dropped the raw hex fallbacks on the -text
    / fill tokens (NC always defines the canonical variants). */
-.teamhub-resource-warning {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 16px;
-    background: var(--color-warning);
-    border-bottom: 1px solid var(--color-warning-text);
-    font-size: var(--th-font-meta);
-    color: var(--color-warning-text);
-    line-height: 1.3;
-}
-.teamhub-resource-warning__icon {
-    flex-shrink: 0;
-    color: var(--color-warning-text);
-}
-/* v4.6.13 — a date that has already passed escalates the same strip from
-   warning to error. The wording changes too ("passed its expiration date"),
-   so the colour is reinforcement rather than the signal (WCAG 1.4.1). */
-.teamhub-resource-warning--expired {
-    background: var(--color-error);
-    border-bottom-color: var(--color-error-text);
-    color: var(--color-error-text);
-}
-.teamhub-resource-warning--expired .teamhub-resource-warning__icon,
-.teamhub-resource-warning__text {
-    flex: 1;
-    min-width: 0;
-}
-.teamhub-resource-warning__link {
-    margin: 0;
-    display: flex;
-    align-items: center;
-    opacity: 0.75;
-    flex-shrink: 0;
-}
-.teamhub-resource-warning__link:hover { opacity: 1; }
+/* v4.13.1 — the `.teamhub-resource-warning*` rules that were here moved to
+   TeamNotices with the strips they styled (DESIGN §2.185). */
 
 .teamhub-teaminfo-body {
     display: flex;
@@ -2630,6 +3003,25 @@ export default {
 /* FilesWidget manages its own top chrome (tab bar) — no extra top border needed */
 .teamhub-tablet-widget__body--notoppad {
     border-top: none;
+}
+
+/* v4.13.26 — a blank-canvas widget's body on the tablet stack.
+ *
+ * Every other body here is as tall as its rows, which is right for rows and
+ * impossible for a frame: an iframe has no content height, so this body gave
+ * it `auto` and the frame sat at its intrinsic 150px — the embedded page then
+ * rendered for a 150px viewport inside a card several hundred pixels wide and
+ * could not scroll, because a page that scrolls its own panes has nothing
+ * left to scroll when the viewport is shorter than its header.
+ *
+ * The tablet surface is a vertical stack with no row count to read, so the
+ * height is simply stated once, as a token. `display: flex` is what lets the
+ * card's `height: 100%` resolve against it. */
+.teamhub-tablet-widget__body--frame {
+    display: flex;
+    flex-direction: column;
+    height: var(--th-canvas-frame-height);
+    box-sizing: border-box;
 }
 
 /* ─── Tablet inline widget content ────────────────────────── */

@@ -537,6 +537,13 @@ class SubTeamService {
      * fall-back and would therefore refuse the very administrator this panel
      * is built for. The former gates on `requireAdminLevel()`, which does.
      *
+     * The `groups` bucket `getMembersForManage()` already returns rides along
+     * untouched (v4.13.3) — each entry is `{groupId, singleId, userType,
+     * displayName, memberCount}` and `groupId` is the `singleId` a removal
+     * takes. It is what the dialog lists the invited groups from; the people
+     * inside them stay in `inherited`, where they were before groups could be
+     * invited at all.
+     *
      * Each person is marked `fromParent` — picked out of the main team — or
      * not, which is the only distinction the panel needs to make and the one
      * the add form is built around. It is computed from the parent's effective
@@ -594,6 +601,15 @@ class SubTeamService {
      * membership is the thing it exists to express, so the rule does not
      * loosen once the team is made.
      *
+     * v4.13.3 — an outsider may also be a **Nextcloud group**
+     * (`type: 'group'`), which the dialog now offers beside a person. Nothing
+     * changed here to allow it: `splitMembership()` has only ever tested the
+     * *local-user* type against the parent's roster, because a group has no
+     * place on one, and `MemberService::inviteMembers()` has always mapped
+     * `'group'` to Circles' `TYPE_GROUP`. The group is one member row; its
+     * people reach the sub-team through it and appear in `members()` under
+     * `inherited`, not as rows of their own.
+     *
      * @param list<string> $members
      * @param array<int, array<string, mixed>> $outsiders
      * @return array<int|string, mixed> the per-entry results `inviteMembers()` returns
@@ -638,8 +654,23 @@ class SubTeamService {
      * removal path would be a second place for that list to fall out of date.
      * It also refuses to remove an owner, which is what protects the admin who
      * created the sub-team from being removed out of their own team.
+     *
+     * v4.13.3 — `$userType` is Circles' own member type: **1** for a person
+     * and **2** for a Nextcloud group, which is the whole reason it exists.
+     * A group invited from outside is one `circles_member` row, and that row
+     * is keyed on `(circle_id, single_id, user_type)` — so taking the group
+     * back out needs the type as well as the id, exactly as
+     * `TeamController::removeMember()` has always taken it for a main team.
+     * Without it a group could be added and never removed.
+     *
+     * **The id a group is removed by is its `singleId`, not its gid**, which
+     * is what `getMembersForManage()` puts in the row's `groupId`. Nothing in
+     * here converts one to the other; the caller passes what it was given.
+     *
+     * Only those two types. A team (`user_type = 16`) is not offered on the
+     * way in, so refusing it here keeps the two directions the same shape.
      */
-    public function removeMember(string $parentTeamId, string $subTeamId, string $userId): void {
+    public function removeMember(string $parentTeamId, string $subTeamId, string $userId, int $userType = 1): void {
         $this->subTeamModule->requireAvailable();
         $this->memberService->requireAdminLevel($parentTeamId);
         $this->assertChildOf($parentTeamId, $subTeamId);
@@ -648,10 +679,23 @@ class SubTeamService {
         if ($userId === '') {
             throw new \InvalidArgumentException('No member was named.');
         }
+        if (!in_array($userType, [1, 2], true)) {
+            throw new \InvalidArgumentException('A sub-team holds people and groups. Nothing else can be removed from here.');
+        }
 
-        $this->memberService->removeMember($subTeamId, $userId, 1);
+        $this->memberService->removeMember($subTeamId, $userId, $userType);
 
-        $this->auditService->log($subTeamId, 'subteam.member_removed', $this->actorUid(), 'user', $userId, []);
+        // One event, with the object typed — a group leaving is the same fact
+        // as a person leaving, and splitting it in two would make the trail
+        // harder to read for no gain.
+        $this->auditService->log(
+            $subTeamId,
+            'subteam.member_removed',
+            $this->actorUid(),
+            $userType === 2 ? 'group' : 'user',
+            $userId,
+            [],
+        );
     }
 
     /**

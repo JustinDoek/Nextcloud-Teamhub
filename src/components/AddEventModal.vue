@@ -73,7 +73,7 @@
                     label-outside
                     v-model="selectedRoomId"
                     class="addevent-modal__input addevent-modal__select"
-                    :options="[{ id: '', label: t('teamhub', '— No room —') }, ...rooms.map(r => ({ id: r.id, label: r.displayName }))]"
+                    :options="[{ id: '', label: t('teamhub', 'No room') }, ...rooms.map(r => ({ id: r.id, label: r.displayName }))]"
                     :reduce="o => o.id"
                     :clearable="false" />
                 <p v-if="pickedRoomIsRoomVox" class="addevent-modal__hint">

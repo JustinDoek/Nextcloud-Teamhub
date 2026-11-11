@@ -155,7 +155,7 @@
                                 {{ t('teamhub', 'End time must be after start time') }}
                             </p>
                             <p class="suggest-wizard__hint suggest-wizard__hint--info">
-                                {{ t('teamhub', 'Enable the Presence module for date/time suggestions.') }}
+                                {{ t('teamhub', 'Enable the People module for date/time suggestions.') }}
                             </p>
                         </template>
 
@@ -272,11 +272,23 @@
                         label-outside
                         v-model="selectedRoomId"
                         class="suggest-wizard__input"
-                        :options="[{ id: '', label: t('teamhub', '— No room —') }, ...rooms.map(r => ({ id: r.id, label: r.displayName }))]"
+                        :options="[{ id: '', label: t('teamhub', 'No room') }, ...rooms.map(r => ({ id: r.id, label: r.displayName }))]"
                         :reduce="o => o.id"
                         :clearable="false" />
-                    <p v-if="selectedRoomId" class="suggest-wizard__hint">
-                        {{ t('teamhub', 'Picking a room books it via RoomVox.') }}
+                    <!-- v4.13.74 — the hint follows the room, not the app.
+                         `/rooms` returns RoomVox rooms and rooms the Calendar
+                         Resource Management app provides, each carrying its own
+                         `source`, and only a RoomVox one is booked by an API
+                         call. A CRM room is invited as an attendee and its own
+                         calendar answers, so promising every picker a RoomVox
+                         booking was wrong on any instance with CRM rooms and
+                         no RoomVox at all. Same two sentences AddEventModal
+                         has used since the picker was built. -->
+                    <p v-if="pickedRoomIsRoomVox" class="suggest-wizard__hint">
+                        {{ t('teamhub', 'This room will be booked automatically via RoomVox.') }}
+                    </p>
+                    <p v-else-if="selectedRoomId" class="suggest-wizard__hint">
+                        {{ t('teamhub', 'This room will be invited to the event. Booking must be confirmed by the resource manager.') }}
                     </p>
                 </div>
                 <div v-else class="suggest-wizard__field">
@@ -404,7 +416,7 @@
                     </div>
 
                     <p v-if="askAgenda && !effectiveIncludeTalk" class="suggest-wizard__hint suggest-wizard__hint--warn">
-                        {{ t('teamhub', 'Ask-for-agenda needs Talk — enable “Add Talk meeting” above.') }}
+                        {{ t('teamhub', 'Ask-for-agenda needs Talk: enable “Add Talk meeting” above.') }}
                     </p>
                 </div>
             </div>
@@ -526,6 +538,16 @@ export default {
     computed: {
         ...mapState(['presenceModuleEnabled', 'presenceConfig']),
         /**
+         * True when the picked room is booked by RoomVox rather than invited.
+         * `/rooms` mixes RoomVox rooms with rooms the Calendar Resource
+         * Management app provides; `source` is how a room says which it is.
+         */
+        pickedRoomIsRoomVox() {
+            if (!this.selectedRoomId) return false
+            const r = this.rooms.find(room => room.id === this.selectedRoomId)
+            return r ? (r.source === 'roomvox' || r.source === 'mixed') : false
+        },
+        /**
          * Presence-driven suggestions only make sense when the module is
          * enabled globally AND for this team. Otherwise we silently skip
          * the suggestion API and fall back to a manual date/start/end
@@ -602,10 +624,10 @@ export default {
             const total = this.proposalCategories.length
             const picked = this.selectedProposalCategories.length
             if (picked === total) {
-                return t('teamhub', 'All categories — every awaiting proposal will be added.')
+                return t('teamhub', 'All categories: every awaiting proposal will be added.')
             }
             if (picked === 0) {
-                return t('teamhub', 'No categories picked — every awaiting proposal will be added.')
+                return t('teamhub', 'No categories picked: every awaiting proposal will be added.')
             }
             return n(
                 'teamhub',
@@ -912,9 +934,15 @@ export default {
         },
 
         formatSuggestion(s) {
-            const dayLabel = formatIsoDate(s.date, { weekday: 'short', day: 'numeric', month: 'short' })
-            const half = s.half === 0 ? t('teamhub', 'morning') : t('teamhub', 'afternoon')
-            return `${dayLabel} — ${half}`
+            // v4.20.0: two whole sentences rather than `${day} — ${half}`.
+            // The dash broke the no-dash rule out of reach of check:dashes, and
+            // a joined label gives a translator no way to move the day.
+            const day = formatIsoDate(s.date, { weekday: 'short', day: 'numeric', month: 'short' })
+            return s.half === 0
+                // TRANSLATORS: a suggested meeting half-day; {day} is a short date such as "Fri, Oct 30"
+                ? t('teamhub', '{day} in the morning', { day })
+                // TRANSLATORS: a suggested meeting half-day; {day} is a short date such as "Fri, Oct 30"
+                : t('teamhub', '{day} in the afternoon', { day })
         },
 
         describeSuggestion(s) {
@@ -945,13 +973,13 @@ export default {
             // Manual-schedule mode reads straight from the form fields,
             // since there is no suggestion to anchor against.
             const haveTimes = this.eventDate && this.eventStart && this.eventEnd
-            if (!haveTimes) return t('teamhub', '— not chosen yet —')
+            if (!haveTimes) return t('teamhub', 'not chosen yet')
             if (!this.presenceAvailable || this.chosenIndex !== null) {
                 const dayLabel = formatIsoDate(this.eventDate,
                     { weekday: 'long', day: 'numeric', month: 'long' })
                 return `${dayLabel} · ${this.eventStart}–${this.eventEnd}`
             }
-            return t('teamhub', '— not chosen yet —')
+            return t('teamhub', 'not chosen yet')
         },
 
         updateFilename() {
@@ -1238,6 +1266,11 @@ export default {
 .suggest-wizard__suggestion-why {
     color: var(--color-text-maxcontrast);
     font-size: 0.85rem;
+    /* The card is a <button>, and Nextcloud's own theme sets every button to
+       bold -- so this line inherited bold and read as a second heading rather
+       than as the detail under one. The weight has to be stated; there is
+       nothing to inherit it from. */
+    font-weight: var(--th-font-weight-regular);
 }
 .suggest-wizard__empty {
     color: var(--color-text-maxcontrast);

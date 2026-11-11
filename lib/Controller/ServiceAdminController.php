@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace OCA\TeamHub\Controller;
 
 use OCA\TeamHub\Constants\ServiceIcons;
+use OCA\TeamHub\Service\AdminSettingsAuditService;
 use OCA\TeamHub\Service\ServiceTeam\ServiceCategoryService;
 use OCP\AppFramework\Controller;
 use OCP\AppFramework\Http\Attribute\AuthorizedAdminSetting;
@@ -29,6 +30,8 @@ class ServiceAdminController extends Controller {
         string                         $appName,
         IRequest                       $request,
         private ServiceCategoryService $categories,
+        // v4.13.17 — the Services tab's own settings in the audit log.
+        private AdminSettingsAuditService $settingsAudit,
         private LoggerInterface        $logger,
     ) {
         parent::__construct($appName, $request);
@@ -47,7 +50,10 @@ class ServiceAdminController extends Controller {
     #[AuthorizedAdminSetting(settings: \OCA\TeamHub\Settings\AdminSettings::class)]
     public function saveCategories(mixed $categories = []): JSONResponse {
         try {
-            $this->categories->save(is_array($categories) ? array_values($categories) : []);
+            $this->settingsAudit->recordAround(
+                'admin.service_categories',
+                fn () => $this->categories->save(is_array($categories) ? array_values($categories) : []),
+            );
             return new JSONResponse($this->describe());
         } catch (\Throwable $e) {
             return $this->exceptionResponse($e, 'Failed to save the categories');
@@ -65,7 +71,10 @@ class ServiceAdminController extends Controller {
                     $links[$field] = (string)$body[$field];
                 }
             }
-            $this->categories->saveLinks($links);
+            $this->settingsAudit->recordAround(
+                'admin.service_links',
+                fn () => $this->categories->saveLinks($links),
+            );
             return new JSONResponse($this->describe());
         } catch (\Throwable $e) {
             return $this->exceptionResponse($e, 'Failed to save the links');

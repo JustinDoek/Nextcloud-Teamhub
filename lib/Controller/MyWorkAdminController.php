@@ -6,6 +6,7 @@ namespace OCA\TeamHub\Controller;
 use OCA\TeamHub\AppInfo\Application;
 use OCA\TeamHub\MyWork\ActionType;
 use OCA\TeamHub\MyWork\ProviderRegistry;
+use OCA\TeamHub\Service\AdminSettingsAuditService;
 use OCA\TeamHub\Service\MyWorkConfigService;
 use OCA\TeamHub\Service\MyWorkService;
 use OCP\AppFramework\Controller;
@@ -35,6 +36,8 @@ class MyWorkAdminController extends Controller {
         string $appName,
         IRequest $request,
         private MyWorkConfigService $configService,
+        // v4.13.17 — My Work's administration is admin settings too.
+        private AdminSettingsAuditService $settingsAudit,
         private MyWorkService $myWorkService,
         private ProviderRegistry $registry,
         private LoggerInterface $logger,
@@ -73,7 +76,10 @@ class MyWorkAdminController extends Controller {
         unset($body['_route']);
 
         try {
-            $this->configService->saveAdminConfig($body);
+            $this->settingsAudit->recordAround(
+                'admin.mywork',
+                fn () => $this->configService->saveAdminConfig($body),
+            );
             return new JSONResponse($this->configService->getAdminConfig());
         } catch (\Throwable $e) {
             $this->logger->error('[TeamHub][MyWorkAdmin] saveConfig failed', [
@@ -129,6 +135,11 @@ class MyWorkAdminController extends Controller {
         }
 
         try {
+            // One snapshot around both writes: a save that changes the switch
+            // and the allowed actions is one administrator's one decision, and
+            // the diff names each key that moved.
+            $before = $this->settingsAudit->snapshot();
+
             $enabled = $this->request->getParam('enabled', null);
             if ($enabled !== null) {
                 $val = filter_var($enabled, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
@@ -145,6 +156,8 @@ class MyWorkAdminController extends Controller {
                 }
                 $this->configService->setAllowedActions($providerId, $actions);
             }
+
+            $this->settingsAudit->diffAndAudit('admin.mywork_provider', $before);
 
             return new JSONResponse([
                 'id'             => $providerId,

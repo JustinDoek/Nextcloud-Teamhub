@@ -36,7 +36,15 @@ final class OpenProjectMessages {
             OpenProjectException::INTEGRATION_NOT_INSTALLED,
             OpenProjectException::INTEGRATION_DISABLED,
             OpenProjectException::INTEGRATION_INCOMPATIBLE,
-            OpenProjectException::HOST_NOT_CONFIGURED =>
+            OpenProjectException::HOST_NOT_CONFIGURED,
+            // v4.13.5 — the same sentence deliberately: to a member, a
+            // connection configured with a method TeamHub cannot perform
+            // is indistinguishable from one that was never set up, and
+            // both are fixed by the same person. The administrator
+            // register below is where the two differ.
+            OpenProjectException::EDIT_CONFLICT =>
+                'OpenProject refused a change as out of date (409): the work package was modified between the form being opened and the change being sent. Optimistic locking working as intended — nothing is wrong with the configuration.',
+            OpenProjectException::AUTH_METHOD_UNSUPPORTED =>
                 $this->l->t('OpenProject is not available on this Nextcloud. Ask your administrator to set up the OpenProject integration.'),
             OpenProjectException::USER_NOT_CONNECTED =>
                 $this->l->t('Connect your OpenProject account in your personal settings to see this project.'),
@@ -62,6 +70,16 @@ final class OpenProjectMessages {
                 $this->l->t('OpenProject did not accept this.'),
             OpenProjectException::JOB_FAILED =>
                 $this->l->t('OpenProject could not finish copying the template.'),
+            // v4.13.9 — nobody's mistake, and the remedy is specific:
+            // look at what changed before deciding again.
+            OpenProjectException::EDIT_CONFLICT =>
+                $this->l->t('Somebody else changed this work package first. Reload to see their version.'),
+            // v4.13.4 — the OpenProject connection this instance uses can
+            // read but not write. Deliberately says nothing about PATCH,
+            // transports or the official app: none of that is the member's
+            // to understand, and the fix is an administrator's.
+            OpenProjectException::METHOD_UNSUPPORTED =>
+                $this->l->t('This Nextcloud cannot change work packages in OpenProject. Ask your administrator.'),
             default =>
                 $this->l->t('OpenProject data could not be loaded.'),
         };
@@ -78,18 +96,22 @@ final class OpenProjectMessages {
                 'The OpenProject module requires an active TeamHub license. Add or renew one under Administration settings → TeamHub → License.',
             OpenProjectException::MODULE_DISABLED =>
                 'The OpenProject module is switched off. Enable it under Administration settings → TeamHub → Integrations → Modules.',
-            OpenProjectException::INTEGRATION_NOT_INSTALLED =>
-                'The "OpenProject Integration" app (integration_openproject) is not installed. Install it from the app store.',
-            OpenProjectException::INTEGRATION_DISABLED =>
-                'The "OpenProject Integration" app is installed but disabled, or not enabled for this user\'s groups. Enable it under Apps.',
+            // v4.13.5 — these three codes still describe real states of the
+            // fallback transport, but none of them recommends it any more
+            // (Justin, 2026-10-18). An administrator has no reason to know
+            // that app exists, and the fix TeamHub actually wants from them
+            // is its own connection, so that is the only thing suggested.
+            // The code itself still distinguishes the three in the log.
+            OpenProjectException::INTEGRATION_NOT_INSTALLED,
+            OpenProjectException::INTEGRATION_DISABLED,
             OpenProjectException::INTEGRATION_INCOMPATIBLE =>
-                'The installed "OpenProject Integration" app does not expose the request interface TeamHub relies on. Update the integration app; TeamHub supports its 2.x and 3.x lines.',
+                'No usable OpenProject connection. Set one up under Administration settings → TeamHub → Integrations → OpenProject connection: the OpenProject URL, a client ID and a client secret from an OAuth application registered in OpenProject.',
             OpenProjectException::HOST_NOT_CONFIGURED =>
-                'No OpenProject host is configured. Set the OpenProject instance URL under Administration settings → OpenProject.',
+                'No OpenProject URL is configured. Set it under Administration settings → TeamHub → Integrations → OpenProject connection.',
             OpenProjectException::USER_NOT_CONNECTED =>
                 'This user has not connected their OpenProject account (Personal settings → OpenProject). With OIDC authorization, check that the user logged in through the configured provider.',
             OpenProjectException::AUTH_FAILED =>
-                'OpenProject rejected this user\'s token (401). The user should reconnect; if every user is affected, check the OAuth client or OIDC audience in the integration app.',
+                'OpenProject rejected this user\'s token (401). The user should reconnect; if every user is affected, check the OAuth client or the OIDC audience of the OpenProject connection.',
             OpenProjectException::PERMISSION_DENIED =>
                 'OpenProject refused the request (403). The user lacks a permission in OpenProject, or the API is restricted for this client.',
             OpenProjectException::PROJECT_NOT_FOUND =>
@@ -103,11 +125,15 @@ final class OpenProjectMessages {
             OpenProjectException::RATE_LIMITED =>
                 'OpenProject is rate-limiting requests from this Nextcloud (429). TeamHub caches aggressively; if this persists, raise the limit on the OpenProject side.',
             OpenProjectException::LINK_STALE =>
-                'The integration app now points at a different OpenProject instance than the one this team was linked against. Restore the previous instance URL, or unlink the team under Administration settings → TeamHub → Maintenance and create it again from the OpenProject project template.',
+                'The configured OpenProject URL now points at a different instance than the one this team was linked against. Restore the previous URL, or unlink the team under Administration settings → TeamHub → Maintenance and create it again from the OpenProject project template.',
             OpenProjectException::VALIDATION_FAILED =>
                 'OpenProject answered 422 to a write: a validation rule on its side refused the input (an identifier already taken, a name too long, a template that cannot be copied). The response carries the sentence OpenProject gave.',
             OpenProjectException::JOB_FAILED =>
                 'An OpenProject background job (a project copy) ended in error or failure. Check the job log in OpenProject; the template may reference something the copying user cannot see.',
+            OpenProjectException::AUTH_METHOD_UNSUPPORTED =>
+                'The OpenProject connection is set to an authorization method TeamHub cannot perform on this version (OIDC single sign-on). Set it to OAuth 2.0 and register an OAuth application in OpenProject under Administration → Authentication → OAuth applications.',
+            OpenProjectException::METHOD_UNSUPPORTED =>
+                'Changing a work package needs HTTP PATCH, which the OpenProject connection in force cannot send. Reads and new work packages are unaffected. Configure TeamHub\'s own OpenProject connection under Administration settings → TeamHub → Integrations → OpenProject connection to enable editing.',
             default => 'OpenProject request failed. See the Nextcloud log for the endpoint and status.',
         };
     }

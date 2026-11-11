@@ -11,6 +11,13 @@
                 {{ error }}
             </div>
             <template v-else>
+                <NcNoteCard
+                    v-if="hasManagedLocations"
+                    type="info"
+                    class="presence-managed-note">
+                    {{ t('teamhub', 'Buildings and floors marked as shared come from the room directory this instance uses. Change them there. Here you add the rooms people sit in.') }}
+                </NcNoteCard>
+
                 <NcButton
                     variant="primary"
                     class="presence-add-btn"
@@ -50,6 +57,13 @@
                                 <strong>{{ b.name }}</strong>
                                 <span v-if="b.address" class="presence-node__sub">{{ b.address }}</span>
                             </div>
+                            <NcChip
+                                v-if="b.source"
+                                no-close
+                                variant="tertiary"
+                                class="presence-node__chip"
+                                :text="t('teamhub', 'Shared')"
+                                :title="t('teamhub', 'Maintained in the room directory')" />
                             <div class="presence-node__actions">
                                 <NcButton
                                     variant="tertiary"
@@ -57,13 +71,18 @@
                                     @click="openCreate('floor', { building_id: b.id })">
                                     <template #icon><PlusIcon :size="ICON_BODY" /></template>
                                 </NcButton>
+                                <!-- A building the room directory maintains is read-only
+                                     here: the controls are hidden rather than disabled,
+                                     per CLAUDE.md § Permissions. -->
                                 <NcButton
+                                    v-if="!b.source"
                                     variant="tertiary"
                                     :aria-label="t('teamhub', 'Edit building')"
                                     @click="openEdit('building', b)">
                                     <template #icon><PencilIcon :size="ICON_BODY" /></template>
                                 </NcButton>
                                 <NcButton
+                                    v-if="!b.source"
                                     variant="tertiary"
                                     :aria-label="t('teamhub', 'Delete building')"
                                     @click="confirmDelete('building', b)">
@@ -99,6 +118,13 @@
                                     <div class="presence-node__label">
                                         <span>{{ f.name }}</span>
                                     </div>
+                                    <NcChip
+                                        v-if="f.source"
+                                        no-close
+                                        variant="tertiary"
+                                        class="presence-node__chip"
+                                        :text="t('teamhub', 'Shared')"
+                                        :title="t('teamhub', 'Maintained in the room directory')" />
                                     <div class="presence-node__actions">
                                         <NcButton
                                             variant="tertiary"
@@ -107,12 +133,14 @@
                                             <template #icon><PlusIcon :size="ICON_BODY" /></template>
                                         </NcButton>
                                         <NcButton
+                                            v-if="!f.source"
                                             variant="tertiary"
                                             :aria-label="t('teamhub', 'Edit floor')"
                                             @click="openEdit('floor', f)">
                                             <template #icon><PencilIcon :size="ICON_BODY" /></template>
                                         </NcButton>
                                         <NcButton
+                                            v-if="!f.source"
                                             variant="tertiary"
                                             :aria-label="t('teamhub', 'Delete floor')"
                                             @click="confirmDelete('floor', f)">
@@ -246,7 +274,7 @@ import axios from '@nextcloud/axios'
 import { generateUrl } from '@nextcloud/router'
 import { showError, showSuccess } from '@nextcloud/dialogs'
 import { translate as t, translatePlural as n } from '@nextcloud/l10n'
-import { NcSettingsSection, NcButton, NcLoadingIcon, NcTextField, NcDialog } from '@nextcloud/vue'
+import { NcSettingsSection, NcButton, NcLoadingIcon, NcTextField, NcDialog, NcChip, NcNoteCard } from '@nextcloud/vue'
 import PlusIcon            from 'vue-material-design-icons/Plus.vue'
 import PencilIcon          from 'vue-material-design-icons/Pencil.vue'
 import DeleteIcon          from 'vue-material-design-icons/Delete.vue'
@@ -271,6 +299,7 @@ export default {
     name: 'PresenceLocationsManager',
     components: {
         NcSettingsSection, NcButton, NcLoadingIcon, NcTextField, NcDialog,
+        NcChip, NcNoteCard,
         PlusIcon, PencilIcon, DeleteIcon, ChevronDownIcon, ChevronRightIcon,
         OfficeBuildingIcon, LayersOutlineIcon, DoorClosedIcon, ContentSaveIcon,
     },
@@ -288,6 +317,16 @@ export default {
         }
     },
     computed: {
+        /**
+         * True when any building or floor is maintained by a room backend, so
+         * the explanatory note is shown only on instances where it means
+         * something (v4.13.53).
+         */
+        hasManagedLocations() {
+            return this.buildings.some(b => !!b.source
+                || (b.floors || []).some(f => !!f.source))
+        },
+
         dialogTitle() {
             const t = this.t.bind(this)
             if (this.dialog.kind === 'building') {
@@ -567,6 +606,17 @@ export default {
 .presence-node__actions {
     display: flex;
     gap: 4px;
+}
+
+/* The chip sits between the label and the row's actions, and never shrinks:
+   a building with a long address must not squeeze it into an ellipsis. */
+.presence-node__chip {
+    flex: 0 0 auto;
+    margin-inline-end: var(--th-space-xs);
+}
+
+.presence-managed-note {
+    margin-bottom: var(--th-space-md);
 }
 
 .presence-form {

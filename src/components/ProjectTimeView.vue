@@ -21,7 +21,7 @@
                      (same pattern the Compass uses). -->
                 <NcButton v-if="isTeamAdmin"
                     variant="tertiary"
-                    :title="t('teamhub', 'Open Manage Team — Project — Time investment')"
+                    :title="t('teamhub', 'Open Manage Team (Project) Time investment')"
                     @click="openTimeSettings">
                     <template #icon><CogOutline :size="ICON_BODY" /></template>
                     {{ t('teamhub', 'Time settings') }}
@@ -827,7 +827,9 @@ export default {
         // the preload path where the view mounts before it becomes visible.
         this.$nextTick(() => this.resetScrollTop())
     },
-    beforeDestroy() {
+    // v4.20.0: was beforeDestroy(), which Vue 3 never calls, so this cleanup
+    // never ran and every listener here outlived the component.
+    beforeUnmount() {
         document.removeEventListener('visibilitychange', this.onVisibilityChange)
         window.removeEventListener('focus', this.onVisibilityChange)
     },
@@ -909,7 +911,7 @@ export default {
         // getters. Formatting it in the viewer's zone moved every log entry
         // to the previous day for anyone west of Greenwich.
         formatDate(unixTs) {
-            if (!unixTs) return t('teamhub', '—')
+            if (!unixTs) return t('teamhub', 'Not set')
             return formatEpochDate(unixTs)
         },
 

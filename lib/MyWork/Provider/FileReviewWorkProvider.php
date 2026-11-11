@@ -458,7 +458,7 @@ class FileReviewWorkProvider implements IWorkProvider {
                     Category::ACTION_REQUIRED,
                     self::STATUS_READY_TO_CLOSE,
                     Priority::NORMAL,
-                    $this->l->t('Everyone has reviewed this — only you can close it'),
+                    $this->l->t('Everyone has reviewed this: only you can close it'),
                     null,
                     ['canClose' => true],
                 );
@@ -681,14 +681,14 @@ class FileReviewWorkProvider implements IWorkProvider {
 
         if (count($names) <= 2) {
             // TRANSLATORS: %1$s is "2 of 4 reviewed", %2$s is a list of people who have not answered yet
-            return $this->l->t('%1$s — waiting for %2$s', [$progress, implode(', ', $names)]);
+            return $this->l->t('%1$s: waiting for %2$s', [$progress, implode(', ', $names)]);
         }
 
         $shown = array_slice($names, 0, 2);
         $rest  = count($names) - 2;
 
         // TRANSLATORS: %1$s is "1 of 5 reviewed", %2$s is two names, %3$s is how many more people are outstanding
-        return $this->l->t('%1$s — waiting for %2$s and %3$s more', [
+        return $this->l->t('%1$s: waiting for %2$s and %3$s more', [
             $progress, implode(', ', $shown), (string)$rest,
         ]);
     }

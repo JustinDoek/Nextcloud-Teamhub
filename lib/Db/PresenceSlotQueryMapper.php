@@ -23,8 +23,9 @@ use OCP\IDBConnection;
  *       Holiday-add endpoint. Sets every existing slot on this date to
  *       (presence_type_id=$holidayTypeId, source='holiday', location_room_id=null)
  *       and bumps updated_at. The calendar_event_uid column is left in
- *       place so B4's calendar-propagation update logic can re-point the
- *       VEVENT correctly on next propagation rather than orphaning it.
+ *       place because it is the only pointer to the VEVENT the pre-4.13.49
+ *       sync left in the user's calendar, and the cleanup migration for
+ *       those events needs it (§2.246).
  *
  *   - countByDates($dates)
  *       Bulk count for a set of dates (used internally by service-layer
@@ -78,10 +79,10 @@ class PresenceSlotQueryMapper {
      *
      * Returns the number of rows affected.
      *
-     * The calendar_event_uid column is deliberately NOT cleared — B4's
-     * propagation logic uses it to re-point an existing VEVENT in the user's
-     * calendar rather than creating a new one, which would leave the old
-     * VEVENT orphaned.
+     * The calendar_event_uid column is deliberately NOT cleared. Nothing
+     * propagates to a calendar any more (§2.215), but the UID is the only
+     * pointer to the VEVENT the pre-4.13.49 sync left behind, and clearing
+     * it would make that event unfindable (§2.246).
      */
     public function applyHolidayOverwriteByDate(
         string $isoDate,

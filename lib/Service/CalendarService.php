@@ -251,7 +251,9 @@ class CalendarService {
             // We select displayname and calendarcolor from oc_calendars where principaluri matches.
             // Exclude the contact birthday calendar (uri = 'contact_birthdays') and any soft-deleted
             // calendars (deleted_at IS NULL).
-            $qb->select('id', 'uri', 'displayname', 'calendarcolor')
+            // `components` since v4.14.8: the roster's calendar export leaves
+            // a tasks-only calendar out of its picker (DESIGN §2.250).
+            $qb->select('id', 'uri', 'displayname', 'calendarcolor', 'components')
                 ->from('calendars')
                 ->where($qb->expr()->eq('principaluri', $qb->createNamedParameter($principalUri)))
                 ->andWhere($qb->expr()->neq('uri', $qb->createNamedParameter('contact_birthdays')));
@@ -276,6 +278,7 @@ class CalendarService {
                     'uri'   => (string)$row['uri'],
                     'name'  => (string)($row['displayname'] ?? $row['uri']),
                     'color' => (string)($row['calendarcolor'] ?? '#0082c9'),
+                    'components' => (string)($row['components'] ?? ''),
                 ];
             }
             return $out;

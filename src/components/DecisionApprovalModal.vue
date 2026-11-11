@@ -7,7 +7,7 @@
         <div class="th-approval-modal">
             <h3 class="th-approval-modal__title">{{ decision.question || t('teamhub', 'Untitled') }}</h3>
             <p class="th-approval-modal__hint">
-                {{ t('teamhub', 'Briefly explain the decision — this becomes part of the audit trail.') }}
+                {{ t('teamhub', 'Briefly explain the decision: this becomes part of the audit trail.') }}
             </p>
             <div class="th-approval-modal__field">
                 <label class="th-approval-modal__label">

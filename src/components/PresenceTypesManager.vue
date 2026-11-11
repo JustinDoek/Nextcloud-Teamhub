@@ -2,7 +2,7 @@
     <div class="presence-types-manager">
         <NcSettingsSection
             :name="t('teamhub', 'Status types')"
-            :description="t('teamhub', 'The vocabulary your organisation uses for presence — what people can pick to describe where they are. Built-in types cannot be deleted but their label, icon, and colour can be customised. Drag rows to reorder.')">
+            :description="t('teamhub', 'The vocabulary your organisation uses for presence: what people can pick to describe where they are. Built-in types cannot be deleted but their label, icon, and colour can be customised. Drag rows to reorder.')">
 
             <div v-if="loading" class="presence-loading">
                 <NcLoadingIcon :size="ICON_LARGE" />

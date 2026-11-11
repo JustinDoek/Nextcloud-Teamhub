@@ -39,6 +39,7 @@
                     :busy="busy"
                     @retry="retry"
                     @continue="pump"
+                    @acknowledge="acknowledge"
                     @rollback="askRollback" />
                 <div class="prov-banner__modal-actions">
                     <NcButton variant="tertiary" @click="close">{{ t('teamhub', 'Close') }}</NcButton>
@@ -215,6 +216,32 @@ export default {
                     this.busy = false
                     await this.pump()
                 }
+            } catch (e) {
+                showError(classifyError(e).message)
+            } finally {
+                this.busy = false
+            }
+        },
+
+        /**
+         * v4.13.30 - accept an operation that finished with something to look
+         * at. The banner closes on success, because the whole point is that
+         * the team page stops saying it: the operation comes back `completed`,
+         * so `!provisioning.complete` is false and TeamNotices renders nothing.
+         *
+         * `changed` is emitted so the team view refetches rather than keeping
+         * the stale `attention` it was given on load.
+         */
+        async acknowledge() {
+            if (this.busy) return
+            this.busy = true
+            try {
+                const { data } = await axios.post(
+                    generateUrl(`/apps/teamhub/api/v1/provisioning/${this.provisioning.id}/acknowledge`),
+                )
+                this.state = data
+                this.$emit('changed')
+                this.showDetails = false
             } catch (e) {
                 showError(classifyError(e).message)
             } finally {

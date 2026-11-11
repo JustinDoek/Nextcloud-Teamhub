@@ -26,7 +26,7 @@
                      than the top of Manage Team. -->
                 <NcButton v-if="isTeamAdmin"
                     variant="tertiary"
-                    :title="t('teamhub', 'Open Manage Team — Project — Budget')"
+                    :title="t('teamhub', 'Open Manage Team (Project) Budget')"
                     @click="openBudgetSettings">
                     <template #icon><CogOutline :size="ICON_BODY" /></template>
                     {{ t('teamhub', 'Budget settings') }}
@@ -265,7 +265,7 @@
                             </td>
                             <td class="th-budget__col-num">{{ formatMoney(expense.projectedMinor) }}</td>
                             <td class="th-budget__col-num" :class="realColorClass(expense.realMinor, expense.projectedMinor)">
-                                {{ expense.realMinor !== null ? formatMoney(expense.realMinor) : t('teamhub', '—') }}
+                                {{ expense.realMinor !== null ? formatMoney(expense.realMinor) : t('teamhub', 'Not set') }}
                             </td>
                             <td v-if="lane.canEdit" class="th-budget__col-actions">
                                 <NcActions>
@@ -657,7 +657,9 @@ export default {
         // scrollTop when the display: none → block flip happens.
         this.$nextTick(() => this.resetScrollTop())
     },
-    beforeDestroy() {
+    // v4.20.0: was beforeDestroy(), which Vue 3 never calls, so this cleanup
+    // never ran and every listener here outlived the component.
+    beforeUnmount() {
         document.removeEventListener('visibilitychange', this.onVisibilityChange)
         window.removeEventListener('focus', this.onVisibilityChange)
     },
@@ -789,7 +791,7 @@ export default {
         // getters. Formatting it in the viewer's zone moved the expense to the
         // previous day for anyone west of Greenwich.
         formatDate(unixTs) {
-            if (!unixTs) return t('teamhub', '—')
+            if (!unixTs) return t('teamhub', 'Not set')
             return formatEpochDate(unixTs)
         },
 

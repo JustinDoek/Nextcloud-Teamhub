@@ -12,6 +12,8 @@ use OCA\TeamHub\Db\FloorMapper;
 use OCA\TeamHub\Db\BuildingMapper;
 use OCA\TeamHub\Service\MemberService;
 use OCA\TeamHub\Service\TimezoneService;
+use OCA\TeamHub\Service\NextcloudAvailabilityService;
+use OCA\TeamHub\Db\HolidayMapper;
 use OCP\IConfig;
 use Psr\Log\LoggerInterface;
 
@@ -69,6 +71,8 @@ class MeetingSuggestionService {
         private BuildingMapper $buildingMapper,
         private IConfig $config,
         private TimezoneService $timezoneService,
+        private NextcloudAvailabilityService $nativeAvailability,
+        private HolidayMapper $holidays,
         private LoggerInterface $logger,
         private array $busyProviders = [],
     ) {
@@ -150,19 +154,21 @@ class MeetingSuggestionService {
             $attendeeCtx[$uid] = ['tz' => $tz, 'slots' => $index];
         }
 
-        // 8. Busy intervals across the whole window, merged across providers.
-        $busyByUser = $this->collectBusy($teamId, $attendees, $windowStartTs, $windowEndTs);
-
-        // 9. Score every candidate.
+        // 8. Score at a representative one-hour window inside each half,
+        // never across midnight-to-noon (which is not a meeting time).
         $scored = [];
         foreach ($candidates as $cand) {
+            $sampleStart = (new \DateTimeImmutable($cand['date'] . ' ' . ($cand['half'] === 0 ? '10:00:00' : '14:00:00'), $organiserTz))->getTimestamp();
+            $native = $this->holidays->findByDate($cand['date']) !== null
+                ? array_fill_keys($attendees, false)
+                : $this->nativeAvailability->checkMany($organiserUid, $attendees, $sampleStart, $sampleStart + 3600);
             $scored[] = $this->scoreCandidate(
                 $cand,
                 $attendees,
                 $attendeeCtx,
                 $typeFlags,
                 $roomBuilding,
-                $busyByUser,
+                $native,
                 $meetingType,
             );
         }
@@ -434,7 +440,7 @@ class MeetingSuggestionService {
         array $attendeeCtx,
         array $typeFlags,
         array $roomBuilding,
-        array $busyByUser,
+        $native,
         string $meetingType,
     ): array {
         $availableOnline   = [];   // userIds available (reachable), any location
@@ -456,27 +462,32 @@ class MeetingSuggestionService {
             $localDate = $local->format('Y-m-d');
             $localHalf = (int)$local->format('G') < self::HALF_DAY_SPLIT_HOUR ? 0 : 1;
 
-            $slot = $ctx['slots'][$localDate . '|' . $localHalf] ?? null;
-            if ($slot === null) {
+            $verdict = $native[$uid] ?? null;
+            if ($verdict === null) {
                 $unknownCount++;
-                continue; // No declared presence — exclude from available count.
+                continue;
             }
-
-            $typeId = $slot->getPresenceTypeId();
-            $flags  = $typeId !== null ? ($typeFlags[$typeId] ?? null) : null;
-            if ($flags === null || $flags['isBusy']) {
-                continue; // Busy/unavailable presence type.
-            }
-
-            // Calendar conflict? Overlap of the candidate's absolute range with
-            // any of this attendee's busy intervals.
-            if ($this->hasConflict($busyByUser[$uid] ?? [], $cand['startTs'], $cand['endTs'])) {
+            if ($verdict === false) {
                 $conflictCount++;
                 continue;
             }
-
-            // Available.
+            $slot = $ctx['slots'][$localDate . '|' . $localHalf] ?? null;
+            $typeId = $slot?->getPresenceTypeId();
+            $flags = $typeId !== null ? ($typeFlags[$typeId] ?? null) : null;
+            // A deliberately scheduled TeamHub absence blocks a meeting even
+            // if the person's Nextcloud calendar is otherwise free. Old busy
+            // weekly templates are ignored for backwards compatibility.
+            if ($slot?->getSource() === 'override' && ($flags['isBusy'] ?? false)) {
+                $conflictCount++;
+                continue;
+            }
+            // Native calendar verdict is the source of availability; location
+            // remains optional and only influences how to meet.
             $availableOnline[] = $uid;
+            if ($slot === null || $slot->getSource() === 'holiday' || $flags === null || $flags['isBusy']) {
+                $remoteAvailable[] = $uid; // workplace unknown / legacy time-off
+                continue;
+            }
 
             // Two parallel groupings for the office case:
             //

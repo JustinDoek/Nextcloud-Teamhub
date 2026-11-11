@@ -21,7 +21,13 @@
     <div class="teamhub-mobile-view">
 
         <!-- ── Canvas ───────────────────────────────────────────────── -->
-        <div class="teamhub-mobile-canvas">
+        <!-- v4.13.26 — the canvas is a scroll container for every body that
+             is as tall as its content, and a flex column for the one body
+             that has no content height of its own: a blank-canvas widget's
+             iframe. See the style block. -->
+        <div
+            class="teamhub-mobile-canvas"
+            :class="{ 'teamhub-mobile-canvas--frame': activeWidgetIsFrame }">
 
             <!-- Active widget header (everything except message stream gets a title) -->
             <div v-if="activeWidget !== 'msgstream'" class="teamhub-mobile-widget-header">
@@ -55,16 +61,21 @@
                             {{ label.text }}
                         </span>
                     </div>
-                    <div v-if="teamOwner" class="teamhub-mobile-teaminfo__owner">
-                        <span class="teamhub-mobile-teaminfo__owner-label">{{ t('teamhub', 'Owner') }}</span>
-                        <div class="teamhub-mobile-teaminfo__owner-row">
+                    <!-- v4.13.56 — team admins, not one owner. Same change as
+                         the desktop Team info card; DESIGN §2.223. -->
+                    <div v-if="teamAdmins.length" class="teamhub-mobile-teaminfo__owner">
+                        <span class="teamhub-mobile-teaminfo__owner-label">{{ t('teamhub', 'Team admins') }}</span>
+                        <div
+                            v-for="admin in teamAdmins"
+                            :key="admin.userId || admin.displayName"
+                            class="teamhub-mobile-teaminfo__owner-row">
                             <NcAvatar
-                                v-if="teamOwner.userId"
-                                :user="teamOwner.userId"
-                                :display-name="teamOwner.displayName"
+                                v-if="admin.userId"
+                                :user="admin.userId"
+                                :display-name="admin.displayName"
                                 :hide-status="true"
                                 :size="32" />
-                            <span>{{ teamOwner.displayName }}</span>
+                            <span>{{ admin.displayName }}</span>
                         </div>
                     </div>
                 </div>
@@ -75,6 +86,11 @@
                 <MembersWidget @view-presence-calendar="$emit('set-view', 'presence')" />
             </div>
 
+            <!-- ─── Birthdays — Department teams only ─────────────── -->
+            <div v-if="activeWidget === 'widget-birthdays'" class="teamhub-mobile-canvas-body">
+                <BirthdaysWidget />
+            </div>
+
             <!-- ─── Calendar ──────────────────────────────────────── -->
             <div v-if="activeWidget === 'widget-calendar'" class="teamhub-mobile-canvas-body">
                 <CalendarWidget ref="calendarWidget" />
@@ -82,7 +98,8 @@
 
             <!-- ─── Tasks ─────────────────────────────────────────── -->
             <div v-if="activeWidget === 'widget-deck'" class="teamhub-mobile-canvas-body">
-                <DeckWidget ref="deckWidget" @openproject-actions="openProjectWorkActions = $event" />
+                <DeckWidget ref="deckWidget" @openproject-actions="openProjectWorkActions = $event"
+                    @edit-openproject-work-package="$emit('edit-openproject-work-package', $event)" />
             </div>
 
             <!-- ─── Activity ──────────────────────────────────────── -->
@@ -139,6 +156,27 @@
                     class="teamhub-mobile-canvas-body">
                     <IntegrationWidget
                         :integration="ext"
+                        :team-id="currentTeamId"
+                        @actions-loaded="$emit('widget-actions-loaded', $event)" />
+                </div>
+            </template>
+
+            <!-- ─── Integration-package widgets (v4.13.24) ─────────── -->
+            <template v-for="cap in packageWidgets">
+                <div
+                    v-if="activeWidget === 'widget-int-cap-' + cap.cap_id"
+                    :key="'mobile-int-cap-' + cap.cap_id"
+                    class="teamhub-mobile-canvas-body"
+                    :class="{ 'teamhub-mobile-canvas-body--frame': isCanvasCapability(cap) }">
+                    <!-- A blank-canvas capability draws its own body; a row
+                         one gets the list. Same split as the desktop grid,
+                         and since v4.13.26 the same shared test. -->
+                    <IntegrationCanvasWidget
+                        v-if="isCanvasCapability(cap)"
+                        :integration="cap" />
+                    <IntegrationWidget
+                        v-else
+                        :integration="cap"
                         :team-id="currentTeamId"
                         @actions-loaded="$emit('widget-actions-loaded', $event)" />
                 </div>
@@ -215,14 +253,7 @@
                 :aria-label="item.title"
                 :title="item.title"
                 @click="setActive(item.key)">
-                <img
-                    v-if="item.iconUrl"
-                    :src="item.iconUrl"
-                    :alt="''"
-                    aria-hidden="true"
-                    class="teamhub-mobile-icon-bar__app-icon"
-                    @error="onIconError($event)" />
-                <component :is="item.icon" v-else :size="ICON_BODY" />
+                <component :is="item.icon" :size="ICON_BODY" />
                 <span class="teamhub-mobile-icon-bar__label">{{ item.shortTitle || item.title }}</span>
             </button>
         </nav>
@@ -232,9 +263,9 @@
 <script>
 import { mapState, mapGetters } from 'vuex'
 import { translate as t, translatePlural as n } from '@nextcloud/l10n'
-import { generateUrl } from '@nextcloud/router'
 import { NcAvatar, NcButton } from '@nextcloud/vue'
 import { ICON_BODY, ICON_LARGE } from '../constants/uiTokens.js'
+import { isCanvasCapability } from '../lib/activeWidgets.js'
 
 import MessageOutline from 'vue-material-design-icons/MessageOutline.vue'
 import InformationOutline from 'vue-material-design-icons/InformationOutline.vue'
@@ -264,9 +295,12 @@ import DeckWidget from './DeckWidget.vue'
 import ActivityWidget from './ActivityWidget.vue'
 import IntravoxWidget from './IntravoxWidget.vue'
 import IntegrationWidget from './IntegrationWidget.vue'
+import IntegrationCanvasWidget from './IntegrationCanvasWidget.vue'
 import FilesWidget          from './FilesWidget.vue'
 import DecisionsWidget      from './DecisionsWidget.vue'
 import MembersWidget        from './MembersWidget.vue'
+import BirthdaysWidget from './BirthdaysWidget.vue'
+import CakeVariant from 'vue-material-design-icons/CakeVariant.vue'
 import ProjectHealthWidget  from './ProjectHealthWidget.vue'
 import ViewDashboard        from 'vue-material-design-icons/ViewDashboard.vue'
 // v4.9.3 — OpenProject Phase 1: the Project info widget and (v4.9.5) the
@@ -292,7 +326,7 @@ export default {
         NcAvatar, NcButton,
         // icons used in the icon bar / canvas headers — registered here so
         // <component :is="..."> resolves them
-        MessageOutline, InformationOutline, AccountGroup,
+        MessageOutline, InformationOutline, AccountGroup, CakeVariant, BirthdaysWidget,
         AccountPlus, Calendar, CalendarPlus, CardText, CheckboxMarkedOutline, GavelIcon,
         ClipboardPlusOutline, ClockOutline, Cog, ContentCopy,
         FileDocumentOutline, FilePlus, Folder, LocationExit, Plus, Puzzle,
@@ -301,7 +335,7 @@ export default {
         LifebuoyIcon, ChartBoxOutline,
         // widget bodies
         MessageStream, CalendarWidget, DeckWidget, ActivityWidget,
-        IntravoxWidget, IntegrationWidget,
+        IntravoxWidget, IntegrationWidget, IntegrationCanvasWidget,
         FilesWidget, DecisionsWidget, MembersWidget,
         ProjectHealthWidget,
         OpenProjectOverviewWidget,
@@ -312,7 +346,11 @@ export default {
     props: {
         // Data needed to render the team-info widget
         teamLabels:   { type: Array,  default: () => [] },
-        teamOwner:    { type: Object, default: null },
+        /**
+         * v4.13.56 — the team's admins, level 9 first. Was `teamOwner`, one
+         * object. TeamWidgetGrid computes it; this view only renders it.
+         */
+        teamAdmins:   { type: Array, default: () => [] },
         isTeamAdmin:  { type: Boolean, default: false },
         isTeamModerator: { type: Boolean, default: false },
         // Whether to show the Tasks widget at all (Deck OR Tasks resource)
@@ -325,6 +363,8 @@ export default {
         'manage-team', 'copy-link', 'invite', 'leave-team',
         'schedule-meeting', 'add-event', 'add-meeting',
         'add-deck-task', 'add-personal-task', 'add-openproject-work-package',
+        // v4.13.9 - `{ workPackageId }` from a row's pencil.
+        'edit-openproject-work-package',
         'create-page', 'delete-page', 'create-wiki-page', 'pages-loaded', 'collective-loaded',
         'set-view',
         'widget-actions-loaded',
@@ -349,12 +389,14 @@ export default {
 
     computed: {
         ...mapState([
-            'currentTeamId', 'resources',
-            'teamWidgets', 'isCurrentUserDirectMember',
+            'currentTeamId', 'resources', 'teamType',
+            // v4.13.24 — `packageWidgets` joins `teamWidgets`: the two
+            // registries are separate mechanisms and a team can have either.
+            'teamWidgets', 'packageWidgets', 'isCurrentUserDirectMember',
             'decisionsModuleEnabled', 'decisionsConfig',
             // v3.104.1 — drops msgstream from the icon bar / canvas when
             // Messages is off for the team.
-            'messagesConfig',
+            'messagesConfig', 'presenceModuleEnabled', 'presenceConfig',
             // v4.3.5 — Wiki (Collectives) toggle. Contributes to the
             // widget-pages icon-bar gate (widget renders when EITHER
             // Intranet or Wiki is enabled). Kept in mapState so the
@@ -373,6 +415,21 @@ export default {
         ...mapGetters(['currentTeam']),
 
         team() { return this.currentTeam || {} },
+
+        /**
+         * v4.13.26 — whether the widget on screen is a blank canvas, i.e. an
+         * iframe whose height has to come from this view rather than from its
+         * own content. Only a package capability can be one.
+         *
+         * @return {boolean}
+         */
+        activeWidgetIsFrame() {
+            if (!this.activeWidget.startsWith('widget-int-cap-')) return false
+            const capId = this.activeWidget.slice('widget-int-cap-'.length)
+            const cap = (this.packageWidgets || [])
+                .find(w => String(w.cap_id) === capId)
+            return isCanvasCapability(cap)
+        },
 
         /**
          * v3.104.1 — per-team Messages toggle. Default true so a team that
@@ -412,6 +469,11 @@ export default {
                 shortTitle: t('teamhub', 'Info'),
                 icon: 'InformationOutline',
             })
+
+            if (this.teamType === 'department' && this.presenceModuleEnabled
+                && this.presenceConfig?.presence_enabled) {
+                list.push({ key: 'widget-birthdays', title: t('teamhub', 'Birthdays'), icon: 'CakeVariant' })
+            }
 
             list.push({
                 key: 'widget-members',
@@ -533,14 +595,31 @@ export default {
             // v4.10.44 — the retired Services widget (v4.10.34) is the
             // Services tab now.
 
-            // External integration widgets — registry-driven
+            // External integration widgets — registry-driven. Use the same
+            // generic Puzzle icon as the canvas header and built-in widget
+            // icons. App icon URLs can fail or be unavailable; hiding a broken
+            // image previously left a text-only entry in this mobile bar.
             ;(this.teamWidgets || []).forEach(w => {
                 list.push({
                     key: 'widget-int-' + w.registry_id,
                     title: w.title || t('teamhub', 'Widget'),
                     shortTitle: w.title || t('teamhub', 'Widget'),
                     icon: 'Puzzle',
-                    iconUrl: w.app_id ? this.appIconUrl(w.app_id) : null,
+                })
+            })
+
+            // v4.13.24 — integration-package widgets (v4.13.23). Same id
+            // convention as the desktop grid (`widget-int-cap-<cap_id>`), so a
+            // widget a team hid, moved or collapsed reads the same on both
+            // surfaces. Mobile had no package path at all until now: a team
+            // whose only widget came from a package got an icon bar that never
+            // mentioned it.
+            ;(this.packageWidgets || []).forEach(w => {
+                list.push({
+                    key: 'widget-int-cap-' + w.cap_id,
+                    title: w.title || t('teamhub', 'Widget'),
+                    shortTitle: w.title || t('teamhub', 'Widget'),
+                    icon: 'Puzzle',
                 })
             })
 
@@ -716,7 +795,12 @@ export default {
                 case 'widget-pages': {
                     if (!this.isTeamModerator) return []
                     const actions = []
-                    if (this.resources.intravox) {
+                    // v4.13.62 — the two Intranet actions are a team admin's,
+                    // which is the gate their endpoints have always had; they
+                    // were offered to moderators and refused. The reasoning is
+                    // on the desktop grid (TeamWidgetGrid). *Create Collectives
+                    // page* below stays a moderator's.
+                    if (this.isTeamAdmin && this.resources.intravox) {
                         actions.push({
                             key: 'create-page',
                             label: t('teamhub', 'Create Intranet page'),
@@ -837,6 +921,9 @@ export default {
     methods: {
         t,
         n,
+        // v4.13.26 — the shared frame test, used twice in the template: once
+        // to pick the body component, once to give that body a height.
+        isCanvasCapability,
 
         setActive(key) {
             if (this.activeWidget === key) return
@@ -895,24 +982,6 @@ export default {
             }
         },
 
-        /**
-         * Resolve a Nextcloud app icon URL. Mirrors the helper used in the
-         * desktop grid for external integration widgets — same URL pattern
-         * keeps icon caching consistent across views.
-         */
-        appIconUrl(appId) {
-            if (!appId) return ''
-            return generateUrl('/svg/' + encodeURIComponent(appId) + '/app-dark?color=000000')
-        },
-
-        /**
-         * If an external app's icon 404s (app uninstalled or icon missing),
-         * silently swap to the generic puzzle-piece fallback already used
-         * on the desktop grid.
-         */
-        onIconError(event) {
-            event.target.style.display = 'none'
-        },
     },
 }
 </script>
@@ -936,6 +1005,31 @@ export default {
     overflow-y: auto;
     overflow-x: hidden;
     -webkit-overflow-scrolling: touch;
+}
+
+/* v4.13.26 — frame mode.
+ *
+ * Every other widget body on this view is a block in a scroll container: it
+ * is as tall as its content and the canvas scrolls. A blank-canvas widget's
+ * body is an iframe, which has no content height — in a block container its
+ * `height: 100%` had nothing definite to resolve against and the frame fell
+ * back to its intrinsic 150px. On a phone that is the whole bug: the embedded
+ * page laid itself out for a 150px viewport, and because such a page sets
+ * `body { overflow: hidden }` and scrolls its own panes, there was nothing
+ * left that could scroll either.
+ *
+ * So for a frame the canvas becomes a flex column and the body takes the
+ * height that is left under the title row. Nothing then overflows the canvas,
+ * which is the point: the scrolling belongs inside the embedded page, where
+ * its own CSS put it. `overflow-y: auto` above stays harmlessly unused. */
+.teamhub-mobile-canvas--frame {
+    display: flex;
+    flex-direction: column;
+}
+
+.teamhub-mobile-canvas-body--frame {
+    flex: 1 1 auto;
+    min-height: 0;
 }
 
 .teamhub-mobile-widget-header {
@@ -1206,11 +1300,6 @@ export default {
     outline-offset: -2px;
 }
 
-.teamhub-mobile-icon-bar__app-icon {
-    width: 22px;
-    height: 22px;
-    object-fit: contain;
-}
 
 .teamhub-mobile-icon-bar__label {
     font-size: var(--th-font-micro);

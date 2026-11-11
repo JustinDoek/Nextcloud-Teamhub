@@ -180,6 +180,41 @@ class TeamIntegrationMapper {
     }
 
     /**
+     * Every per-team opt-in on the instance, unbounded.
+     *
+     * v4.13.23 — the population the package backfill reads
+     * (`MigrateLegacyIntegrations`). It has to see every row: the rule it
+     * applies is "preserve exactly what is visible today", and a `LIMIT` would
+     * silently hide part of an estate's current configuration and then report
+     * the migration as complete.
+     *
+     * Ordered so a backfill run is deterministic — two instances with the same
+     * data must produce the same packages, inclusions and preferences.
+     *
+     * @return list<array{registry_id: int, team_id: string, sort_order: int}>
+     */
+    public function findAllAssignments(): array {
+        $qb = $this->db->getQueryBuilder();
+        $qb->select('registry_id', 'team_id', 'sort_order')
+            ->from('teamhub_team_integrations')
+            ->orderBy('registry_id', 'ASC')
+            ->addOrderBy('team_id', 'ASC');
+
+        $result = $qb->executeQuery();
+        $out    = [];
+        while ($row = $result->fetch()) {
+            $out[] = [
+                'registry_id' => (int)$row['registry_id'],
+                'team_id'     => (string)$row['team_id'],
+                'sort_order'  => (int)$row['sort_order'],
+            ];
+        }
+        $result->closeCursor();
+
+        return $out;
+    }
+
+    /**
      * Check whether a specific integration is enabled for a team.
      */
     public function isEnabled(int $registryId, string $teamId): bool {

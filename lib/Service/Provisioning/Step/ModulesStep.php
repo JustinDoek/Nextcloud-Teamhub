@@ -78,12 +78,59 @@ class ModulesStep implements StepInterface {
             }
         }
 
-        // ── Pages (Intravox): a toggle row plus the page ─────────────────
-        $wantsPages = $ctx->hasApp('intravox') && !empty($installed['intravox']);
+        // ── Pages: a toggle row plus the page ────────────────────────────
+        //
+        // **Pages is a feature, not an app, and two apps can provide it**
+        // (Justin, 2026-10-26). The template says `pages` and the registry
+        // says `intravox` for the same thing (see stepLabel in
+        // src/constants/policy.js), and Collectives provides the team's pages
+        // too. If Collectives is providing them, there is nothing for Intravox
+        // to do here and nothing to report about it: CollectivesStep has
+        // already made the collective, and asking Intravox for a second team
+        // page would either duplicate it or fail and park the whole operation
+        // in `attention` over a feature the team already has.
+        //
+        // Collectives wins when a template somehow carries both. That is
+        // Justin's call and it is the safe way round: CollectivesStep runs
+        // whether or not this one does, so deferring to it cannot leave the
+        // team with no pages at all.
+        $collectivesProvidesPages = $ctx->hasApp('collectives')
+            && !empty($installed['collectives'])
+            && $ctx->blueprint->collectiveBehavior() !== 'none';
+        $wantsPages = $ctx->hasApp('intravox')
+            && !empty($installed['intravox'])
+            && !$collectivesProvidesPages;
+        if ($collectivesProvidesPages) {
+            $applied['pages_via'] = 'collectives';
+        }
         try {
             $this->teams->updateTeamApps($teamId, [['app_id' => 'intravox', 'enabled' => $wantsPages, 'config' => null]]);
         } catch (\Throwable $e) {
-            $notes['intravox_toggle'] = $e->getMessage();
+            // **Only a problem when the team actually wanted Pages.**
+            //
+            // This write runs either way, because the team's app list should
+            // record the off state as well as the on one. But when
+            // $wantsPages is false the row is pure bookkeeping: nothing the
+            // creator asked for is missing if it fails, and there is nothing
+            // for anyone to go and fix.
+            //
+            // Reported by Justin, 2026-10-26: a team kept showing "Workspace
+            // setup finished with something to look at: Team modules" naming
+            // Intravox, on an OpenProject template that **no longer includes
+            // Intravox at all**. That is this line. The step reads $ctx, which
+            // is the request frozen at provisioning time, so removing the
+            // integration from the template cannot clear an operation that has
+            // already run; and because any failure here became an attention
+            // note, the team was parked in `attention` for a toggle it never
+            // asked to have set.
+            if ($wantsPages) {
+                $notes['intravox_toggle'] = $e->getMessage();
+            } else {
+                $this->logger->info(
+                    '[TeamHub][ModulesStep] could not record the Intravox toggle as off; the team did not ask for Pages, so this is not raised for attention',
+                    ['teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID],
+                );
+            }
         }
         if ($wantsPages) {
             try {

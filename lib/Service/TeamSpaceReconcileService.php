@@ -84,7 +84,7 @@ class TeamSpaceReconcileService {
     private const NOTICES_KEY = 'teamspace_notices';
 
     /** The docs page an unlicensed instance's notification points at. */
-    public const DOCS_URL = 'https://teamhub.doekworks.eu/docs/nextcloud-admin/team-folders#team-spaces-on-nextcloud-35';
+    public const DOCS_URL = 'https://teamhub.doekworks.eu/docs/nextcloud-admin/team-folders.html#team-spaces-on-nextcloud-35';
 
     public function __construct(
         private TeamSpaceService      $teamSpaceService,

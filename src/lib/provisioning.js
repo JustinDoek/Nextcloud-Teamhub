@@ -175,7 +175,7 @@ export function componentLabel(id) {
     case 'intravox': return t('teamhub', 'Pages')
     case 'messages': return t('teamhub', 'Messages')
     case 'decisions': return t('teamhub', 'Decisions')
-    case 'presence': return t('teamhub', 'Presence')
+    case 'presence': return t('teamhub', 'People')
     case 'timeline': return t('teamhub', 'Timeline')
     case 'dashboard': return t('teamhub', 'TeamHub dashboard')
     default: return id
@@ -190,7 +190,11 @@ export function componentLabel(id) {
  */
 export function roleLabel(key) {
     switch (key) {
-    case 'owner': return t('teamhub', 'Team owner')
+    // v4.13.56 — reads the same as 'admin'. The role key still exists and
+    // still decides who the team is handed to, but nothing inside a team
+    // names an owner (DESIGN §2.223), and this label is rendered in the
+    // create-team role preview, which is inside a team's creation.
+    case 'owner': return t('teamhub', 'Team admin')
     case 'admin': return t('teamhub', 'Team admin')
     case 'moderator': return t('teamhub', 'Moderator')
     case 'member': return t('teamhub', 'Member')

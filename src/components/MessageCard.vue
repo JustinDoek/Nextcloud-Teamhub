@@ -16,7 +16,7 @@
                 :user="message.author_id"
                 :display-name="message.author_display_name || message.author_id"
                 :disable-menu="false"
-                :size="32" />
+                :size="AVATAR_MD" />
             <div class="message-card__meta">
                 <span class="message-card__author">{{ message.author_display_name || message.author_id }}</span>
                 <span class="message-card__date">{{ formattedDate }}</span>
@@ -298,7 +298,7 @@
                 :aria-label="isPollClosed
                     ? t('teamhub', '{option}: {votes}', { option, votes: getPollVotes(index) })
                     : (pollResults.userVote === index
-                        ? t('teamhub', '{option} — your vote', { option })
+                        ? t('teamhub', '{option}: your vote', { option })
                         : t('teamhub', 'Vote for: {option}', { option }))"
                 :aria-disabled="isPollClosed || pollResults.userVote === index ? 'true' : undefined"
                 @click="isPollClosed ? null : vote(index)"
@@ -322,11 +322,11 @@
             </div>
             
             <div class="poll-footer">
-                <ClipboardCheckOutline :size="ICON_BODY" />
+                <ClipboardCheckOutline :size="ICON_INLINE" />
                 <span v-if="isPollClosed" class="poll-closed-label">
                     {{
                         // TRANSLATORS: total vote count when poll is closed, e.g. "1 total vote – Poll closed"
-                        n('teamhub', '{total} total vote – Poll closed', '{total} total votes – Poll closed', pollResults.totalVotes, { total: pollResults.totalVotes })
+                        n('teamhub', '{total} total vote: Poll closed', '{total} total votes: Poll closed', pollResults.totalVotes, { total: pollResults.totalVotes })
                     }}
                 </span>
                 <span v-else>
@@ -378,7 +378,7 @@
             <div v-if="decisionStatus === 'finalized'" class="decision-banner decision-banner--finalized" role="status">
                 <GavelIcon :size="ICON_BODY" />
                 <div class="decision-banner__body">
-                    <strong>{{ t('teamhub', 'Finalized — awaiting approval') }}</strong>
+                    <strong>{{ t('teamhub', 'Finalized: awaiting approval') }}</strong>
                     <span v-if="decision.answeredBy" class="decision-banner__sub">
                         {{ t('teamhub', 'Final wording by {name}', { name: decision.answeredBy }) }}
                     </span>
@@ -704,7 +704,7 @@ import PaperclipIcon from 'vue-material-design-icons/Paperclip.vue'
 // v4.8.7 — new icon sizes come from the shared scale rather than a literal,
 // per SKILLS.md § Design tokens. ICON_BODY is 16, which is what the icons
 // already in this header use, so nothing shifts visually.
-import { ICON_BODY, ICON_INLINE, ICON_LARGE } from '../constants/uiTokens.js'
+import { ICON_BODY, ICON_INLINE, ICON_LARGE, AVATAR_MD } from '../constants/uiTokens.js'
 
 // Image extensions we can render as inline thumbnails
 const IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'avif']
@@ -828,6 +828,7 @@ export default {
             ICON_BODY,
             ICON_INLINE,
             ICON_LARGE,
+            AVATAR_MD,
             commentsOpen: false,
             // v4.8.7 — icon size from the shared scale, exposed the way the
             // rest of the app exposes it (a data field, because MDI's :size
@@ -1764,7 +1765,7 @@ export default {
                     commentId: this.markingCommentId,
                     messageId: this.message.id,
                 })
-                showSuccess(t('teamhub', 'Decision finalized — awaiting approval'))
+                showSuccess(t('teamhub', 'Decision finalized: awaiting approval'))
                 this.showMarkDialog = false
                 this.markingCommentId = null
                 this.$store.dispatch('fetchComments', this.message.id)
@@ -2128,22 +2129,31 @@ a.message-card__origin-pill:focus-visible {
     line-height: 1.4;
 }
 
+/* v4.14.1: the poll block was built at card scale (16px padding on the
+   frame, 16px on every option, a 2px border and 16px footer gutters), so a
+   four-option poll stood twice as tall as the Decisions or Members widget
+   beside it on the dashboard. Everything here is the same poll at widget
+   density: one grid step of padding on the frame, a 1px hairline per option
+   and half the footer gutter. Nothing about the text size changed — the
+   options still read at body size. */
 .poll-widget {
-    margin-top: 20px;
-    margin-bottom: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: var(--th-space-xs);
+    margin-top: var(--th-space-md);
+    margin-bottom: var(--th-space-xs);
     border: 1px solid var(--color-border);
     border-radius: var(--border-radius-element);
-    padding: 16px;
+    padding: var(--th-space-sm);
     background: var(--color-background-hover);
 }
 
 .poll-option {
     position: relative;
-    padding: 16px 16px;
-    margin-bottom: 8px;
+    padding: var(--th-space-xs) var(--th-space-sm);
     border-radius: var(--border-radius-element);
     background: var(--color-main-background);
-    border: 2px solid var(--color-border);
+    border: 1px solid var(--color-border);
     overflow: hidden;
     transition: all var(--animation-quick);
 }
@@ -2210,9 +2220,9 @@ a.message-card__origin-pill:focus-visible {
 .poll-footer {
     display: flex;
     align-items: center;
-    gap: 8px;
-    margin-top: 16px;
-    padding-top: 16px;
+    gap: var(--th-space-sm);
+    margin-top: var(--th-space-xs);
+    padding-top: var(--th-space-sm);
     border-top: 1px solid var(--color-border);
     font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);

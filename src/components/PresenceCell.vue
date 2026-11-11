@@ -98,7 +98,8 @@ export default {
                     type: this.typeInfo.label,
                 })
             }
-            return t('teamhub', '{cell}: not set. Click to set.', { cell: base })
+            // TRANSLATORS: {cell} is a day and half-day, e.g. "Monday morning" — the half-day carries no workplace, so it reads as time the member does not work
+            return t('teamhub', '{cell}: not working. Click to set.', { cell: base })
         },
     },
     methods: {

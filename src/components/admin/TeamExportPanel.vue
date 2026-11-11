@@ -2,7 +2,7 @@
 	<div class="team-export">
 
 		<p class="team-export__intro">
-			{{ t('teamhub', 'Write teams out to a CSV file in the same format the importer reads. Account names, groups, the template, its policy and the expiration date all come along. Apps and modules are not written — a re-imported team is provisioned from its template, exactly as the New Team wizard would.') }}
+			{{ t('teamhub', 'Write teams out to a CSV file in the same format the importer reads. Account names, groups, the template, its policy and the expiration date all come along. Apps and modules are not written. A re-imported team is provisioned from its template, exactly as the New Team wizard would.') }}
 		</p>
 
 		<!-- Said here rather than discovered later: the importer refuses a name
@@ -109,8 +109,8 @@
 				{{ n('teamhub', '{n} team will be written.', '{n} teams will be written.', preview.total, { n: preview.total }) }}
 				<template v-if="preview.blocked > 0">
 					{{ n('teamhub',
-					     '{n} of them cannot be imported again as-is — see below.',
-					     '{n} of them cannot be imported again as-is — see below.',
+					     '{n} of them cannot be imported again as-is: see below.',
+					     '{n} of them cannot be imported again as-is: see below.',
 					     preview.blocked,
 					     { n: preview.blocked }) }}
 				</template>
@@ -144,7 +144,7 @@
 			</div>
 
 			<p class="team-export__hint">
-				{{ t('teamhub', 'The file is written anyway — it is a faithful picture of what is on this server. A row that cannot be imported again is reported when you try, and the other rows are unaffected.') }}
+				{{ t('teamhub', 'The file is written anyway: it is a faithful picture of what is on this server. A row that cannot be imported again is reported when you try, and the other rows are unaffected.') }}
 			</p>
 		</template>
 

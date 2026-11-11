@@ -4,7 +4,7 @@
     <id>teamhub</id>
     <name>TeamHub</name>
     <!-- The xsd caps <summary> at 128 characters (type l10n-string). -->
-    <summary>Team workspace for Nextcloud: messages, decisions, presence, projects, services. A self-hosted Microsoft Teams alternative.</summary>
+    <summary>Team workspace for Nextcloud: messages, decisions, people, projects, services. A self-hosted Microsoft Teams alternative.</summary>
     <description><![CDATA[**Your users are asking for Microsoft Teams. Your auditor is asking who approved what, and where it is stored. TeamHub answers both from the Nextcloud you already run.**
 
 A Nextcloud Team on its own is a membership list. TeamHub turns that list into a governed workspace: messages, decisions, presence, a timeline and projects on one page per team, beside the Talk conversation, team space, Calendar, Collective and Deck board that team already uses. Deck stays the source of truth for cards, Talk for conversations, Files for documents Ã¢â‚¬â€ TeamHub reads across them, writes your actions back to them, and records what happened.
@@ -27,7 +27,7 @@ A Nextcloud Team on its own is a membership list. TeamHub turns that list into a
 - Runs entirely inside your Nextcloud Ã¢â‚¬â€ no hosted version, no external service, no sub-processor to add to your register
 - An instance with an active licence transmits nothing at all
 ]]></description>
-    <version>4.13.0</version>
+    <version>4.20.0</version>
     <licence>agpl</licence>
     <author mail="info@doekworks.eu" homepage="https://doekworks.eu">Doek Works</author>
     <namespace>TeamHub</namespace>
@@ -39,10 +39,25 @@ A Nextcloud Team on its own is a membership list. TeamHub turns that list into a
     <website>https://teamhub.doekworks.eu</website>
     <bugs>https://github.com/JustinDoek/nextcloud-teamhub/issues</bugs>
     <repository>https://github.com/JustinDoek/Nextcloud-Teamhub</repository>
-    <screenshot>https://raw.githubusercontent.com/JustinDoek/Nextcloud-Teamhub/main/screenshots/appstore/team-dashboard.png</screenshot>
-    <screenshot>https://raw.githubusercontent.com/JustinDoek/Nextcloud-Teamhub/main/screenshots/appstore/service-catalog.png</screenshot>
-    <screenshot>https://raw.githubusercontent.com/JustinDoek/Nextcloud-Teamhub/main/screenshots/appstore/my-work.png</screenshot>
-    <screenshot>https://raw.githubusercontent.com/JustinDoek/Nextcloud-Teamhub/main/screenshots/appstore/decision-approved.png</screenshot>
+    <!-- v4.14.0 — the six 855x481 captures replace the four 600px-wide ones
+         under screenshots/appstore/. Two reasons they are a replacement and
+         not an addition:
+           - 855 CSS px is the exact width the App Store renders a screenshot
+             at (measured on the live listing 2026-11-02; the container is
+             fixed and does not grow with the viewport), so the old 600px
+             files were being upscaled to 855 and shown soft.
+           - publish-to-release.js **wipes** a mirrored directory before
+             re-copying it, so screenshots/appstore/ stops existing on the
+             default branch at the next publish and those four URLs would
+             404 on the listing.
+         The path has no appstore/ segment any more: these live at the root of
+         screenshots/, which is what the mirror now carries. -->
+    <screenshot>https://raw.githubusercontent.com/JustinDoek/Nextcloud-Teamhub/main/screenshots/my_work.png</screenshot>
+    <screenshot>https://raw.githubusercontent.com/JustinDoek/Nextcloud-Teamhub/main/screenshots/roster.png</screenshot>
+    <screenshot>https://raw.githubusercontent.com/JustinDoek/Nextcloud-Teamhub/main/screenshots/decisions.png</screenshot>
+    <screenshot>https://raw.githubusercontent.com/JustinDoek/Nextcloud-Teamhub/main/screenshots/Manage_team.png</screenshot>
+    <screenshot>https://raw.githubusercontent.com/JustinDoek/Nextcloud-Teamhub/main/screenshots/OpenProject_integration.png</screenshot>
+    <screenshot>https://raw.githubusercontent.com/JustinDoek/Nextcloud-Teamhub/main/screenshots/compliance.png</screenshot>
 
 
     <!-- Child order is fixed by the xsd's <xs:sequence>, not free: Ã¢â‚¬Â¦ screenshot,
@@ -53,7 +68,7 @@ A Nextcloud Team on its own is a membership list. TeamHub turns that list into a
          but the App Store validates against the schema on upload. -->
     <dependencies>
         <php min-version="8.1" max-version="8.5"/>
-        <nextcloud min-version="33" max-version="35"/>
+        <nextcloud min-version="34" max-version="35"/>
     </dependencies>
 
     <background-jobs>
@@ -66,9 +81,11 @@ A Nextcloud Team on its own is a membership list. TeamHub turns that list into a
         <job>OCA\TeamHub\BackgroundJob\MilestoneAutoPostJob</job>
         <job>OCA\TeamHub\BackgroundJob\LicenseExpiryNotificationJob</job>
         <job>OCA\TeamHub\BackgroundJob\TelemetryReportJob</job>
+        <job>OCA\TeamHub\BackgroundJob\SeatReportJob</job>
         <job>OCA\TeamHub\BackgroundJob\TeamImportJob</job>
         <job>OCA\TeamHub\BackgroundJob\ProvisioningJob</job>
         <job>OCA\TeamHub\BackgroundJob\TeamSpaceReconcileJob</job>
+        <job>OCA\TeamHub\BackgroundJob\FederatedTeamCleanupJob</job>
         <job>OCA\TeamHub\BackgroundJob\ExpireWorkflowSharesJob</job>
         <job>OCA\TeamHub\BackgroundJob\TeamAdoptionSweepJob</job>
         <job>OCA\TeamHub\BackgroundJob\DecisionReviewJob</job>
@@ -82,6 +99,7 @@ A Nextcloud Team on its own is a membership list. TeamHub turns that list into a
     <repair-steps>
         <post-migration>
             <step>OCA\TeamHub\Migration\RepairSteps\SeedPresenceTypes</step>
+            <step>OCA\TeamHub\Migration\RepairSteps\SeedShiftTypes</step>
             <step>OCA\TeamHub\Migration\RepairSteps\SeedTemplatesAndProfiles</step>
             <step>OCA\TeamHub\Migration\RepairSteps\BackfillDeckStackOrder</step>
             <step>OCA\TeamHub\Migration\RepairSteps\ScheduleTeamSpaceReconcile</step>
@@ -93,6 +111,13 @@ A Nextcloud Team on its own is a membership list. TeamHub turns that list into a
             <step>OCA\TeamHub\Migration\RepairSteps\CompleteNextcloudServicesBundle</step>
             <step>OCA\TeamHub\Migration\RepairSteps\ImportLedgerQuotaRequests</step>
             <step>OCA\TeamHub\Migration\RepairSteps\SeedDecisionCategories</step>
+            <!-- v4.13.23 — carries every existing integration registration
+                 into the package model. Must run after the schema step that
+                 creates the five teamhub_integ_* tables; repair steps run
+                 after all migrations, so ordering within this list only
+                 matters relative to the other seeds, and this one depends on
+                 none of them. -->
+            <step>OCA\TeamHub\Migration\RepairSteps\MigrateLegacyIntegrations</step>
         </post-migration>
         <!-- A fresh install runs the migrations schema-only (no pre/post
              steps) and skips <post-migration>; the seeds must be listed under
@@ -100,14 +125,28 @@ A Nextcloud Team on its own is a membership list. TeamHub turns that list into a
              or presence types (v4.10.3). -->
         <install>
             <step>OCA\TeamHub\Migration\RepairSteps\SeedPresenceTypes</step>
+            <step>OCA\TeamHub\Migration\RepairSteps\SeedShiftTypes</step>
             <step>OCA\TeamHub\Migration\RepairSteps\SeedTemplatesAndProfiles</step>
             <!-- v4.11.18 Ã¢â‚¬â€ a no-op on a fresh install (no team has the
                  Decisions module on yet), listed because the rule is that a
                  seed belongs in both lists, and the day someone provisions a
                  team during install it must not be the exception. -->
             <step>OCA\TeamHub\Migration\RepairSteps\SeedDecisionCategories</step>
+            <!-- v4.13.23 — a no-op on a fresh install (no legacy registration
+                 exists yet), listed because the rule is that a step belongs in
+                 both lists. It sets its own marker and returns. -->
+            <step>OCA\TeamHub\Migration\RepairSteps\MigrateLegacyIntegrations</step>
         </install>
     </repair-steps>
+
+    <!-- v4.13.30 - TeamHub's first occ command. It sends a metered licence's
+         member count on demand, which is otherwise only sent by SeatReportJob
+         on its twelve-hourly tick. Deliberately a command and not a button:
+         the count is a billing matter for the instance's operator, not
+         something a team administrator should be invited to manage. -->
+    <commands>
+        <command>OCA\TeamHub\Command\SendSeatReport</command>
+    </commands>
 
     <settings>
         <admin>OCA\TeamHub\Settings\AdminSettings</admin>

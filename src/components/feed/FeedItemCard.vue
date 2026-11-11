@@ -222,7 +222,8 @@ import HelpCircle from 'vue-material-design-icons/HelpCircle.vue'
 import Message from 'vue-material-design-icons/Message.vue'
 import OpenInNew from 'vue-material-design-icons/OpenInNew.vue'
 import Poll from 'vue-material-design-icons/Poll.vue'
-// v4.9.7 — OpenProject news rows: the source glyph.
+// v4.9.7 — OpenProject news rows: the "Open project in OpenProject" action.
+// (It was the card's glyph chip too until v4.13.31 made news a team message.)
 import BriefcaseOutline from 'vue-material-design-icons/BriefcaseOutline.vue'
 import FeedItemThread from './FeedItemThread.vue'
 import { ICON_INLINE, ICON_BODY, ICON_TOOLBAR, AVATAR_MD } from '../../constants/uiTokens.js'
@@ -244,7 +245,10 @@ const KIND_ICONS = {
     decision: Gavel,
     public: Earth,
     message: Message,
-    openproject: BriefcaseOutline,
+    // v4.13.31 — no entry for 'openproject': a news row is a team message
+    // and gets the team message's glyph. Its provenance is the OpenProject
+    // project pill, the author line and Open in OpenProject, which is how
+    // the mirrored post has said it since 4.9.9.
 }
 
 export default {
@@ -531,7 +535,7 @@ export default {
             if (this.dateUnknown) {
                 // An em dash rather than an empty cell — blank reads as a
                 // rendering bug, this reads as "not applicable".
-                return '—'
+                return 'Not set'
             }
             const secs = this.item.created_at
             const ms = secs * 1000
@@ -1063,7 +1067,8 @@ export default {
 .feed-card--public   { --th-feed-tone-soft: var(--color-success);               --th-feed-tone-ink: var(--color-success-text); }
 .feed-card--talk     { --th-feed-tone-soft: var(--color-info);                  --th-feed-tone-ink: var(--color-info-text); }
 .feed-card--system   { --th-feed-tone-soft: var(--color-background-dark);       --th-feed-tone-ink: var(--color-main-text); }
-.feed-card--openproject { --th-feed-tone-soft: var(--color-background-darker);  --th-feed-tone-ink: var(--color-main-text); }
+/* v4.13.31 — no `--openproject` tone: a news row takes `--message`, the
+   tone of the team message it is. */
 
 @media (max-width: 700px) {
     .feed-card__main {

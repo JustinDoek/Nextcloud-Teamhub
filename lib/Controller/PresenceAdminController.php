@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace OCA\TeamHub\Controller;
 
+use OCA\TeamHub\Exception\AccessDeniedException;
 use OCA\TeamHub\Exception\PresenceConflictException;
 use OCA\TeamHub\Service\PresenceHolidayService;
 use OCA\TeamHub\Service\PresenceLocationService;
@@ -395,6 +396,18 @@ class PresenceAdminController extends Controller {
                 $body['affectedCount'] = $e->getAffectedCount();
             }
             return new JSONResponse($body, Http::STATUS_CONFLICT);
+        }
+
+        if ($e instanceof AccessDeniedException) {
+            $this->logger->debug(sprintf(
+                '[TeamHub][PresenceAdminController] %s: forbidden — %s',
+                $action,
+                $e->getMessage()
+            ));
+            return new JSONResponse(
+                ['error' => $e->getMessage()],
+                Http::STATUS_FORBIDDEN
+            );
         }
 
         if ($e instanceof \InvalidArgumentException) {

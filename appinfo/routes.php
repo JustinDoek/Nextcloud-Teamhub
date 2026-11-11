@@ -5,6 +5,9 @@ return [
     'routes' => [
         // Main page route
         ['name' => 'page#index',    'url' => '/',                  'verb' => 'GET'],
+        // Read-only, member-gated People profile reachable from Nextcloud profile actions.
+        ['name' => 'peoplePublic#profile', 'url' => '/people/{userId}', 'verb' => 'GET'],
+        ['name' => 'peoplePublic#directory', 'url' => '/api/v1/people/directory/{userId}', 'verb' => 'GET'],
         // Standalone iframe page — visual timeline
         ['name' => 'page#timeline', 'url' => '/timeline/{teamId}', 'verb' => 'GET'],
 
@@ -52,6 +55,11 @@ return [
         ['name' => 'team#getTeamMembers',         'url' => '/api/v1/teams/{teamId}/members',                 'verb' => 'GET'],
         ['name' => 'team#getAllEffectiveMembers',   'url' => '/api/v1/teams/{teamId}/members/all',             'verb' => 'GET'],
         ['name' => 'team#getMembersForManage',     'url' => '/api/v1/teams/{teamId}/members/manage',          'verb' => 'GET'],
+        // v4.13.16 — membership recertification (DESIGN §2.193). Team-admin
+        // gated in MemberReviewService; the POST is the attestation and is
+        // deliberately CSRF-protected.
+        ['name' => 'team#memberReviewStatus',      'url' => '/api/v1/teams/{teamId}/members/review',          'verb' => 'GET'],
+        ['name' => 'team#attestMemberReview',      'url' => '/api/v1/teams/{teamId}/members/review',          'verb' => 'POST'],
         // v4.6.26 — literal segment, like /all and /manage above. Safe beside
         // the {userId} route below it: that one is DELETE-only.
         ['name' => 'team#getTeamMailComposeUrl',   'url' => '/api/v1/teams/{teamId}/members/mail',            'verb' => 'GET'],
@@ -110,6 +118,7 @@ return [
         ['name' => 'picker#listFileFolders',       'url' => '/api/v1/pickers/files',                          'verb' => 'GET'],
         ['name' => 'team#createIntravoxPage',     'url' => '/api/v1/teams/{teamId}/intravox/page',           'verb' => 'POST'],
         ['name' => 'team#deleteIntravoxPage',     'url' => '/api/v1/teams/{teamId}/intravox/page',           'verb' => 'DELETE'],
+        ['name' => 'team#createIntravoxSubPage',  'url' => '/api/v1/teams/{teamId}/intravox/subpage',        'verb' => 'POST'],
         ['name' => 'team#getIntravoxSubPages',    'url' => '/api/v1/teams/{teamId}/intravox/subpages',       'verb' => 'GET'],
         ['name' => 'team#getIntravoxTeamPage',    'url' => '/api/v1/teams/{teamId}/intravox/team-page',      'verb' => 'GET'],
         ['name' => 'team#invalidateIntravoxCache', 'url' => '/api/v1/teams/{teamId}/intravox/subpages/cache', 'verb' => 'DELETE'],
@@ -129,6 +138,13 @@ return [
 
         // Team actions
         ['name' => 'team#requestJoinTeam',        'url' => '/api/v1/teams/{teamId}/join',                    'verb' => 'POST'],
+        // v4.13.18 — the two decisions an invited user can take. Separate from
+        // requestJoinTeam because that one refuses an invite-only team, which
+        // is the whole point of an invitation. These are also the targets of
+        // the invitation notification's Accept / Decline, so their route names
+        // are load-bearing: Notifier.php builds the action links from them.
+        ['name' => 'team#acceptInvitation',       'url' => '/api/v1/teams/{teamId}/invitation/accept',       'verb' => 'POST'],
+        ['name' => 'team#declineInvitation',      'url' => '/api/v1/teams/{teamId}/invitation/decline',      'verb' => 'POST'],
         ['name' => 'team#leaveTeam',              'url' => '/api/v1/teams/{teamId}/leave',                   'verb' => 'POST'],
         ['name' => 'team#markTeamSeen',           'url' => '/api/v1/teams/{teamId}/seen',                    'verb' => 'POST'],
         ['name' => 'team#createTeamResources',    'url' => '/api/v1/teams/{teamId}/create-resources',        'verb' => 'POST'],
@@ -246,6 +262,10 @@ return [
         ['name' => 'teamAdoption#update',      'url' => '/api/v1/team-adoptions/{id}',                 'verb' => 'PUT'],
         ['name' => 'teamAdoption#accept',      'url' => '/api/v1/team-adoptions/{id}/accept',          'verb' => 'POST'],
         ['name' => 'teamAdoption#decline',     'url' => '/api/v1/team-adoptions/{id}/decline',         'verb' => 'POST'],
+        // v4.14.15 — a team another server owns (DESIGN §2.256). Read-only
+        // and its own controller: every /teams/{teamId} route above answers
+        // for a team this server owns and runs through the registry gate.
+        ['name' => 'federatedTeam#show',       'url' => '/api/v1/federated-teams/{teamId}',            'verb' => 'GET'],
         // v4.11.32 — directory groups waiting for a team (DESIGN §2.166).
         // Admin-only, one home; see IdpGroupController's note on why these
         // are not #[NoAdminRequired] the way the adoption routes are.
@@ -345,6 +365,25 @@ return [
         ['name' => 'teamImage#serve',  'url' => '/api/v1/teams/{teamId}/image', 'verb' => 'GET'],
 
         // ----------------------------------------------------------------
+        // Team banner — upload, remove, serve (v4.13.1). The wide picture
+        // above the team's content; upload/remove are moderator-gated, serve
+        // is member-gated. Same shape as the team image above.
+        // ----------------------------------------------------------------
+        ['name' => 'teamBanner#upload', 'url' => '/api/v1/teams/{teamId}/banner', 'verb' => 'POST'],
+        ['name' => 'teamBanner#remove', 'url' => '/api/v1/teams/{teamId}/banner', 'verb' => 'DELETE'],
+        ['name' => 'teamBanner#serve',  'url' => '/api/v1/teams/{teamId}/banner', 'verb' => 'GET'],
+
+        // ----------------------------------------------------------------
+        // Compliments (v4.13.2). No {teamId} in the path on purpose: a
+        // compliment is between two people, and the gate that matters is
+        // "do they share a team", which is about the pair. Every method
+        // takes its sender or recipient from the session.
+        // ----------------------------------------------------------------
+        ['name' => 'compliment#send',   'url' => '/api/v1/compliments',        'verb' => 'POST'],
+        ['name' => 'compliment#unseen', 'url' => '/api/v1/compliments/unseen', 'verb' => 'GET'],
+        ['name' => 'compliment#seen',   'url' => '/api/v1/compliments/seen',   'verb' => 'POST'],
+
+        // ----------------------------------------------------------------
         // Team expiration — team-admin half (v4.6.13). Every method is
         // #[NoAdminRequired] and gated inside TeamExpiryService by
         // MemberService::requireAdminLevel().
@@ -360,6 +399,10 @@ return [
         ['name' => 'maintenance#getOrphanedTeams',  'url' => '/api/v1/admin/maintenance/orphaned-teams',                       'verb' => 'GET'],
         ['name' => 'maintenance#deleteOrphanedTeam','url' => '/api/v1/admin/maintenance/orphaned-teams/{teamId}',              'verb' => 'DELETE'],
         ['name' => 'maintenance#assignOwner',        'url' => '/api/v1/admin/maintenance/orphaned-teams/{teamId}/assign-owner','verb' => 'POST'],
+        // v4.13.16 — the integrations register: where this instance's team
+        // data goes. Read-only; see IntegrationRegisterService.
+        ['name' => 'maintenance#integrationRegister',       'url' => '/api/v1/admin/integrations/register',          'verb' => 'GET'],
+        ['name' => 'maintenance#integrationRegisterDetail', 'url' => '/api/v1/admin/integrations/register/{appId}',  'verb' => 'GET'],
         ['name' => 'maintenance#getTelemetry',       'url' => '/api/v1/admin/telemetry',                                       'verb' => 'GET'],
         ['name' => 'maintenance#saveTelemetry',      'url' => '/api/v1/admin/telemetry',                                       'verb' => 'PUT'],
         ['name' => 'maintenance#searchUsers',        'url' => '/api/v1/admin/users/search',                                    'verb' => 'GET'],
@@ -369,6 +412,7 @@ return [
         ['name' => 'maintenance#repairMissingOwner',         'url' => '/api/v1/admin/maintenance/assign-owner/{teamId}',           'verb' => 'POST'],
         ['name' => 'maintenance#repairDuplicateMember',      'url' => '/api/v1/admin/maintenance/repair-duplicate-member/{teamId}', 'verb' => 'POST'],
         ['name' => 'maintenance#clearCfgSingle',            'url' => '/api/v1/admin/maintenance/clear-cfg-single/{teamId}',         'verb' => 'POST'],
+        ['name' => 'maintenance#repairInvalidMemberIds',    'url' => '/api/v1/admin/maintenance/repair-member-ids/{teamId}',        'verb' => 'POST'],
         ['name' => 'maintenance#removeNestedTeam',          'url' => '/api/v1/admin/maintenance/nested-team',                       'verb' => 'DELETE'],
         ['name' => 'maintenance#findGhostMembers',          'url' => '/api/v1/admin/maintenance/ghost-members',                     'verb' => 'GET'],
         ['name' => 'maintenance#removeGhostMember',         'url' => '/api/v1/admin/maintenance/ghost-members/{userId}',            'verb' => 'DELETE'],
@@ -405,6 +449,10 @@ return [
         ['name' => 'teamImport#show',     'url' => '/api/v1/admin/import/teams/{id}',          'verb' => 'GET'],
         ['name' => 'teamImport#destroy',  'url' => '/api/v1/admin/import/teams/{id}',          'verb' => 'DELETE'],
         ['name' => 'teamImport#index',    'url' => '/api/v1/admin/import/teams',               'verb' => 'GET'],
+        // v4.13.58 — clears the Recent imports list. Kept beside the {id}
+        // DELETE above so the difference between "discard this run" and
+        // "clear the history" is readable from one place.
+        ['name' => 'teamImport#clearHistory', 'url' => '/api/v1/admin/import/teams',           'verb' => 'DELETE'],
 
         // ----------------------------------------------------------------
         // Bulk team export (v4.6.14) — the read side of the same CSV
@@ -469,6 +517,24 @@ return [
         // ----------------------------------------------------------------
         ['name' => 'layout#getLayout',         'url' => '/api/v1/teams/{teamId}/layout', 'verb' => 'GET'],
         ['name' => 'layout#saveLayout',        'url' => '/api/v1/teams/{teamId}/layout', 'verb' => 'PUT'],
+        // v4.13.33 — drop this member's own arrangement of this team, so the
+        // default cascade applies to it again. What "Reset to the default
+        // layout" calls.
+        ['name' => 'layout#resetLayout',       'url' => '/api/v1/teams/{teamId}/layout', 'verb' => 'DELETE'],
+        ['name' => 'layout#saveTabOrder',      'url' => '/api/v1/teams/{teamId}/layout/tabs', 'verb' => 'PUT'],
+        // v4.13.34 — issue #109 phase 2: the default home layout for one kind
+        // of team. A team's own default is a Manage team setting and rides
+        // `teams/{teamId}/dashboard/config` instead. Gated by
+        // `#[AuthorizedAdminSetting]` alone, so a delegated TeamHub admin may
+        // write them; see LayoutDefaultController's docblock.
+        //
+        // v4.13.36 — the instance-wide default and its three routes are gone.
+        // Justin, 2026-10-28: *"This should be set per template and no default
+        // for all templates."* A width between "every team" and "this team"
+        // that nobody asked to configure is a width to keep working.
+        ['name' => 'layoutDefault#getTemplateDefault',   'url' => '/api/v1/admin/policy/templates/{templateKey}/layout', 'verb' => 'GET'],
+        ['name' => 'layoutDefault#saveTemplateDefault',  'url' => '/api/v1/admin/policy/templates/{templateKey}/layout', 'verb' => 'PUT'],
+        ['name' => 'layoutDefault#clearTemplateDefault', 'url' => '/api/v1/admin/policy/templates/{templateKey}/layout', 'verb' => 'DELETE'],
         // User personal default layout — stored in oc_preferences, no team scope.
         ['name' => 'layout#getDefaultLayout',  'url' => '/api/v1/layout/default',        'verb' => 'GET'],
         ['name' => 'layout#saveDefaultLayout', 'url' => '/api/v1/layout/default',        'verb' => 'PUT'],
@@ -488,7 +554,19 @@ return [
         // ----------------------------------------------------------------
         // Per-user UI preferences (v4.4.12) — oc_preferences, no team scope.
         // ----------------------------------------------------------------
+        ['name' => 'birthdays#upcoming', 'url' => '/api/v1/teams/{teamId}/people/birthdays', 'verb' => 'GET'],
+        ['name' => 'birthdays#celebration', 'url' => '/api/v1/people/birthday/celebration', 'verb' => 'GET'],
+        ['name' => 'birthdays#acknowledge', 'url' => '/api/v1/people/birthday/acknowledge', 'verb' => 'POST'],
+        ['name' => 'anniversaries#celebrations', 'url' => '/api/v1/people/anniversaries', 'verb' => 'GET'],
+        ['name' => 'anniversaries#acknowledge', 'url' => '/api/v1/people/anniversaries/acknowledge', 'verb' => 'POST'],
+        ['name' => 'peopleProfile#show', 'url' => '/api/v1/people/profile', 'verb' => 'GET'],
+        ['name' => 'peopleProfile#save', 'url' => '/api/v1/people/profile', 'verb' => 'PUT'],
         ['name' => 'preferences#getPreferences',  'url' => '/api/v1/preferences', 'verb' => 'GET'],
+        // v4.13.56 — the welcome page's admin-written subline. Readable by
+        // every authenticated user because it is shown to every user; written
+        // on the NC-admin-gated /admin/settings endpoint. See the controller
+        // for why it is not a field on the preferences response.
+        ['name' => 'preferences#getWelcomeMessage', 'url' => '/api/v1/welcome-message', 'verb' => 'GET'],
         ['name' => 'preferences#savePreferences', 'url' => '/api/v1/preferences', 'verb' => 'PUT'],
 
         // ----------------------------------------------------------------
@@ -518,6 +596,11 @@ return [
         ['name' => 'announcement#list',    'url' => '/api/v1/announcements',         'verb' => 'GET'],
         ['name' => 'announcement#get',     'url' => '/api/v1/announcements/body',    'verb' => 'GET'],
         ['name' => 'announcement#dismiss', 'url' => '/api/v1/announcements/dismiss', 'verb' => 'POST'],
+        // v4.13.56 — the forced popup's four counters (shown / read / ack /
+        // optout). Fixed segment like the two above, for the reason DESIGN
+        // §2.66 records: a `{filename}` segment ending in `.md` is treated by
+        // Symfony as a request-format hint and stripped.
+        ['name' => 'announcement#seen',    'url' => '/api/v1/announcements/seen',    'verb' => 'POST'],
 
         // ----------------------------------------------------------------
         // Integration API — external-app registration (NC admin required)
@@ -538,6 +621,52 @@ return [
         ['name' => 'integration#reorderIntegrations',    'url' => '/api/v1/teams/{teamId}/integrations/reorder',                     'verb' => 'PUT'],
 
         // ----------------------------------------------------------------
+        // Integration packages (v4.13.23) — the package/capability model.
+        //
+        // Addressed by stable identity (app_id / integration_key /
+        // capability_key), never by a database id, so a per-team preference
+        // survives an app being disabled, upgraded and reinstalled.
+        //
+        // Order matters: `/presentation/reorder` and
+        // `/packages/all-widget-data` are declared before the parameterised
+        // forms below them, or `reorder` matches `{capId}` and
+        // `all-widget-data` matches `{appId}`. The same lesson as the
+        // `/template` and `/validate` routes at line 432.
+        // ----------------------------------------------------------------
+
+        // Team administrator — presentation only. There is deliberately no
+        // route here that can enable, disable, include or remove a package,
+        // or touch My Work.
+        ['name' => 'integration#getPresentation',      'url' => '/api/v1/teams/{teamId}/integrations/presentation',                 'verb' => 'GET'],
+        ['name' => 'integration#reorderCapabilities',  'url' => '/api/v1/teams/{teamId}/integrations/presentation/reorder',         'verb' => 'PUT'],
+        ['name' => 'integration#showCapability',       'url' => '/api/v1/teams/{teamId}/integrations/presentation/{capId}/show',    'verb' => 'POST'],
+        ['name' => 'integration#hideCapability',       'url' => '/api/v1/teams/{teamId}/integrations/presentation/{capId}/hide',    'verb' => 'POST'],
+
+        // Team member — what renders.
+        ['name' => 'integration#getTeamPackages',         'url' => '/api/v1/teams/{teamId}/integrations/packages',                  'verb' => 'GET'],
+        ['name' => 'integration#getAllPackageWidgetData', 'url' => '/api/v1/teams/{teamId}/integrations/packages/all-widget-data',  'verb' => 'GET'],
+        ['name' => 'integration#getPackageWidgetData',    'url' => '/api/v1/teams/{teamId}/integrations/packages/{appId}/{integrationKey}/{capabilityKey}/data',   'verb' => 'GET'],
+        ['name' => 'integration#getPackageActionForm',    'url' => '/api/v1/teams/{teamId}/integrations/packages/{appId}/{integrationKey}/{capabilityKey}/form',   'verb' => 'GET'],
+        ['name' => 'integration#submitPackageAction',     'url' => '/api/v1/teams/{teamId}/integrations/packages/{appId}/{integrationKey}/{capabilityKey}/submit', 'verb' => 'POST'],
+
+        // ----------------------------------------------------------------
+        // Integration governance (v4.13.23) — Nextcloud administrator only.
+        //
+        // Enablement and template inclusion. Every method carries
+        // #[AuthorizedAdminSetting] and its service re-checks
+        // IGroupManager::isAdmin, following PolicyController verbatim.
+        // ----------------------------------------------------------------
+        ['name' => 'integrationAdmin#index',           'url' => '/api/v1/admin/integrations',                              'verb' => 'GET'],
+        ['name' => 'integrationAdmin#templates',       'url' => '/api/v1/admin/integrations/templates',                    'verb' => 'GET'],
+        ['name' => 'integrationAdmin#disablePreview',  'url' => '/api/v1/admin/integrations/{pkgId}/disable-preview',      'verb' => 'GET'],
+        ['name' => 'integrationAdmin#enable',          'url' => '/api/v1/admin/integrations/{pkgId}/enable',               'verb' => 'POST'],
+        ['name' => 'integrationAdmin#disable',         'url' => '/api/v1/admin/integrations/{pkgId}/disable',              'verb' => 'POST'],
+        ['name' => 'integrationAdmin#templatePreview',   'url' => '/api/v1/admin/integrations/templates/{templateKey}/preview/{pkgId}',   'verb' => 'GET'],
+        ['name' => 'integrationAdmin#includeInTemplate', 'url' => '/api/v1/admin/integrations/templates/{templateKey}/include/{pkgId}',   'verb' => 'POST'],
+        ['name' => 'integrationAdmin#removeFromTemplate','url' => '/api/v1/admin/integrations/templates/{templateKey}/include/{pkgId}',   'verb' => 'DELETE'],
+        ['name' => 'integrationAdmin#reconcile',         'url' => '/api/v1/admin/integrations/templates/{templateKey}/reconcile/{pkgId}', 'verb' => 'POST'],
+
+        // ----------------------------------------------------------------
         // Audit log — admin governance (NC admin required)
         // ----------------------------------------------------------------
         ['name' => 'audit#listTeams',     'url' => '/api/v1/admin/audit/teams',                          'verb' => 'GET'],
@@ -545,6 +674,9 @@ return [
         ['name' => 'audit#listAllEvents', 'url' => '/api/v1/admin/audit/events',                         'verb' => 'GET'],
         ['name' => 'audit#listEvents',    'url' => '/api/v1/admin/audit/teams/{teamId}/events',         'verb' => 'GET'],
         ['name' => 'audit#exportTeam',    'url' => '/api/v1/admin/audit/teams/{teamId}/export',         'verb' => 'GET'],
+        // v4.13.16 — recompute the tamper-evidence chain. Real work, so it is
+        // a button rather than part of the Compliance tab's summary fetch.
+        ['name' => 'audit#integrity',     'url' => '/api/v1/admin/audit/integrity',                      'verb' => 'GET'],
         ['name' => 'audit#getRetention',  'url' => '/api/v1/admin/audit/retention',                      'verb' => 'GET'],
         ['name' => 'audit#saveRetention', 'url' => '/api/v1/admin/audit/retention',                      'verb' => 'PUT'],
 
@@ -617,12 +749,60 @@ return [
         ['name' => 'presenceUser#materialiseNow',    'url' => '/api/v1/presence/slots/materialise','verb' => 'POST'],
         ['name' => 'presenceUser#getSlots',          'url' => '/api/v1/presence/slots',             'verb' => 'GET'],
         ['name' => 'presenceUser#overrideSlot',      'url' => '/api/v1/presence/slots/override',   'verb' => 'PUT'],
+        ['name' => 'presenceUser#overrideRange',     'url' => '/api/v1/presence/slots/override-range', 'verb' => 'PUT'],
 
         // Presence module — team (v3.44.0, Session B3)
         // Team-member-gated; config writes require team admin.
         ['name' => 'presenceTeam#getTeamGrid', 'url' => '/api/v1/teams/{teamId}/presence',        'verb' => 'GET'],
         ['name' => 'presenceTeam#getConfig',   'url' => '/api/v1/teams/{teamId}/presence/config', 'verb' => 'GET'],
         ['name' => 'presenceTeam#suggestTimes', 'url' => '/api/v1/teams/{teamId}/presence/suggest-times', 'verb' => 'GET'],
+
+        // ── Roster (v4.13.67) ────────────────────────────────────────────
+        // Reading needs team membership; every write needs team admin, except
+        // claim/unassign-self which a member does to themselves. DESIGN §2.233.
+        ['name' => 'roster#index',        'url' => '/api/v1/teams/{teamId}/roster',                             'verb' => 'GET'],
+        ['name' => 'roster#createShift',  'url' => '/api/v1/teams/{teamId}/roster/shifts',                      'verb' => 'POST'],
+        ['name' => 'roster#updateShift',  'url' => '/api/v1/teams/{teamId}/roster/shifts/{shiftId}',            'verb' => 'PUT'],
+        ['name' => 'roster#deleteShift',  'url' => '/api/v1/teams/{teamId}/roster/shifts/{shiftId}',            'verb' => 'DELETE'],
+        ['name' => 'roster#assign',       'url' => '/api/v1/teams/{teamId}/roster/shifts/{shiftId}/assign',     'verb' => 'POST'],
+        ['name' => 'roster#unassign',     'url' => '/api/v1/teams/{teamId}/roster/shifts/{shiftId}/unassign',   'verb' => 'POST'],
+        ['name' => 'roster#claim',        'url' => '/api/v1/teams/{teamId}/roster/shifts/{shiftId}/claim',      'verb' => 'POST'],
+        ['name' => 'roster#publish',      'url' => '/api/v1/teams/{teamId}/roster/publish',                     'verb' => 'POST'],
+        // v4.13.68 — concept/publish, the announcement and hand-overs.
+        ['name' => 'roster#unpublish',        'url' => '/api/v1/teams/{teamId}/roster/unpublish',                             'verb' => 'POST'],
+        ['name' => 'roster#notify',           'url' => '/api/v1/teams/{teamId}/roster/notify',                                'verb' => 'POST'],
+        ['name' => 'roster#requestHandover',  'url' => '/api/v1/teams/{teamId}/roster/shifts/{shiftId}/handover',             'verb' => 'POST'],
+        ['name' => 'roster#claimHandover',    'url' => '/api/v1/teams/{teamId}/roster/handovers/{requestId}/claim',           'verb' => 'POST'],
+        ['name' => 'roster#withdrawHandover', 'url' => '/api/v1/teams/{teamId}/roster/handovers/{requestId}/withdraw',        'verb' => 'POST'],
+        // v4.13.74 — the team's own week templates, managed from Manage team,
+        // Module settings. Team admin, not Nextcloud admin: the shift types
+        // are the instance's, the templates built from them are the team's
+        // (DESIGN §2.238).
+        ['name' => 'roster#listTemplates',    'url' => '/api/v1/teams/{teamId}/roster/templates',                           'verb' => 'GET'],
+        ['name' => 'roster#createTemplate',   'url' => '/api/v1/teams/{teamId}/roster/templates',                           'verb' => 'POST'],
+        ['name' => 'roster#updateTemplate',   'url' => '/api/v1/teams/{teamId}/roster/templates/{templateId}',              'verb' => 'PUT'],
+        ['name' => 'roster#deleteTemplate',   'url' => '/api/v1/teams/{teamId}/roster/templates/{templateId}',              'verb' => 'DELETE'],
+        ['name' => 'roster#applyTemplate',    'url' => '/api/v1/teams/{teamId}/roster/apply-template',                      'verb' => 'POST'],
+
+        // Shift types — Nextcloud administrator only (no NoAdminRequired).
+        // The four `/admin/shift-schedules` routes beside these were removed
+        // in v4.14.4 with the instance-wide weekly pattern; the week belongs
+        // to the team and is written in Manage team (DESIGN §2.247).
+        ['name' => 'shiftType#index',   'url' => '/api/v1/admin/shift-types',      'verb' => 'GET'],
+        ['name' => 'shiftType#create',  'url' => '/api/v1/admin/shift-types',      'verb' => 'POST'],
+        ['name' => 'shiftType#update',  'url' => '/api/v1/admin/shift-types/{id}', 'verb' => 'PUT'],
+        ['name' => 'shiftType#destroy', 'url' => '/api/v1/admin/shift-types/{id}', 'verb' => 'DELETE'],
+
+        // v4.13.71 — statistics, staffing, and a person's own availability.
+        ['name' => 'roster#myStats',   'url' => '/api/v1/teams/{teamId}/roster/stats/me',                      'verb' => 'GET'],
+        ['name' => 'roster#teamStats', 'url' => '/api/v1/teams/{teamId}/roster/stats/team',                    'verb' => 'GET'],
+        ['name' => 'roster#staffing',  'url' => '/api/v1/teams/{teamId}/roster/shifts/{shiftId}/staffing',     'verb' => 'GET'],
+        // v4.14.8 — a member's published week into their own calendar, one
+        // action, busy or free. Member level, own shifts only (DESIGN §2.250).
+        ['name' => 'roster#calendarWeek',     'url' => '/api/v1/teams/{teamId}/roster/calendar',  'verb' => 'GET'],
+        ['name' => 'roster#exportToCalendar', 'url' => '/api/v1/teams/{teamId}/roster/calendar',  'verb' => 'POST'],
+        ['name' => 'shiftAvailability#show', 'url' => '/api/v1/people/shift-availability', 'verb' => 'GET'],
+        ['name' => 'shiftAvailability#save', 'url' => '/api/v1/people/shift-availability', 'verb' => 'PUT'],
         ['name' => 'presenceTeam#suggestTimeslots', 'url' => '/api/v1/teams/{teamId}/presence/suggest-timeslots', 'verb' => 'GET'],
         ['name' => 'presenceTeam#saveConfig',  'url' => '/api/v1/teams/{teamId}/presence/config', 'verb' => 'PUT'],
 
@@ -798,6 +978,8 @@ return [
         // ----------------------------------------------------------------
         ['name' => 'license#getStatus',    'url' => '/api/v1/admin/license',         'verb' => 'GET'],
         ['name' => 'license#saveKey',      'url' => '/api/v1/admin/license',         'verb' => 'PUT'],
+        ['name' => 'license#requestQuote', 'url' => '/api/v1/admin/license/quote',   'verb' => 'POST'],
+        ['name' => 'license#requestTrial', 'url' => '/api/v1/admin/license/trial',   'verb' => 'POST'],
         ['name' => 'license#entitlements', 'url' => '/api/v1/license/entitlements',  'verb' => 'GET'],
 
         // ----------------------------------------------------------------
@@ -822,6 +1004,16 @@ return [
         ['name' => 'policy#updateProfile',  'url' => '/api/v1/admin/policy/profiles/{profileKey}',     'verb' => 'PUT'],
         ['name' => 'policy#destroyProfile', 'url' => '/api/v1/admin/policy/profiles/{profileKey}',     'verb' => 'DELETE'],
         ['name' => 'policy#listTemplates',  'url' => '/api/v1/admin/policy/templates',                 'verb' => 'GET'],
+        // v4.13.24 — create and delete a template. There was no create path
+        // at all before: `teamhub_template` only ever gained rows from the
+        // seed, so the shipped five were the only kinds of team an estate
+        // could have. No migration behind either route — `template_key` is
+        // the table's primary key and team creation reads the table live.
+        //
+        // The collection POST is declared before the parameterised routes
+        // below for the reason the integration block at line 576 records:
+        // `/templates` must not be matched as `/templates/{templateKey}`.
+        ['name' => 'policy#createTemplate', 'url' => '/api/v1/admin/policy/templates',                 'verb' => 'POST'],
         // v4.8.3 — member-callable. The create-team wizard fetches the whole
         // template set once on mount, which is what retires the
         // TeamTemplates ↔ CreateTeamView mirror.
@@ -832,7 +1024,14 @@ return [
         // `policy#setDefaultProfile` was here in v4.8.4. Removed in v4.8.5 —
         // the default policy is per template now and rides updateTemplate.
         ['name' => 'policy#updateTemplate', 'url' => '/api/v1/admin/policy/templates/{templateKey}',   'verb' => 'PUT'],
+        ['name' => 'policy#destroyTemplate','url' => '/api/v1/admin/policy/templates/{templateKey}',   'verb' => 'DELETE'],
         ['name' => 'policy#conflicts',      'url' => '/api/v1/admin/policy/conflicts',                 'verb' => 'GET'],
+
+        // v4.13.16 — the Nextcloud Teams (Circles) frontend switch. On the
+        // Policy tab, and writing another app's config value: see
+        // TeamsFrontendService for what the one value reaches.
+        ['name' => 'policy#teamsFrontend',    'url' => '/api/v1/admin/policy/teams-frontend',          'verb' => 'GET'],
+        ['name' => 'policy#setTeamsFrontend', 'url' => '/api/v1/admin/policy/teams-frontend',          'verb' => 'PUT'],
 
         // v4.8.27 — rolling a saved change out to the teams that carry it. The
         // plan comes back from the PUT above, because compliance is measured
@@ -912,8 +1111,31 @@ return [
         ['name' => 'openProject#attention',      'url' => '/api/v1/teams/{teamId}/openproject/attention',   'verb' => 'GET'],
         // v4.9.15 — the Upcoming tasks widget's "Create OpenProject work
         // package": OpenProject's own form (types, assignees) and the create.
+        // ----------------------------------------------------------------
+        // TeamHub's own OpenProject connection (v4.13.5) — see
+        // OpenProjectOAuthController and OPENPROJECT.md §3.1a.
+        //
+        // `oauthCallback` is the one route in the app that OpenProject
+        // redirects a browser to, so it cannot carry a Nextcloud CSRF
+        // token; `state` is the defence and the controller documents it.
+        // It lives outside /api/v1 because it is a browser destination,
+        // not an API call, and its URL is registered by an administrator
+        // in OpenProject and must stay stable.
+        // ----------------------------------------------------------------
+        ['name' => 'openProjectOAuth#status',          'url' => '/api/v1/openproject/connection',        'verb' => 'GET'],
+        ['name' => 'openProjectOAuth#connect',         'url' => '/api/v1/openproject/connection',        'verb' => 'POST'],
+        ['name' => 'openProjectOAuth#disconnect',      'url' => '/api/v1/openproject/connection',        'verb' => 'DELETE'],
+        ['name' => 'openProjectOAuth#callback',        'url' => '/openproject/oauth/callback',           'verb' => 'GET'],
+        ['name' => 'openProjectOAuth#adminConfig',     'url' => '/api/v1/admin/openproject/connection',  'verb' => 'GET'],
+        ['name' => 'openProjectOAuth#saveAdminConfig', 'url' => '/api/v1/admin/openproject/connection',  'verb' => 'POST'],
+
         ['name' => 'openProject#workPackageForm',   'url' => '/api/v1/teams/{teamId}/openproject/work-packages/form', 'verb' => 'GET'],
         ['name' => 'openProject#createWorkPackage', 'url' => '/api/v1/teams/{teamId}/openproject/work-packages',      'verb' => 'POST'],
+        // v4.13.9 — the edit path. PATCH on the route as well as to
+        // OpenProject: the verb says what it does, and a connection that
+        // cannot send PATCH upstream answers 501 rather than pretending.
+        ['name' => 'openProject#workPackageEditForm', 'url' => '/api/v1/teams/{teamId}/openproject/work-packages/{workPackageId}/form', 'verb' => 'GET'],
+        ['name' => 'openProject#updateWorkPackage',   'url' => '/api/v1/teams/{teamId}/openproject/work-packages/{workPackageId}',      'verb' => 'PATCH'],
 
         // ----------------------------------------------------------------
         // OpenProject integration, Phase 2 (v4.9.6) — blueprint-driven
@@ -936,6 +1158,7 @@ return [
         ['name' => 'provisioning#status',     'url' => '/api/v1/provisioning/{id}',          'verb' => 'GET', 'requirements' => ['id' => '\d+']],
         ['name' => 'provisioning#run',        'url' => '/api/v1/provisioning/{id}/run',      'verb' => 'POST', 'requirements' => ['id' => '\d+']],
         ['name' => 'provisioning#retry',      'url' => '/api/v1/provisioning/{id}/retry',    'verb' => 'POST', 'requirements' => ['id' => '\d+']],
+        ['name' => 'provisioning#acknowledge', 'url' => '/api/v1/provisioning/{id}/acknowledge', 'verb' => 'POST', 'requirements' => ['id' => '\d+']],
         ['name' => 'provisioning#rollback',   'url' => '/api/v1/provisioning/{id}/rollback', 'verb' => 'POST', 'requirements' => ['id' => '\d+']],
         // The team page's banner (members) and the membership tools (team admins).
         ['name' => 'provisioning#forTeam',         'url' => '/api/v1/teams/{teamId}/provisioning',                  'verb' => 'GET'],

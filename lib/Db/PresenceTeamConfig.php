@@ -12,7 +12,8 @@ use OCP\AppFramework\Db\Entity;
  * hide_reasons:     0 = full detail visible, 1 = only busy/free/off shown.
  *
  * One row per team (team_id is unique-indexed). Rows are created on first
- * config write; absence of a row means both fields are at their default (0).
+ * config write; absence of a row means People enabled and full details visible.
+ * The v4.13.41 upgrade preserves previous implicit-off settings for older teams.
  *
  * @method int     getId()
  * @method void    setId(int $id)
@@ -22,6 +23,8 @@ use OCP\AppFramework\Db\Entity;
  * @method void    setPresenceEnabled(int $v)
  * @method int     getHideReasons()
  * @method void    setHideReasons(int $v)
+ * @method int     getShiftsEnabled()
+ * @method void    setShiftsEnabled(int $v)
  * @method int     getCreatedAt()
  * @method void    setCreatedAt(int $createdAt)
  * @method int     getUpdatedAt()
@@ -32,12 +35,15 @@ class PresenceTeamConfig extends Entity {
     protected string $teamId          = '';
     protected int    $presenceEnabled = 0;
     protected int    $hideReasons     = 0;
+    /** v4.13.68 — Shifts, the licensed half of the People module. Off by default. */
+    protected int    $shiftsEnabled   = 0;
     protected int    $createdAt       = 0;
     protected int    $updatedAt       = 0;
 
     public function __construct() {
         $this->addType('presenceEnabled', 'integer');
         $this->addType('hideReasons',     'integer');
+        $this->addType('shiftsEnabled',   'integer');
         $this->addType('createdAt',       'integer');
         $this->addType('updatedAt',       'integer');
     }

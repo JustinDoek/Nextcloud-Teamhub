@@ -30,7 +30,6 @@ class PresenceTemplateService {
         private PresenceSlotMapper             $slotMapper,
         private PresenceTypeMapper             $typeMapper,
         private PresenceMaterialisationService $materialisation,
-        private PresenceCalendarService        $calendarService,
         private LoggerInterface                $logger,
     ) {}
 
@@ -52,6 +51,12 @@ class PresenceTemplateService {
             $indexed[$r->getDayOfWeek() * 2 + $r->getHalfDay()] = $r;
         }
 
+        $availableTypes = [];
+        foreach ($this->typeMapper->findAll() as $type) {
+            if ($type->getIsBusy() === 0 && $type->getSelectableByUser() === 1) {
+                $availableTypes[$type->getId()] = true;
+            }
+        }
         $out = [];
         for ($day = 0; $day <= 6; $day++) {
             foreach ([0, 1] as $half) {
@@ -60,8 +65,8 @@ class PresenceTemplateService {
                 $out[] = [
                     'day_of_week'      => $day,
                     'half_day'         => $half,
-                    'presence_type_id' => $row?->getPresenceTypeId(),
-                    'location_room_id' => $row?->getLocationRoomId(),
+                    'presence_type_id' => isset($availableTypes[$row?->getPresenceTypeId() ?? -1]) ? $row->getPresenceTypeId() : null,
+                    'location_room_id' => isset($availableTypes[$row?->getPresenceTypeId() ?? -1]) ? $row->getLocationRoomId() : null,
                     'updated_at'       => $row?->getUpdatedAt(),
                 ];
             }
@@ -229,12 +234,8 @@ class PresenceTemplateService {
                 $slot->setSource('template');
                 $slot->setUpdatedAt($now);
                 $this->slotMapper->update($slot);
-                // Update the VEVENT to reflect the reverted template values (B4).
-                $this->calendarService->syncSlot($slot);
                 $reverted++;
             } else {
-                // Delete the VEVENT before deleting the slot row (B4).
-                $this->calendarService->deleteSlotEvent($slot);
                 $this->slotMapper->delete($slot);
                 $deleted++;
             }
@@ -273,8 +274,12 @@ class PresenceTemplateService {
     }
 
     private function validateTypeId(int $typeId): int {
-        if ($this->typeMapper->findById($typeId) === null) {
+        $type = $this->typeMapper->findById($typeId);
+        if ($type === null) {
             throw new DoesNotExistException("Presence type {$typeId} not found");
+        }
+        if ($type->getIsBusy() === 1 || $type->getSelectableByUser() !== 1) {
+            throw new \InvalidArgumentException('Set working hours and absences in Nextcloud; TeamHub stores only workplace types');
         }
         return $typeId;
     }

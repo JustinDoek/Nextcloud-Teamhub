@@ -5,6 +5,467 @@
 
 ---
 
+## Refusals answer 403 and 404, not 400 (changed 4.20.0)
+
+Fifteen `TeamController` routes answered **every** exception with 400 and its message, so a refused membership or admin check came back as 400 and a missing team as 400. They now answer through `clientErrorResponse()`:
+
+| Exception | Status | Body |
+|---|---|---|
+| `AccessDeniedException` | 403 | `{ error }`, the message |
+| `NotFoundException` | 404 | `{ error }` |
+| `AppNotAvailableException` | 422 | `{ error }` |
+| `ValidationException`, `\InvalidArgumentException` | 400 | `{ error }` |
+| any other `\Exception` | 400 | `{ error }`, the message, **unchanged** |
+
+Routes: `team#getIntravoxSubPages`, `getIntravoxTeamPage`, `invalidateIntravoxCache`, `getCollectivesConfig`, `getCollectivesTeamRow`, `getCollectivesSubPages`, `invalidateCollectivesCache`, `createCollectivesPage`, `markTeamSeen`, `createCalendarEvent`, `updateTeamDescription`, `removeMember`, `updateMemberLevel`, `approveRequest`, `rejectRequest`.
+
+`team#getCollectivesPageTree` (`GET /api/v1/teams/{teamId}/collectives/page-tree`) caught a class that did not exist, so every failure escaped as an unlogged 500. It now uses `exceptionResponse()`: 403 for a non-member, and a logged 500 with a `ref` for anything unexpected.
+
+`roster#calendarWeek` (`GET …/roster/calendar`) is **CSRF-protected** since 4.20.0. It carried `#[NoCSRFRequired]` with no documented reason; its only caller is `@nextcloud/axios`, which sends the request token.
+
+---
+
+## A members' endpoint that was admitting only administrators (changed 4.13.51)
+
+`GET /api/v1/teams/{teamId}/calendar/events/week` (`team#getCalendarEventsForWeek`) carried **no controller attributes at all**. Its `#[NoAdminRequired]` and `#[NoCSRFRequired]` were stranded above the *next* method's docblock and therefore applied to `getCalendarEventsInRange`, which declares its own. Without `#[NoAdminRequired]` Nextcloud admits only a Nextcloud administrator, so the week view refused every ordinary member. The attributes now sit on the method they were written for; the endpoint's own `requireMemberLevel()` check is unchanged, and was always the real boundary.
+
+`getCalendarEventsInRange` keeps `#[NoAdminRequired]` and no longer inherits a stray `#[NoCSRFRequired]`. It is called from the frontend through `@nextcloud/axios`, which sends the request token, so the CSRF check it now faces is one it already satisfies.
+
+Found by the first PHPStan run that could resolve the framework. DESIGN §2.218.
+
+---
+
+## People: the collaboration profile, birthdays, anniversaries and time off (added 4.13.41 — 4.13.50)
+
+The Presence module is called **People** everywhere a person reads it. Nothing underneath was renamed: the routes are still `/api/v1/presence/*`, the config keys still `presence_*`, the tables still `teamhub_presence_*`. See DESIGN §2.210 for why.
+
+### The location tree (changed in 4.13.54)
+
+`GET /api/v1/admin/presence/buildings` returns the buildings → floors → rooms tree. Each building and each floor now carries a **`source`**: `null` for one an administrator created here, or the identifier of the room backend that publishes it (`calendar_resource_management`, `roomvox`, …).
+
+A row with a non-null `source` is **read only**. `PUT` and `DELETE` on it answer **403** from `PresenceLocationService`, not merely hidden controls in the admin page; adding a floor under a managed building, or a room under a managed floor, is unaffected and is the point of the feature. Rooms never carry a `source` and are never synced.
+
+The tree read also triggers the sync, so the buildings and floors a backend publishes are never stale when somebody looks at them. See DESIGN §2.221.
+
+### The collaboration profile
+
+| Endpoint | Gate | Answers |
+|---|---|---|
+| `GET /api/v1/people/profile` | `#[NoAdminRequired]`, the caller only | the caller's profile, the Department-template teams they may pick from, and the room tree |
+| `PUT /api/v1/people/profile` | `#[NoAdminRequired]`, CSRF-protected | body `{ "profile": { … } }` — **the caller's own profile, always**; no `userId` is accepted |
+
+The write verifies every reference server-side: a department id against `TeamService::getUserTeams()` + `TeamTypeService`, a room id against `PresenceLocationService`. A department the caller does not belong to, or a room that does not exist, is **400** — not a silent drop.
+
+**Storage is a preference, not a table**: `people_collaboration_profile_v1`, one JSON value per user under the `teamhub` app id (DESIGN §2.211). No migration, and an app update keeps it.
+
+**Two fields are read-only and come from Nextcloud, not from the form** (DESIGN §2.212): the account date from a `UserCreatedEvent` TeamHub recorded, falling back to `IUser::getFirstLogin()`, with `0` and `-1` reading as *Not available*; the department date from the direct Circles membership's `joined` column, absent for a member who holds the team only through a group. **Neither is an employment date** and neither may be presented as one.
+
+### The read-only profile of a colleague (gate changed 4.13.52)
+
+| Endpoint | Gate | Answers |
+|---|---|---|
+| `GET /api/v1/people/directory/{userId}` | `#[NoAdminRequired]`, People module on, **signed-in viewer** | the fields that user shares |
+| `GET /people/{userId}` | the same check, repeated server-side | the `TemplateResponse` standalone page |
+
+**The shared-Department requirement is gone (Justin, 2026-10-30).** A collaboration profile is a property of a person, not of a team. Requiring a shared People-enabled Department team made the feature invisible on every upgraded instance, because the 4.13.41 migration writes `presence_enabled = 0` for every pre-existing team — so the gate was shut everywhere and nothing on the page could say why. What remains is the instance-wide People switch, a **signed-in** viewer (a Nextcloud profile page can be public; these details are for colleagues), and each field's own sharing switch. Both endpoints still answer **403** through one gate in `PeopleDirectoryService`, so the page and the API cannot drift apart.
+
+`fields` changed shape with the gate: it is now an **ordered list of `{label, value}` with the labels already translated** server-side, instead of an object keyed by English label. Both readers render what they are given rather than each keeping a copy of the label map.
+
+**4.13.63 — there is now a third reader, and it is unified search.** `PeopleSearchProvider` (`teamhub-people`, order 54) matches the term against published profile fields and links each hit to `/people/{userId}`. It has **no endpoint of its own**: Nextcloud's search drawer calls it, and it reads through the same gate. Two things an integration should know about what is searchable:
+
+- **The SQL is a prefilter, not the authorisation.** One `iLike` over the stored `people_collaboration_profile_v1` preferences narrows the pool; every candidate then goes through `PeopleDirectoryService::profiles()` and only the fields *that* returns are matched. A field its owner un-shared is in the stored JSON and can never be a search key.
+- **Department and usual workplace are not search keys**, though both still appear in a result's subline. They are stored as ids rather than names; a department is a team, and `teamhub-teams` already answers for teams. Display names are left to Nextcloud core.
+
+`PeopleDirectoryService::profiles(array $userIds)` is the batched form of `profile()` added for this, and is the one to call for more than one person: `getBuildings()` triggers the room-backend sync (§2.221), so a loop over the single-person call would sync once per person.
+
+The entry point is no longer a profile **action**. The fields are rendered into the Nextcloud profile page itself, by a script attached through the documented `OCP\Profile\BeforeTemplateRenderedEvent`; `PeopleProfileLinkAction` is removed (DESIGN §2.219, which reverses §2.214).
+
+### Birthdays and anniversaries
+
+| Endpoint | Answers |
+|---|---|
+| `GET /api/v1/teams/{teamId}/people/birthdays` | the **three** next birthdays in a Department team, from today; display name and localized month/day **only** |
+| `GET /api/v1/people/birthday/celebration` | whether the caller has a greeting waiting |
+| `POST /api/v1/people/birthday/acknowledge` | records it, **on dismissal only** |
+| `GET /api/v1/people/anniversaries` | the caller's 1/5/10/25-year department milestones falling today |
+| `POST /api/v1/people/anniversaries/acknowledge` | body `{ teamId, years }`, the caller only |
+
+The birthday source of truth is Nextcloud's own `IAccountManager::PROPERTY_BIRTHDATE`. `SCOPE_PRIVATE` and the profile's `shareBirthday` both veto it, **no birth year is ever returned**, and a 29 February birthday is greeted on 1 March in a common year. The members endpoint requires team membership before it enumerates anybody, and returns an empty list for a non-Department team or one whose admin hid the widget.
+
+A `GET` never marks a greeting seen — only the dismissal `POST` does, so a page reload does not consume somebody's birthday (CLAUDE.md: a GET never mutates).
+
+### Shifts: my week in my calendar, double bookings, and notices (4.14.8)
+
+DESIGN §2.250. Two endpoints, both behind team membership and `requireAvailable()` like every roster route.
+
+| Endpoint | Gate | Answers |
+|---|---|---|
+| `GET …/roster/calendar?week=YYYY-MM-DD` | team member | `{ from, to, shifts, calendars, calendarUri, transp }`. The **caller's own published** shifts in the week holding `week` (Monday to Sunday), each with `inCalendar`; the calendars the caller **owns** that can hold an event (tasks-only calendars are left out); and what they picked last time, else Nextcloud's default calendar, else busy |
+| `POST …/roster/calendar` | team member | `{ week, calendarUri, transp }` → `{ added, updated, failed, from, to }`. `transp` is `OPAQUE` (busy) or `TRANSPARENT` (free). Writes every one of those shifts into that calendar in one call; **running it again rewrites the same events**. 400 for a calendar the caller does not own, a bad `transp`, or a week with nothing of theirs in it; 422 when the CalDAV backend is not there |
+
+**No user id is accepted by either**, so neither can read or write a colleague's week. The calendar is matched against the caller's own calendar home on the server, not trusted from the body.
+
+**Each event** carries `UID:teamhub-shift-{shiftId}-{userId}@teamhub-roster` (user id sanitised to `[a-zA-Z0-9._-]`), object URI the UID lowercased plus `.ics`, `PRODID:-//TeamHub//TeamHub Roster//EN` and the marker **`X-TEAMHUB-ROSTER:1`**. Times are UTC, converted from the member's own timezone, and a shift that ends the next day ends at the wall-clock time even on the night the clocks change. `teamhub_roster_cal` holds one row per (shift, person) with the calendar and URI.
+
+**Coming off a shift takes the event out**: `unassign`, a hand-over claimed from you, `unpublish`, `DELETE …/shifts/{id}`, and deleting the team (shifts from today on only). Every removal checks the marker first and leaves anything without it. Gaining a shift never writes by itself.
+
+**Double bookings are refused.** `assign`, `claim` and a hand-over `claim` answer **409** when the person is already on another shift whose hours overlap, **in any team, draft or published**. The message names neither the other shift nor its team. Back-to-back shifts touch and are allowed. `staffing` reports it as a fourth `state`, **`overlap`**, beside `timeoff`; both refuse.
+
+**`claim` now refuses a draft shift** (400). The docblock always said it needed a published shift; nothing enforced it until 4.14.8.
+
+**Notifications.** Seven new `teamhub` subjects, all about **published** shifts, never sent to the person who acted, each linking to `?team={teamId}&roster={date}` (opens the Roster tab):
+
+| Subject | Sent to | When |
+|---|---|---|
+| `roster_published` | everybody on a newly published shift | `publish`. One per person for the week, listing up to seven of their shifts. Object `roster_week` / `{teamId}:{from}`, which replaces the previous week notice |
+| `roster_withdrawn` | everybody who was on the week | `unpublish`. Same object, so it replaces the publish notice |
+| `roster_assigned` | the person | `assign` onto a published shift |
+| `roster_unassigned` | the person | `unassign` of somebody else from a published shift |
+| `roster_shift_removed` | everybody on it | `DELETE` of a published shift |
+| `roster_role_changed` | everybody on it | `PUT` that changes a published shift's role |
+| `roster_handover_taken` | the requester | a hand-over claimed |
+
+`PUT …/shifts/{id}`, `DELETE …/shifts/{id}`, `unassign` and `unpublish` now pass the caller to the service as the actor. Their request and response shapes are unchanged.
+
+### Shifts: schedules, concept/published, and hand-overs (added 4.13.68)
+
+**The gate changed.** Every roster endpoint now goes through `ShiftsModuleService::requireAvailable()`, which is **three** gates, refused in this order and named in the message:
+
+1. `presence_module_enabled` — the People module, instance-wide. Shifts has **no instance switch of its own**.
+2. **A licence.** `LicenseService::hasLicenseKey()` plus an enforcement level of `none` or `grace`.
+3. `teamhub_presence_team.shifts_enabled` — the team's own switch, **default 0**.
+
+`GET /api/v1/teams/{teamId}/presence/config` now also answers `shifts_enabled`, `shifts_offerable` (People on **and** licensed) and `shifts_reason` (`unlicensed` | `disabled` | null), so a client can grey the control with the reason instead of hiding it. `PUT` accepts `shifts_enabled`; setting it to 1 without a licence is **403**, setting it to 0 is always allowed.
+
+#### Shift types — Nextcloud administrator only
+
+No `#[NoAdminRequired]` on either of these, which is the access rule. Served by `ShiftTypeController`, which was `ShiftScheduleController` until 4.14.4.
+
+| Endpoint | Answers |
+|---|---|
+| `GET/POST /api/v1/admin/shift-types` | the vocabulary every team rosters from |
+| `PUT/DELETE /api/v1/admin/shift-types/{id}` | a built-in refuses deletion (switch it off); so does one a **team roster template** still uses |
+
+**Removed in 4.14.4: the four `/api/v1/admin/shift-schedules` endpoints.** They served the instance-wide weekly pattern of DESIGN §2.234, which the team roster template below replaced one release later (§2.247). The two tables behind them are dropped by `Version000414004Date20261103120000`.
+
+The *in use* check moved with them. Until 4.14.4 deleting a type was refused when a **schedule** used it and never looked at a team's template, so a type a team was rostering from could be deleted without a word; it now asks `RosterTemplateRowMapper::usesShiftType()`.
+
+#### The team's own week templates — team admin (added 4.13.74)
+
+**The division, and it is the point of these five endpoints.** A Nextcloud administrator defines the shift **types** above; a **team admin** defines that team's **templates**, from Manage team → Module settings. Before 4.13.74 the only weekly pattern was the instance-wide schedule, whose endpoint admits Nextcloud administrators only — so the Roster tab's picker was permanently empty for the one person it was built for (DESIGN §2.240). 4.14.4 removed that schedule, which leaves these the only week in the app (§2.247).
+
+Every one of these is `#[NoAdminRequired]` plus `requireAdminLevel($teamId)` plus `requireAvailable($teamId)`. `{templateId}` is looked up **by id and team together**, so an id belonging to another team is a 400 "that template does not exist" rather than a 403 — it is not found, not refused.
+
+| Endpoint | Answers |
+|---|---|
+| `GET …/roster/templates` | `{ templates, types }`. The team's templates with their weeks, **and the active shift types**, which travel with them because a team admin cannot read the administrator's own type endpoint |
+| `POST …/roster/templates` | `{ name, description?, isActive?, lines }` → the saved template. **201** |
+| `PUT …/roster/templates/{templateId}` | the same body. The week is **replaced wholesale**, in one transaction |
+| `DELETE …/roster/templates/{templateId}` | `{ deleted: true }`. Weeks already drafted from it are untouched |
+| `POST …/roster/apply-template` | `{ weekStart, templateId }` → `{ created, skipped, from, to }`. Drafts the week with every place named by its role |
+
+A template line is `{ dayOfWeek, shiftTypeId, role, requiredCount }`, `dayOfWeek` 0 = Monday. **The `role` is required** and is what the template is for: it is copied into the shift's `notes`, which is the column the roster card has shown as the role since 4.13.70, so a drafted week reads *Receptionist 08:00 to 12:00* and the only thing left is assigning people.
+
+**Two roles may share one weekday and one shift type**; the same role twice on one may not. That is the one rule that could not have been expressed by adding a `team_id` to the instance-wide schedule tables, whose unique index was (schedule, weekday, type) — and the reason the **duplicate guard on a shift now counts the role**. A line whose shift type has since been switched off is skipped rather than refused: the administrator who retired *Night* did not invalidate every template that used it.
+
+Deleting a team forgets its templates.
+
+#### Planning, publishing and announcing
+
+`POST …/roster/apply`, which laid the instance-wide pattern over a week, **was removed in 4.14.4** with the pattern itself. `…/roster/apply-template` above is now the only way a week is drafted.
+
+| Endpoint | Gate | Answers |
+|---|---|---|
+| `POST …/roster/unpublish` | **team admin** | `{ from, to }`. Back to concept: clears `published_at`, removes the presence rows the week wrote, withdraws open hand-overs. **`published_by` is kept** |
+| `POST …/roster/notify` | **team admin** | `{ from, to }` → `{ posted, error }`. Announces the published week in the **message stream**, not Talk. Never fails a publish |
+
+#### Hand-overs
+
+| Endpoint | Gate | Answers |
+|---|---|---|
+| `POST …/roster/shifts/{shiftId}/handover` | member, **on that shift**, shift published | `{ reason? }` → `{ request, announced }`. The row is written first; the Talk post is best effort, so a team without Talk still gets a working request and `announced: false` |
+| `POST …/roster/handovers/{requestId}/claim` | team member | The requester comes off, the claimer goes on, **one transaction**. Availability still blocks (**409**) |
+| `POST …/roster/handovers/{requestId}/withdraw` | the requester only | |
+
+The grid read now carries `handover` on each shift: `null`, or `{ id, requesterUid, requesterName, reason }` for an open request.
+
+The Talk message links to `?team={teamId}&shiftRequest={id}`, which opens the team's Roster tab.
+
+### Statistics, availability and staffing (added 4.13.71)
+
+| Endpoint | Gate | Answers |
+|---|---|---|
+| `GET …/roster/stats/me?year=YYYY` | team member | **the caller's own** year. No uid is accepted, so this cannot read a colleague's. **Since 4.14.11 it spans every team** the caller has published shifts or hand-over requests in, not only `{teamId}`, and adds `teams: [{ teamId, teamName, total }]` (DESIGN §2.253) |
+| `GET …/roster/stats/team?year=YYYY` | **team admin** | the team's year plus a line per member. A comparison between colleagues is not a member's business |
+| `GET …/roster/shifts/{shiftId}/staffing` | **team admin** | who may be put on this shift, and what stands in each person's way |
+| `GET /api/v1/people/shift-availability` | signed in | **the caller's own** week, all fourteen cells |
+| `PUT /api/v1/people/shift-availability` | signed in | `{ cells: [{ dayOfWeek, halfDay, available }] }`, the caller's own |
+
+A statistics bucket is `{ plannedShifts, plannedMinutes, workedShifts, workedMinutes, upcomingShifts, upcomingMinutes, handoverRequests }`, with twelve `months` (January is 0) and a `total`. **Minutes, not hours** — rounding happens at the point of display, or a column of rounded figures stops adding up to its own total.
+
+**`workedBasis` is `past_shifts`, and a client should say so.** Nothing records that a shift was staffed, so "worked" means its date has passed. Only **published** shifts are counted: a draft is a plan nobody was told about. Hours come from the shift type, so retiming a type changes historical figures.
+
+Hand-over requests are counted by **when they were asked**, whatever became of them — a withdrawn request counts, because the asking is the fact.
+
+**Staffing options** are `{ userId, displayName, state, reason, onShift }` with `state` one of:
+
+- `ok` — nothing known against it.
+- `unavailable` — they said they cannot work this half-day. **Advice, not a lock**: the assign endpoint still accepts them.
+- `timeoff` — booked time off, which **does** refuse with a 409.
+- `overlap` (4.14.8) — already on another shift at overlapping hours, in any team. Refuses with a 409.
+
+**4.14.9 — the staffing response is an object, and it is ordered fairly** (DESIGN §2.251). `GET …/staffing` answers `{ options, sortedBy, weekFrom, weekTo, weekendFrom }` (it was `{ options }` with the same `options` inside, so a client reading `options` is unaffected). Each option adds **`weekMinutes`** (minutes this person has on **this team's** shifts in the shift's Monday to Sunday week) and **`weekendShifts`** (this team's Saturday and Sunday shifts over the four weeks ending with that week). Drafts count; other teams do not. `sortedBy` is `weekend` when the shift being staffed is on a Saturday or Sunday, else `week`. Within each `state` the options are ordered lightest first: by `weekendShifts` then `weekMinutes` for a weekend shift, the other way round otherwise, then by name. It orders and never filters.
+
+**Availability is instance-wide**, not per team, and an **absent row means available** — anything else would empty every roster on the day the feature is switched on. Only the exceptions are stored. `day_of_week` is 0 = Monday; `half_day` is 0 morning, 1 afternoon.
+
+**A public holiday no longer blocks an assignment** (4.13.71). The grid read carries `holidays` as `{ "YYYY-MM-DD": name }` so a client can mark the day, and a published shift now **overwrites** the holiday overlay in `teamhub_presence_slots`: somebody rostered on a holiday is working it. A deliberate absence still wins.
+
+---
+
+**4.13.70 — `notes` is `role`.** The shift's free-text field is **Role** everywhere a person or an integration sees it, and the grid serialises it as `role`. **The column is still `notes`** — renaming it would be a migration on every supported database to change text no user ever sees (§2.210's rule). A shift with a role is labelled by it; without one, by its shift type. The hand-over message in Talk uses the same resolution, and its date is now formatted with `IL10N::l('date', …)` in the poster's language — a Talk message is one string for a room, so it cannot follow each reader's locale.
+
+**4.13.69 — two corrections.** The planning controls (apply a schedule, publish, back to concept, notify) moved from Manage team onto the **Roster tab**, gated on `can_manage` from the grid payload; the server gates are unchanged, so an integration sees no difference. And every message these endpoints send had `{name}` placeholders that `OCP\IL10N::t()` never substitutes — it takes **sprintf** parameters, unlike the JavaScript `t()`. The strings are numbered (`%1$s`) now. No PHP string in this app is covered by `check:l10n`, which scans `src/` only.
+
+---
+
+### The roster: who works when (added 4.13.67)
+
+The People module's second surface, behind the **same double gate** as the planning grid: the instance switch `presence_module_enabled` **and** the team's `presence_enabled`. Either off is a **403** on every endpoint below, not an empty list.
+
+| Endpoint | Gate | Answers |
+|---|---|---|
+| `GET /api/v1/teams/{teamId}/roster?from=&to=` | team member | the week. A member is served **published shifts only**; a team admin also gets the draft and `can_manage: true` |
+| `POST /api/v1/teams/{teamId}/roster/shifts` | **team admin** | `{ date, shiftTypeId, roomId?, requiredCount?, role? }` |
+| `PUT /api/v1/teams/{teamId}/roster/shifts/{shiftId}` | **team admin** | `{ requiredCount?, role?, roomId? }`. The date and the type are **not** editable: a shift that changes either is a different shift, and editing in place would silently move people already on it |
+| `DELETE /api/v1/teams/{teamId}/roster/shifts/{shiftId}` | **team admin** | removes the shift, everyone on it, and the presence rows it wrote |
+| `POST …/shifts/{shiftId}/assign` | **team admin** | `{ userId }` |
+| `POST …/shifts/{shiftId}/unassign` | team admin, **or** the member dropping a shift they claimed | `{ userId }` |
+| `POST …/shifts/{shiftId}/claim` | team member | the caller takes an open place on a published shift |
+| `POST /api/v1/teams/{teamId}/roster/publish` | **team admin** | `{ from, to }` → `{ published, from, to }` |
+
+Range reads are capped at **31 days**; a longer one is a 400.
+
+**A shift id is checked against its team**, not trusted from the route — the id is guessable and "the frontend only sends its own" is not a boundary.
+
+**409, not 400, when the person is not available.** Assigning onto a public holiday or a member's booked time off is refused with the reason. Availability is a hard constraint: an unassigned shift is a better answer than one assigned to somebody on holiday. A *weekly workplace* does not block.
+
+**What publishing does.** It stamps `published_at` on every **draft** shift in the range, leaves an already-published one's timestamp alone (that date is the record that the notice period was met, per Arbeidstijdenwet art. 4:2), and writes every assignee's presence.
+
+**The presence write-through.** A published shift lands in `teamhub_presence_slots` with **`source = 'roster'`**, on the half-days it occupies — the noon split, and a shift running past midnight also takes the next morning. It replaces a `template` slot, never a `holiday` or a deliberate absence, and the clean-up only ever deletes rows carrying its own source. A client reading the presence grid can therefore tell an assigned shift from a declared workplace by `source`.
+
+**Shift types are instance-wide and administrator-managed**, the same contract as presence types: `teamhub_shift_type`, keyed by `slug`, with `HH:MM` wall-clock times. `end <= start` means the shift ends the next day; nothing stores that separately, so the two cannot disagree. Three are seeded (`early`, `late`, `night`) by `RepairSteps\SeedShiftTypes`.
+
+---
+
+### Time off: a range of half-days
+
+`PUT /api/v1/presence/slots/override-range` — `#[NoAdminRequired]`, the caller only.
+
+```
+{ "from_date": "2026-12-21", "to_date": "2027-01-02",
+  "part": "all" | "morning" | "afternoon",
+  "presence_type_id": 7, "restore": false }
+```
+
+| Rule | Answer |
+|---|---|
+| range length | 1 to 120 days inclusive, else **400** |
+| `presence_type_id` | only the `vacation`, `sick` and `non_working_day` slugs, else **400**; required unless `restore` |
+| an administrator's public holiday | **skipped, never overwritten**, and counted in `skipped` |
+| every date locked by a holiday | **409**, carrying `affectedCount` |
+| `restore: true` | returns each selected half-slot to its own weekly workplace **including its original room**, or clears it where there is no weekly preference |
+
+The write is one transaction: a range either lands or it does not. `part` addresses **half-days**, and materialisation now skips only the half-days that are already specified, so an afternoon of sick leave no longer suppresses that morning's normal workplace.
+
+**What this is not:** a TeamHub absence is not a Nextcloud Absence. It is read by TeamHub's meeting suggestions and planning grid and by nothing else — it writes no calendar event, does not set Nextcloud's own absence status, and does not block third-party CalDAV scheduling (DESIGN §2.216). A member who needs those must set Nextcloud Absence as well.
+
+**What a colleague sees is `Unavailable`** — never *Sick*, never the reason, and with the team's existing `hide_reasons` setting the label goes too. The reason stays in TeamHub's own rows, which is to say an operator with database access can still read it.
+
+### Availability comes from the calendar, and only the meeting wizard asks
+
+**Changed in 4.13.64: `GET /api/v1/teams/{teamId}/presence` no longer returns `availability` or `availability_samples`.** A client reading either gets nothing; both keys are gone from both branches of the response, including the zero-member one. The grid's sampled dots are removed with them (DESIGN §2.230) — two samples per member per day were fourteen `checkMany()` calls per grid load for a signal that needed a caveat sentence above the table to avoid being misread.
+
+**Meeting suggestions are unchanged** and are the only caller of `NextcloudAvailabilityService` now. Three things still hold there (DESIGN §2.215):
+
+- An unresolvable answer is **`unknown`**, never `free`. It depends on a valid email address, a configured calendar and organizer permission.
+- The wizard checks **exact candidate times**, not samples.
+- An explicit TeamHub non-working override beats a `free` from FreeBusy (`MeetingSuggestionService::scoreCandidate`). The reverse — TeamHub writing presence into a calendar — is switched off; **events written by the old sync still exist and were deliberately not deleted**, so they can still influence a FreeBusy answer.
+
+---
+
+## Default home layouts: the cascade stopped being a race (changed 4.13.36 — 4.13.40)
+
+Issue #109, after Justin's walk. **This section reverses the contract below it**, which 4.13.35 had only just established. The reasoning is DESIGN §2.209; what an integration has to know is here.
+
+### The newest decision no longer wins
+
+4.13.35 served the strongest applicable default unless the member had arranged that home *since* it was set. `LayoutCascadePolicy` replaces that comparison with a fixed order, and says so in as many words: *once a member arranges their own grid, later template edits must never reset that arrangement.*
+
+| Order | Applies |
+|---|---|
+| 1 | the team's default in mode **`enforce`** — absolute, no comparison, no member write permitted |
+| 2 | the member's **personal default for this template**, when they have set one |
+| 3 | the team's default in mode **`apply_once`** — *still compared against the member's `updated_at`* |
+| 4 | the default for this kind of team (its template) |
+| 5 | the shipped layout |
+
+The timestamp comparison survives in `LayoutController::getLayout()`, but `LayoutCascadePolicy::resolve()` now returns `updatedAt: 0` for everything except an `apply_once` team default. So an **administrator's template or instance default no longer reaches a member who has arranged that team** — re-saving it changes nothing for them. Only a team `apply_once` default still rolls out that way.
+
+A personal default reaches the member's other teams by a different route: saving one **releases that user's own grid rows** for unlocked teams of the same template (`origin` back to `auto`), so the rollout is a write, not a comparison.
+
+### A personal default is scoped to a template, and `teamId` is now required
+
+| Endpoint | Change |
+|---|---|
+| `GET /api/v1/layout/default` | **requires `?teamId=`** |
+| `PUT /api/v1/layout/default` | **requires `teamId` in the payload**; **403** when that team's layout is enforced |
+
+Both verify membership, and the template is derived from the team **server-side** — a client-supplied `templateKey` cannot choose the scope of a preference write. Storage moved from the global `default_layout_json` / `default_tab_order_json` to `default_layout_template_<type>` / `default_tab_order_template_<type>` (`UserTemplateLayoutKeys`). **The old global keys are left in place, unread and unmigrated**: they could spread a Project team's widgets into a Collaboration team, which is the bug that ended them.
+
+### `DELETE .../teams/{teamId}/layout` means something else now
+
+It used to delete the member's row so the team rejoined the default cascade. It now performs an **explicit reset to the current template recipe**, persisting the row with `origin = 'tmpl'` (which fits the existing `VARCHAR(8)` column, so no migration). **An integration that relied on the old meaning has to be reviewed.** It is refused while the team layout is enforced.
+
+### Tab order has its own endpoint
+
+`PUT /api/v1/teams/{teamId}/layout/tabs` — body `{ "tabOrder": [ … ] }`, any member. It saves navigation order **without touching grid coordinates, `origin` or `updated_at`**, and it stays available under enforcement: a tab bar is navigation, not layout. `PUT` and `DELETE` of the grid itself both return **403** while a team layout is enforced, for team administrators too — they publish through the admin-gated `PUT /api/v1/teams/{teamId}/dashboard/config`, which also accepts `reset_team_layout: true` to put the team back on its template while keeping its mode.
+
+`TeamLayoutPolicy::locksPersonalGrid()` is the single predicate behind every one of those refusals.
+
+### A newly published team layout is enforced by default
+
+Publishing a team layout creates it in **`enforce`**. Replacing an existing one keeps whatever mode it already had. **No existing team was migrated.** `suggest` and `apply_once` remain available in Manage team → Settings → Dashboard.
+
+Deleting a team now also clears its `teamhub_layout_default` row and its members' `teamhub_widget_layouts` rows, cascading to sub-teams.
+
+### Still open in this contract
+
+- **One-second timestamp resolution.** Two decisions in the same second compare equal, both in default precedence and in the key a dismissed suggestion is stored under. A real fix needs a generation counter or a higher-resolution column, and a migration.
+- **No optimistic concurrency.** Two administrators publishing a team layout at once: last write wins, silently.
+- **No push.** A mode changed in another session is enforced by the server on the next write and shown after the next navigation; an already-open tab is not told.
+
+---
+
+## Default home layouts, corrected after the first walk (changed 4.13.35)
+
+Six fixes from Justin's walk of 4.13.33/34. Three of them change this contract.
+
+### The cascade: the newest decision wins
+
+v4.13.34 put every administrator-set default **behind** the member's own arrangement, so setting one changed nothing for anybody who had ever dragged a card. It is now **one comparison**: an applicable default is served unless the member arranged that home *after* the default was set (`teamhub_widget_layouts.updated_at` against the default's `updated_at`).
+
+| Order | Applies |
+|---|---|
+| 1 | the team's default in mode **`enforce`** — always, no comparison |
+| 2 | the member's own arrangement (`origin = 'user'`) — **if they made it after the strongest applicable default was set** |
+| 3 | the team's default in mode **`apply_once`** |
+| 4 | the member's personal default |
+| 5 | the default for this kind of team (its template) |
+| 6 | the instance default |
+| 7 | the system default |
+
+Only the **strongest applicable** default's timestamp is compared, so touching the instance default cannot override an arrangement on a team whose template has one of its own. A member's **personal** default is never in the comparison: it is their own decision, so it cannot be what their own arrangement loses to.
+
+A consequence worth stating: **saving a default is the rollout.** Re-saving an unchanged layout is how an administrator makes it reach members who have arranged since, and there is no separate rollout route.
+
+### `canSetDefault` is now `canSetTeamDefault`
+
+The layout bundle sent three booleans; it now sends one.
+
+```
+- "canSetDefault": { "team": true, "template": true, "instance": true }
++ "canSetTeamDefault": true
+```
+
+The instance and per-template defaults are no longer offered from a team's home at all — they are set in Admin → TeamHub → Policy (Justin, 2026-10-28: Nextcloud administrator tasks belong there, and nothing guarantees an administrator is a member of a team). `canSetTeamDefault` is Circles level ≥ 8, as before.
+
+### The two admin GETs carry what an editor needs to open
+
+| Endpoint | Added |
+|---|---|
+| `GET /api/v1/admin/layout/default` | **`shipped`** — the layout TeamHub ships. The editor has no team's home to seed from, and this is what its *Reset* restores |
+| `GET /api/v1/admin/policy/templates/{templateKey}/layout` | **`shipped`**, and **`instance`** — a template with no default of its own inherits the instance one, so that is what its editor opens on and what *Reset* restores |
+
+`PUT` is unchanged, and an **empty `tabOrder` is meaningful**: the admin editor arranges the grid only, sends `[]`, and the cascade then keeps whatever tab order the member already has.
+
+### `dashboardConfig` is built in one place
+
+`team_layout` and `team_layout_mode` were added to `TeamController::readDashboardConfig()` in 4.13.34 and **not** to the layout bundle's copy, which is the one the Manage team screen reads — so a saved team layout reported as absent. Both now call `DashboardWidgets::configFor()`. No field changed shape; the bundle simply carries the two it was missing.
+
+---
+
+## Default home layouts: the instance, a kind of team, one team (added 4.13.34)
+
+Issue #109 phases 2 and 3. A default is what a member's home looks like **before and unless they arrange it themselves**; nothing is copied into anybody's layout row when one is set, so a changed default reaches everybody who has not arranged their own home, at once. Storage is one table, `teamhub_layout_default`, keyed by `(scope, scope_id)`.
+
+### The cascade `GET /api/v1/teams/{teamId}/layout` now walks
+
+1. the team's own default, if its mode is **`enforce`** — above the member's own arrangement
+2. the member's own arrangement (`teamhub_widget_layouts.origin = 'user'`)
+3. the team's own default, if its mode is **`apply_once`**
+4. the member's personal default (`oc_preferences`)
+5. the default for this **kind** of team (its template)
+6. the **instance** default
+7. the system default
+
+A team default in mode **`suggest`** is in none of those: it reaches the member as an offer on the bundle and changes nothing until they take it.
+
+### Two new fields on the layout bundle
+
+| Field | Meaning |
+|---|---|
+| `teamPreset` | `{ mode: "suggest"\|"apply_once"\|"enforce"\|null, updatedAt, layout }`. `mode` is null when the team has no default of its own. `layout` is sent **only** for `suggest`, the one mode that asks the member to choose; the other two are already in `layout` |
+| `canSetDefault` | `{ team, template, instance }` booleans. Which "save this arrangement as a default" actions to offer. `team` is Circles level ≥ 8; the other two are a Nextcloud administrator. Answered by the server so a control nobody may use is never drawn |
+
+### Instance and per-template defaults
+
+All six are gated by `#[AuthorizedAdminSetting]` **alone**, with no `requireNcAdmin()` behind them, so a **delegated TeamHub admin may write them** (Justin's decision, 2026-10-27). That is a departure from every other instance-governance route in this app, which still refuses one; see `LayoutDefaultController`'s docblock and HANDOFF.
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /api/v1/admin/layout/default` | `{ default: { layout, tabOrder, mode, updatedBy, updatedAt } \| null }` |
+| `PUT /api/v1/admin/layout/default` | Body `{ layout, tabOrder }`. **400** on an empty layout, or one too large (64 KB cleaned) |
+| `DELETE /api/v1/admin/layout/default` | Teams fall back to the system default |
+| `GET /api/v1/admin/policy/templates/{templateKey}/layout` | The same shape, for one kind of team |
+| `PUT /api/v1/admin/policy/templates/{templateKey}/layout` | Body `{ layout, tabOrder }`. **400** on a malformed template key |
+| `DELETE /api/v1/admin/policy/templates/{templateKey}/layout` | Teams of the template fall back to the instance default |
+
+Deleting a template (`DELETE /api/v1/admin/policy/templates/{templateKey}`) takes its default layout with it, for the reason it already took the integration inclusions: a template later created with the same key must not inherit decisions made about a different one.
+
+### A team's own default rides the dashboard config
+
+No new route: it is a Manage team setting written by a **team admin** (level ≥ 8), beside the hidden-widgets list it belongs with.
+
+`PUT /api/v1/teams/{teamId}/dashboard/config` takes three more shapes, and `false` (absent) is distinguished from `null` because null is itself one of the meanings:
+
+| Body | Effect |
+|---|---|
+| `{ team_layout: [...], team_tab_order: [...], team_layout_mode: "apply_once" }` | Set or replace it. Mode defaults to `apply_once` |
+| `{ team_layout: null }` | Remove it. Members keep any arrangement of their own |
+| `{ team_layout_mode: "enforce" }` | Change what it does, without touching the layout. **400** when the team has no layout to apply a mode to |
+
+`GET` and the `PUT` response add `team_layout` (`{ widgets, updatedAt }` or null) and `team_layout_mode`. The layout itself is deliberately **not** returned here: the Manage team screen has no grid to draw it in, and it reaches the people it is for through the layout bundle.
+
+An unrecognised stored mode reads as `suggest`, never `enforce` — a value nothing recognises must not be the one that takes a member's home away from them.
+
+---
+
+## The home layout: a packed default, and who arranged one (changed 4.13.33)
+
+Three changes to the layout endpoints, all driven by issue #109.
+
+| Endpoint | Change |
+|---|---|
+| `DELETE /api/v1/teams/{teamId}/layout` | **New.** Drops the caller's own arrangement of this team so the default cascade applies to it again. `{ "status": "ok" }`; **400** on a malformed team id, **403** for a non-member, **500** if the delete fails. What *Reset to the default layout* calls, in place of the `PUT` of a copy of the default it used to send. Scoped to the caller and the team: no body, no bulk form, nothing that could reach another member's row |
+| `PUT /api/v1/teams/{teamId}/layout` | Accepts **`origin`** in the body: `"user"` when the save is the member arranging their home (a drag, a resize, leaving edit mode), anything else — including absent — when TeamHub is saving on their behalf. Stored in `teamhub_widget_layouts.origin` and only ever **promoted**, so a tab reorder cannot take a home off the cascade and cannot put an arranged one back on it |
+| `GET /api/v1/teams/{teamId}/layout` | **`isDefault`** is unchanged in shape and now load-bearing: `true` means the layout came from the cascade and the client packs it to the widgets the team actually shows (`src/lib/packLayout.js`) without saving the result. A saved team row is used **only when `origin` is `user`** — a row TeamHub wrote for itself is walked past. `userDefault` is now the **merged** default on both paths; it used to be merged on one and raw on the other |
+
+**`autoFit` is retired.** It is no longer emitted on `DEFAULT_LAYOUT` items and is dropped from a `PUT` body that still carries it. The measurement pass behind it could never grow a widget — it measured `.teamhub-widget-card`, which has `overflow: hidden`, so `scrollHeight` always equalled `clientHeight` — and what it did instead was write a layout row on first team open, which took every member off the cascade permanently. Widget heights are stated by the default now: one height for every widget whose body is a list, enough for five rows. DESIGN §2.206.
+
+**No migration is needed for the `origin` value itself**, but the column is new (`Version000413033`) and is NULL on every row that predates it. `GET` answers for a NULL row as it reads it, by comparing where its widgets stand against the system default, and does not write the answer back — a GET here does not mutate. The column fills when the member next arranges something.
+
+---
+
 ## Sub-teams (added 4.12.2)
 
 A sub-team is an ordinary TeamHub team with a parent: its own circle, registry row, members, storage, modules, policy profile and archive, plus one row in `teamhub_sub_team`. **There is no `circles_member` row between a parent and a child** — Circles propagates membership from the contained circle up to the container, so such a row would make a sub-team's invited outsiders effective members of the main team. DESIGN §2.175.
@@ -35,7 +496,7 @@ DESIGN §2.177.
 | `/api/v1/teams/{teamId}/sub-teams/{subTeamId}` | DELETE | admin of `{teamId}` (4.12.5) |
 | `/api/v1/teams/{teamId}/sub-teams/{subTeamId}/members` | GET | admin of `{teamId}` (4.12.5) |
 | `/api/v1/teams/{teamId}/sub-teams/{subTeamId}/members` | POST | admin of `{teamId}` (4.12.5) |
-| `/api/v1/teams/{teamId}/sub-teams/{subTeamId}/members/{userId}` | DELETE | admin of `{teamId}` (4.12.5) |
+| `/api/v1/teams/{teamId}/sub-teams/{subTeamId}/members/{userId}` | DELETE | admin of `{teamId}` (4.12.5; `?type=group` 4.13.3) |
 
 **Every `{subTeamId}` route proves two things, not one.** Admin of `{teamId}` says only *you administer some main
 team*, and the sub-team id arrives from the caller — so each of these also checks that `{subTeamId}` is a child of
@@ -164,9 +625,15 @@ Admin-gated through `getMembersForManage()` deliberately, rather than `getAllEff
 
 The same two lists `POST …/sub-teams` takes, validated by the same rule and answering the same two **400**s. Returns `{ "success": true, "results": […] }` — the per-entry results `inviteMembers()` produces, passed through rather than swallowed: Circles authorises its own `addMember()` against the initiator's rights on the circle, so a parent admin with no row on the sub-team may see entries fail and the panel has to be able to say so.
 
+**4.13.3 — an `outsiders` entry may be a Nextcloud group:** `{ "id": "finance", "type": "group" }`. Nothing in the rule changed to allow it. `splitMembership()` has only ever tested the **local-user** type against the parent's roster, because a group is never on one — so a group whose gid happens to match a main team member's uid is still accepted, and the two refusals above are unchanged for people. The group becomes one `circles_member` row of `user_type = 2`; the people inside it reach the sub-team through it and come back from the GET above under `inherited`, not as rows of their own.
+
+Whether groups are offered at all is the instance's decision, not this endpoint's: `GET /api/v1/users/search` already filters by the administrator's invite-type policy and by Nextcloud's own `shareapi_allow_group_sharing`, so on an instance where either is off no group is ever found to send.
+
 ### `DELETE /api/v1/teams/{teamId}/sub-teams/{subTeamId}/members/{userId}` (4.12.5)
 
 The uid in the path, as `team#removeMember` already does for a team's own members. Straight through `MemberService::removeMember()`, which is the point: leaving a team has a tick list — the resource-membership reconcile, the message subscriptions, the outstanding file reviews — and a second removal path would be a second place for it to fall out of date. That method also refuses to remove an **owner**, which is what protects the admin who created the sub-team; the UI hides the button rather than offering one that fails.
+
+**`?type=group` (4.13.3)** removes an invited group instead of a person, and then **the id in the path is the group's `singleId`** — the `groupId` the GET above returns — not its gid. `circles_member` keys a row on `(circle_id, single_id, user_type)`, so the type is as load-bearing as the id; before 4.13.3 the type was hardcoded to a person and a group could be added here and never removed. The same query parameter and the same mapping `team#removeMember` has always taken. `circle` is deliberately not accepted: a team cannot be invited into a sub-team in the first place, and any other value **400**s.
 
 ## Changed by sub-teams (4.12.2)
 
@@ -972,6 +1439,25 @@ Mark an announcement as read for the current user.
 
 **Response 400 / 404**: same rules as the GET body endpoint.
 
+### `POST /api/v1/announcements/seen` (body: `{ filename, event }`) — added 4.13.56
+
+Record one popup event for the current user. Feeds the four counters the telemetry payload reports as `announcement_popup`, so Justin can tell "nobody acted on it" from "nobody saw it".
+
+**Auth**: any authenticated user (`#[NoAdminRequired]`). The popup is only drawn for Nextcloud instance admins, but the gate here is the service's "may this user see this announcement" rule — the audience rule lives in the frontend and is deliberately not duplicated server-side.
+
+**Body**:
+```json
+{ "filename": "welcome-4.13.56.md", "event": "read" }
+```
+
+- `event` — one of `shown` (the popup was displayed), `read` (scrolled to the end, which is what unlocks its controls), `ack` (OK pressed, so it returns at the next sign-in), `optout` (OK with "do not show again" ticked).
+
+**Response 200**: `{ "recorded": bool }`. `false` for an unknown filename, an unknown event, an announcement this user may not see, or an event this user has **already** been counted for — each user contributes at most one of each event per announcement, which is what stops one administrator reloading from reading as twenty instances paying attention. None of those is an error the reader should be shown, hence 200 rather than 400/404.
+
+**Response 400**: `filename` or `event` missing.
+
+**Storage**: counters in app config `announce_popup_stats` (`{ "<filename>": { shown, read, ack, optout } }`); the per-user ledger in `oc_preferences` under `announce_popup_seen`. Counts only — no user id and no content leaves the instance.
+
 ### Security notes
 
 - Filename is validated twice: once against the registry whitelist (`findVisibleEntry`), then again by shape (`str_contains` for `/`, `\`, `..`) before any filesystem read. A malformed registry entry cannot become a traversal.
@@ -1436,9 +1922,11 @@ The personal "What’s new" feed. Combines team messages from every team the cal
 | `can_vote` | `talk-poll` | As `can_reply`, plus the poll is open (`status === 0`). |
 | `my_votes` | `talk-poll` | Option indices this caller has already picked. Empty when Talk's vote table doesn't answer. |
 
-`sourceCounts` and `facets` are computed on the merged result **before** the source tab narrows anything, so selecting one tab leaves every other tab's number intact. `team` / `public` / `talk` / `openproject` partition the feed; `mentions` and `decisions` are lenses over those same rows, so the numbers are **not** expected to sum to `all`.
+`sourceCounts` and `facets` are computed on the merged result **before** the source tab narrows anything, so selecting one tab leaves every other tab's number intact. `team` / `public` / `talk` partition the feed; `mentions` and `decisions` are lenses over those same rows, so the numbers are **not** expected to sum to `all`. **There is no `openproject` key since 4.13.31** — an OpenProject news row counts under `team`.
 
-**OpenProject news rows (v4.9.7).** `includeOpenProject` (bool, default `1`) adds one row per OpenProject **news** item written inside the period, from every project the caller's teams are linked to, read live as the caller (OPENPROJECT.md §6.3) — and, as a side effect of the read, mirrors each item once into its team's message stream (§6.1). `projectIds` (list, max 50, digits only) narrows them; `teamIds` and `from`/`to` apply too ("all time" = the last 90 days for OpenProject); `types` excludes them wholesale like Talk rows. Shape: `{ "id": "op:<connection>:<projectId>:news:<newsId>", "source": "openproject", "activityType": "news", "subject" (the title), "message" (the summary, or the first 400 characters of the body, plain text), "created_at", "team_id", "team_name", "author_id": "" (not a Nextcloud account), "actor_name" (the author as OpenProject names them), "project": { id, name, url }, "news": { id, url }, "opens_externally": true, "can_open_team", "can_view_comments": false, "can_comment": false, "comment_count": 0 }`. Counted under `sourceCounts.openproject` only. `facets.projects` lists `{ id, name, teamId, count }` for the projects present before the `projectIds` narrowing. The payload also carries `sources.openproject` — `{ state: ok | partial | error | auth_required | not_connected | unavailable | skipped, code, message, covered, skipped }` — so the client can render one notice while every other source stands; a failing OpenProject never fails the feed. Work-package edits are **not** feed rows (Justin, 2026-09-14: the feed is for news and messages).
+**OpenProject news rows (v4.9.7).** `includeOpenProject` (bool, default `1`) adds one row per OpenProject **news** item written inside the period, from every project the caller's teams are linked to, read live as the caller (OPENPROJECT.md §6.3) — and, as a side effect of the read, mirrors each item once into its team's message stream (§6.1). `projectIds` (list, max 50, digits only) narrows them; `teamIds` and `from`/`to` apply too ("all time" = the last 90 days for OpenProject); `types` excludes them wholesale like Talk rows. Shape: `{ "id": "op:<connection>:<projectId>:news:<newsId>", "source": "openproject", "activityType": "news", "subject" (the title), "message" (the summary, or the first 400 characters of the body, plain text), "created_at", "team_id", "team_name", "author_id": "" (not a Nextcloud account), "actor_name" (the author as OpenProject names them), "project": { id, name, url }, "news": { id, url }, "opens_externally": true, "can_open_team", "can_view_comments": false, "can_comment": false, "comment_count": 0 }`. **Counted under `sourceCounts.team` since 4.13.31** (`openproject` only, before that): a news item *is* a team message — the mirror writes it into the team's stream as one — so counting it separately counted one item under two headings. `source` stays `openproject`, as the row's provenance: the card reads it to draw the project pill and the *Open in OpenProject* action. A news row only ever resolves through a link on a team the caller is in, so `team` is right by construction; it is counted under neither `mentions` nor `decisions`. `facets.projects` lists `{ id, name, teamId, count }` for the projects present before the `projectIds` narrowing. The payload also carries `sources.openproject` — `{ state: ok | partial | error | auth_required | not_connected | unavailable | skipped, code, message, covered, skipped }` — so the client can render one notice while every other source stands; a failing OpenProject never fails the feed. Work-package edits are **not** feed rows (Justin, 2026-09-14: the feed is for news and messages).
+
+`includeOpenProject` is **API-only since 4.13.31**, and ANDed with `includeTeam`: news is a team message, so `includeTeam=0` drops it whether or not this is set, and the frontend no longer sends it (its rail switch is gone, and a stored `false` is ignored on read and dropped on the next save, the way `includeSystem`'s was in 4.5.31). The parameter stays because `includeOpenProject=0` is the one way to ask for the team's messages **without** this source's live HTTP read.
 
 `hasMore` is derived from the merged list length against the page window, so it can no longer offer a next page that turns out to be empty.
 
@@ -1622,6 +2110,126 @@ Server-side validated against `TeamTypeService::ALLOWED = ['collaboration','proj
 
 ---
 
+## Compliments (added 4.13.2)
+
+One person telling another they did well, with a note. No `{teamId}` in any path on purpose: a compliment is between two people, and the gate that matters — the two must share a team — is about the *pair*. The team is recorded as provenance and an unresolvable one is dropped rather than refused. Sender and recipient are always the session's user, never the body's. DESIGN §2.186.
+
+Deliberately **not** a My Work workflow and **not** a Nextcloud notification — see §2.186 for both decisions and the cost accepted for the second.
+
+### `POST /api/v1/compliments`  *(added 4.13.2)*
+
+Pay a compliment.
+
+**Auth**: any signed-in user. The service refuses unless the two share at least one registered team (read through `circles_membership`, so membership via a group or a parent circle counts).
+
+**Body**:
+```json
+{ "to": "jaap", "note": "Thanks for covering the handover.", "teamId": "TEAM1" }
+```
+
+- `to` — the recipient's uid. Required.
+- `note` — up to 500 characters; control characters stripped, runs of blank lines collapsed, trimmed, then cut to length. **Optional at the API and required in the composer** (§2.186), so an older client is never refused.
+- `teamId` — the team page it was sent from; omitted or unregistered is stored as `''`.
+
+**Response 200**: `{ "status": "sent" }`
+
+**Failures**:
+- `400` with a sentence the sender can act on — complimenting themselves, an account that does not exist, somebody they share no team with, or the sixth compliment to the same person within 24 hours (`ComplimentService::RATE_LIMIT_PER_PAIR`, per *pair* rather than per sender)
+- `401` — not signed in
+- `500` — internal error (logged)
+
+---
+
+### `GET /api/v1/compliments/unseen`  *(added 4.13.2)*
+
+What the caller has not been shown yet, grouped by sender in the order each person's **first** compliment arrived, each sender's notes in the order they were written. That is the shape the party popup renders.
+
+**Auth**: any signed-in user; answers for the caller only.
+
+**Response 200**:
+```json
+{
+  "total": 3,
+  "ids": [1, 2, 3],
+  "senders": [
+    { "uid": "inge", "displayName": "Inge NC", "subline": "Controller · Finance", "count": 2,
+      "notes": [ { "note": "You unblocked me on Monday.", "createdAt": 1760600000 },
+                 { "note": "And again on Thursday.", "createdAt": 1760686400 } ] }
+  ]
+}
+```
+
+- `total` — compliments, not senders. At most 50 per read (`ComplimentMapper::MAX_PER_READ`).
+- `ids` — exactly the rows this payload describes; the client posts these back to `/seen`.
+- `notes` — a compliment sent with an empty note contributes to `count` and adds no entry here.
+- `subline` is resolved with `adminContext: false`, so a field the sender set to private stays private.
+
+**Reading marks nothing seen.** A tab closed before the popup paints does not swallow a compliment.
+
+---
+
+### `POST /api/v1/compliments/seen`  *(added 4.13.2)*
+
+Mark the compliments the popup just showed as seen.
+
+**Auth**: any signed-in user.
+
+**Body**: `{ "ids": [1, 2, 3] }` — at most 100 per call; a JSON-encoded string is also accepted.
+
+**Response 200**: `{ "marked": 3 }`
+
+The UPDATE is scoped to the caller's own still-unseen rows, so an id that is not theirs matches nothing rather than being refused — which is also why there is no separate ownership check. Nothing is deleted: `seen_at` is set, and "since your last visit" needs no stored visit.
+
+---
+
+### `POST /api/v1/teams/{teamId}/banner`  *(added 4.13.1)*
+
+Upload the team banner — the wide picture shown between the tab bar and the team's content, on every tab.
+
+**Auth**: team **moderator** or above (level ≥ 4), the same gate the team picture uses.
+
+**Body**: `multipart/form-data` with a file field named `banner`. Accepted types `image/jpeg|png|gif|webp`; at most 8 MB and 50 megapixels. The image is scaled to fit 1920×1080 with its aspect ratio preserved and never upscaled or cropped, then re-encoded as JPEG at quality 82. The crop to the strip happens in the browser (`object-fit: cover`).
+
+**Response 200**:
+```json
+{ "banner_url": "/index.php/apps/teamhub/api/v1/teams/.../banner?v=1760630400" }
+```
+
+The `v` parameter is the stored file's modification time. It is what makes a replaced banner reach members who already have the old one cached, since the response carries a day of `Cache-Control`.
+
+**Failures**:
+- `400` — no file, upload error, over 8 MB, over 50 MP, unsupported type, undecodable
+- `403` — not a moderator
+- `500` — storage or encoding failure (logged)
+
+**Storage**: NC app data — `appdata_<instanceid>/teamhub/team-banners/{teamId}.jpg`. No table, no migration.
+
+---
+
+### `DELETE /api/v1/teams/{teamId}/banner`  *(added 4.13.1)*
+
+Remove the team banner. Silent when the team has none.
+
+**Auth**: team moderator or above.
+
+**Response 200**: `{ "banner_url": null }`
+
+---
+
+### `GET /api/v1/teams/{teamId}/banner`  *(added 4.13.1)*
+
+Serve the banner bytes. `#[NoCSRFRequired]` so an ordinary `<img src>` can load it.
+
+**Auth**: any team member, direct or inherited — the boundary the team picture's own serve route applies. Without it any authenticated user could read any team's banner by iterating `teamId`.
+
+**Response 200**: `image/jpeg`, with `Cache-Control: public, max-age=86400` and an `ETag`.
+
+**Failures**:
+- `403` — not a member
+- `404` — the team has no banner
+
+---
+
 ### `GET /api/v1/teams/{teamId}/dashboard/config`  *(added 4.1.2)*
 
 Fetch the team-wide dashboard customization: which widgets the owner/admin has hidden from every member's Home dashboard, and which tab opens when a member enters the team.
@@ -1634,6 +2242,7 @@ Fetch the team-wide dashboard customization: which widgets the owner/admin has h
 ```
 
 - `hidden_widgets` — array of widget ids removed from every member's grid (desktop, tablet, mobile). Their grid positions are preserved, so un-hiding restores placement.
+- **Default when nothing is stored (4.13.1)**: `["widget-teaminfo"]`. The Team info widget is hidden on a team no administrator has configured, because the team banner now carries the team's name and description above every tab. It is a default, not a removal — the switch is still in Manage team → Settings → Widgets. **A stored empty list is not the same thing:** `[]` means an administrator chose to show every widget and is honoured as such, so the two readers take an absent key (`''`) rather than `'[]'` as their fallback. `OCA\TeamHub\Constants\DashboardWidgets`, DESIGN §2.185.
 - `default_tab` — tab key opened on team entry; `"msgstream"` (Home) is the default. Falls back to Home if the configured tab isn't currently available.
 
 **Storage**: NC app-config — `dashboard_hidden_<teamId>` (JSON array) and `dashboard_tab_<teamId>` (string). Same per-team pattern as the messages/timeline toggles; no table. Also emitted inline on the layout bundle as `dashboardConfig`.
@@ -1751,6 +2360,21 @@ User-scoped UI preferences stored in `oc_preferences` under the `teamhub` app id
 
 **Response 200**: the same envelope as the GET, reflecting the stored state.
 
+### `GET /api/v1/welcome-message` — added 4.13.56
+
+The welcome page's subline as a Nextcloud administrator wrote it, or `''` when none is set (the page then shows the line TeamHub ships).
+
+**Auth**: any logged-in user (`#[NoAdminRequired]`). The value is shown to every user by design.
+
+**Response 200**:
+```json
+{ "welcomeMessage": "Everything team related lives here. See the [intranet](https://example.com) for the handbook." }
+```
+
+Rendered as markdown through the team-message renderer (`src/lib/messageMarkdown.js`), so it is DOMPurify-sanitised on the way to the page.
+
+**Written** on `PUT /api/v1/admin/settings` as `welcomeMessage`, which is NC-admin gated. It is **not** a field on `GET /api/v1/preferences` above, whose contract is that every value it returns is the caller's own, and **not** read from `/api/v1/admin/settings`, which would 403 for every non-admin and silently fall back to the shipped line — the bug 4.11.33 fixed for the create-team dialog's own admin-written sentence. Stored in app config, capped at `TeamService::WELCOME_MESSAGE_MAX` (4000 characters).
+
 ---
 
 ## Leave-team endpoint (response extended 4.4.8)
@@ -1836,7 +2460,7 @@ Authenticated users only. Returns 404 for a malformed id, an unknown id, and for
 ```
 
 - `joinPolicy` — `open` (join lands you in the team), `request` (a moderator approves first), `closed` (invite only; nothing to press).
-- `membership` — `member` (direct or via a group/sub-team), `requesting` (a join request or an invitation is outstanding), `none`.
+- `membership` — `member` (direct or via a group/sub-team), `invited` (the team has invited this person and is waiting on them), `requesting` (this person has asked and a moderator has not answered), `none`. **`invited` is new in 4.13.18**; until then it was folded into `requesting`, which told an invitee that *their* request was awaiting approval and offered them nothing to press. DESIGN §2.195.
 - **`description` is `""` and `image_url` is `null` when `joinPolicy` is `closed`.** On an invite-only team both are content; the name alone is what the link holder needs in order to learn the link is not for them.
 
 Disclosure note: any authenticated user who supplies a team id learns that team's name and how to get in. That is the feature — a link is worth nothing if the recipient cannot see what they are being offered — and it is not an enumeration surface, since a Circles `unique_id` is a 31-character random token.
@@ -1880,6 +2504,23 @@ Unchanged shape, two behaviour fixes:
 
 ---
 
+## Invitation endpoints (added 4.13.18)
+
+### `POST /api/v1/teams/{teamId}/invitation/accept`
+### `POST /api/v1/teams/{teamId}/invitation/decline`
+
+The two decisions an invited user can take. `{"success": true}` on either.
+
+**No role gate, and none is possible** — the caller is not a member of the team yet. Holding a `circles_member` row with `status = 'Invited'` *is* the authorisation, checked in `TeamInvitationService`; the team's own configuration is what decided to write that row. Everything else answers **403 `{"error": "not_invited"}`**, including an existing member, a pending join request and a blocked user. A 403 rather than a 404 deliberately: a 404 here would confirm which team ids exist.
+
+**Separate from `POST /join` on purpose.** That endpoint answers 403 `invite_only` for a team without `CFG_OPEN`, which is the kind of team an invitation usually comes from — reusing it would refuse nearly every invitation. Circles agrees: `CircleJoin::manageMemberStatus()` takes an `Invited` row at `LEVEL_NONE` to `LEVEL_MEMBER` without consulting the config or an invitation code.
+
+**Both reach Circles through `CircleService`, never `LocalController`.** The frontend switch of §2.190 gates that controller and nothing below it; routing either decision through it is what this release fixes. Accept is `circleJoin()`, decline is `circleLeave()`.
+
+These are also the targets of the `team_invitation` notification's **Accept** / **Decline** buttons, so their route names are load-bearing — `Notifier.php` builds the action links from `teamhub.team.acceptInvitation` / `teamhub.team.declineInvitation`. The notifications web UI posts them with `@nextcloud/axios`, so the CSRF token travels and neither needs `#[NoCSRFRequired]`. A desktop or mobile client sends no such token; for those the notification's body link opens `?team=<id>`, which lands on `TeamJoinView` and offers the same two buttons. DESIGN §2.195.
+
+---
+
 ## Layout endpoint (updated 4.1.0)
 
 ### `GET /api/v1/teams/{teamId}/layout`
@@ -1888,7 +2529,8 @@ Response additions in both team-row and cascade-to-default branches (in addition
 
 - **`messagesConfig`** (4.0.0) — `{ messages_enabled: bool }`, so the frontend can gate the message stream widget without a second fetch.
 - **`teamType`** (4.1.0) — `"collaboration" | "project" | "department" | null`. Populated from `teamhub_team_type` via `TeamTypeService::getType`. `null` for legacy teams so the badge renders nothing.
-- **`autoFit` on DEFAULT_LAYOUT items** (4.1.0) — new grid items carry `autoFit: true`. The frontend measures rendered content on first mount and grows `h` to fit, then strips the flag and re-saves. Persisted in `teamhub_layouts` if still set at save time so the pass survives a page reload.
+- **`autoFit` on DEFAULT_LAYOUT items** (4.1.0, **retired 4.13.33**) — new grid items carried `autoFit: true` and the frontend was to measure rendered content on first mount and grow `h` to fit. It never could: see the 4.13.33 section at the top of this file. No longer emitted, and dropped from a save that still sends it.
+- **`teamBanner`** (4.13.1) — `{ url: string|null }`. The current team's banner, `null` when it has none; the URL carries the stored file's version as `v`. Always emitted, so a team without a banner clears the strip rather than leaving the previous team's picture on screen. Deliberately **not** on `GET /api/v1/teams` — that would cost an app-data stat per sidebar row for a picture only the open team draws. DESIGN §2.185.
 - **`dashboardConfig`** (4.1.2) — `{ hidden_widgets: string[], default_tab: string }`. Team-wide customization set by owner/admin in Manage Team → Settings → Dashboard. Drives the widget grid on desktop, tablet, and mobile plus the on-open tab selection. Same shape and semantics as `GET /teams/{teamId}/dashboard/config`.
 
 ---
@@ -2110,6 +2752,29 @@ Create a team meeting — writes a notes file in the team's `Meetings/` folder, 
 
 A team can appear in both arrays — corruption and an app claim are independent facts about it. Reset no longer touches CFG_APP, so repairing a corrupt wiki-enabled team leaves its collective binding intact.
 
+## Member-id repair (added 4.14.7)
+
+### `POST /api/v1/admin/maintenance/repair-member-ids/{teamId}`
+
+**Auth**: NC admin (`MaintenanceService::requireNcAdmin()`).
+
+Rewrites every `circles_member` row of the team whose `member_id` is shorter than 14 characters, empty or absent, giving each a freshly generated 31-character id. Matching `circles_token` rows are updated in the same pass.
+
+**Response 200**
+```json
+{ "success": true, "repaired": 1 }
+```
+
+`repaired` is the number of member rows rewritten; `0` is a normal answer for a healthy team.
+
+**Failures**: `403` not an NC admin, `500` other.
+
+**Why it exists.** `circles_member.member_id` is the member row's own identity, and Circles rejects anything under 14 characters on every write (`CoreRequestBuilder::confirmValidId()`). Four TeamHub paths used to insert the bare uid by raw SQL, bypassing that check. The row works locally and fails only across federation: the receiving instance runs the **owner** row through the one `insertOrUpdate()` in `RemoteService::syncRemoteCircle()` that has no `catch (InvalidIdException)`, and answers the event with a 409 *"Could not verify Team"* while the inviting side reports success. See DESIGN §2.249.
+
+`GET /api/v1/admin/maintenance/membership-check` reports these as an `invalid_member_id` issue, carrying `invalid_count` and `owner_affected` — the owner row is the one that actually blocks federation, since every other member is skipped individually by `syncRemoteMembers()`.
+
+`Version000414007Date20261109180000` performs the same repair across every `source = 16` team on upgrade, so this endpoint is for teams damaged after that point rather than the main remediation path.
+
 ## Audit-tab "Find teams for a user" endpoints (added 3.84.1)
 
 Drives the new admin panel that finds every team a user belongs to and supports bulk removal. Backed by `MaintenanceService::listTeamsForUser` and `MaintenanceService::adminRemoveUserFromTeam`.
@@ -2215,7 +2880,9 @@ Other `preview` fields are unchanged from earlier versions: `team_count`, `user_
 
 ## License endpoints (v3.100.0, Track F — Licensing. Removed `refresh` in 4.3.20 and `trial` in 4.4.0)
 
-TeamHub uses fully manual, air-gapped licensing (v4.4.0+). Trials and paid licenses are issued by hand from the licensing dashboard in response to email; the customer pastes the returned JWT into the License tab. No outbound calls to the licensing back-end; no daily check-ins; no install/uninstall pings; no renewed-JWT downloads.
+TeamHub licensing is manual: trials and paid licenses are issued by hand from the portal in response to email, and the customer pastes the returned JWT into the License tab. **Validation is entirely offline for every licence kind** — the signature is checked in-process against a public key shipped with the app, and nothing is ever fetched to decide whether a key is good. No activation call, no daily check-in, no install/uninstall ping, no renewed-JWT download.
+
+**One exception, added in 4.13.30 and scoped to one licence kind** (`docs/metered-licensing-architecture.md`): a licence whose `kind` claim is `metered` has no seat cap and instead reports its effective member count to the portal twice a month, which is what the customer is billed for. That report is the app's only licensing-related outbound call. It is **a property of the licence, not of the app** — a banded (`airgapped`) licence makes no outbound call on any app version, which is what an air-gapped instance depends on.
 
 ### `GET /api/v1/admin/license`
 
@@ -2248,8 +2915,14 @@ Returns the full license status envelope for the License tab and the enforcement
   "seatEnforcement":      "none",
   "seatCap":              100,
   "seatLockAt":           120,
-  "lastTelemetryAt":      null,
-  "lastTelemetryPayload": null
+  "reportState":          "not-required",
+  "reportOverdueDays":    0,
+  "reportLastOkAt":       null,
+  "reportLastPeriod":     null,
+  "reportNextDueAt":      null,
+  "reportLockAt":         null,
+  "reportLastPayload":    null,
+  "reportLastError":      null
 }
 ```
 
@@ -2257,7 +2930,11 @@ Returns the full license status envelope for the License tab and the enforcement
 - **`enforcementLevel`** (`none` / `grace` / `soft-lock` / `unlicensed`) — temporal state, driven by JWT `exp` vs now. `grace` runs for `LicenseService::PAID_GRACE_DAYS = 14` past `exp` for a paid key (the Commercial Licence and Support Agreement's art. 13.4; **was 30 until 4.10.12**) and not at all for a trial (`is_trial`, art. 14.3): a trial is `soft-lock` from the moment it expires. The boundary is inclusive — on the fourteenth day a paid key is soft-locked.
 - **`seatEnforcement`** (added 4.4.0; `none` / `over-warn` / `over-lock`) — seat-count state. `count > seats` → `over-warn` (banner only); `count > ceil(1.2 × seats)` → `over-lock` (blocks new-Advanced creation + writes on existing Advanced surfaces). Unlimited tier (999999), missing `seats` claim on legacy JWTs, and unlicensed instances all resolve to `none`.
 - **`paidUntil`, `paidDaysRemaining`** (added 4.3.21) — new-model JWTs carry a `paid_until` claim. Legacy JWTs without it fall back to `paid_until = exp` so the API shape stays valid. **`graceDays`** (changed 4.10.12) is the window the key is *entitled to* — `14` for a paid key, `0` for a trial — computed by `LicenseService::graceDaysFor()`; the JWT's `grace_days` claim is no longer echoed or consulted.
-- **`lastTelemetryAt`, `lastTelemetryPayload`** — always `null` from 4.4.0 onward (the daily-report writer was deleted). Fields kept for API back-compat; frontend does not read them.
+- **`lastTelemetryAt`, `lastTelemetryPayload`** — **removed in 4.13.30.** They were `null` on every instance from 4.4.0 onward (the daily-report writer was deleted and nothing replaced it), and no caller in `src/` ever read them. A client still reading them gets `undefined` rather than `null`; nothing else changes.
+- **`reportState`** (added 4.13.30; `not-required` / `ok` / `due` / `overdue` / `locked`) — where a **metered** licence sits on the member-reporting ladder, measured from the last accepted report (or from when the key was first seen). `not-required` for every other licence kind, which is the invariant an air-gapped instance relies on. The rungs are `LicenseService::REPORT_WARN_DAYS` (21), `REPORT_ESCALATE_DAYS` (32) and `REPORT_LOCK_DAYS` (45); the boundary is inclusive, so on the forty-fifth day the instance locks. **A trial never reaches `locked`** — it reports and is warned, but is never locked for silence.
+- **`locked` feeds `enforcementLevel`.** It is the only place reporting state changes what the app allows, and it fires on a key that is otherwise perfectly valid: `enforcementLevel` becomes `soft-lock` and `invalidReason` says in words that no report has arrived, so an administrator is never left guessing why a current licence stopped working.
+- **`reportLockAt`** — the timestamp the instance will lock, so a client can name the date rather than do the arithmetic. `null` for a trial and before anything has been measured.
+- **`reportLastPayload`** — the last report **verbatim**, exactly as posted. It is echoed back so an administrator (and their DPO) can see what left the box rather than read a promise about it.
 
 ### `PUT /api/v1/admin/license`
 
@@ -2273,6 +2950,109 @@ Save a new license JWT (verified before persist).
 **Response 200**: same envelope as `GET /api/v1/admin/license` (the frontend refreshes without a second roundtrip).
 
 **Failures**: `400` invalid JWT (bad signature, expired, UUID mismatch, missing claims). The specific reason surfaces in `invalidReason` on the status envelope so the admin sees exactly what to fix.
+
+### `POST /api/v1/admin/license/quote` *(4.14.12)*
+
+Send the License tab's quote request to the licensing service, which files it with the website's `quote.php` requests (`enquiries` table) and mails sales. `LicenseController::requestQuote` → `QuoteRequestService`.
+
+**Auth**: `#[AuthorizedAdminSetting(AdminSettings)]`, CSRF-protected. `#[UserRateLimit(limit: 5, period: 3600)]`.
+
+**Request body**:
+```json
+{ "kind": "licence", "email": "it@example.org", "country": "NL", "seats": 120, "supportPlan": "none", "message": "" }
+```
+
+- `kind` — `licence` or `support`.
+- `country` — ISO 3166 alpha-2. No VAT number: VAT is checked by hand after the quotation is sent.
+- `seats` — required for `licence` (1 to 100000), ignored for `support`.
+- `supportPlan` — `none` (default, the Included level), `supported` or `priority`; `licence` only, ignored for `support`. `400` field `support_plan` for anything else.
+- `message` — up to 2000 characters.
+
+The server adds `uuid` (Nextcloud `instanceid`), `members` (unique team members, the Statistics figure) and the TeamHub and Nextcloud versions before posting. The browser never sends them. The outbound body and the receiver's answers are in `docs/licensing-requests-contract.md`.
+
+**Response 201**: `{ "reference": "TH-2611-K7QM" }`.
+
+**Failures** (the error is a code; the License tab writes the sentence):
+- `400` `{ "error": "invalid", "field": "kind"|"email"|"country"|"seats"|"message" }`
+- `429` `{ "error": "rate_limited" }`, from the receiver's throttle (or Nextcloud's own limiter)
+- `502` `{ "error": "unreachable"|"unavailable"|"rejected" }`. The dialog then offers the e-mail fallback.
+
+### `POST /api/v1/admin/license/trial` *(4.14.12)*
+
+*Request a trial key*. Without `extension`, fetches this instance's one trial key from the licensing service (one per instance UUID, ever) and installs it through `LicenseService::saveKey()`. With `extension`, files a request for an extended trial with sales instead; the License tab offers that after a `trial_used`. `LicenseController::requestTrial` → `TrialRequestService`.
+
+**Auth**: `#[AuthorizedAdminSetting(AdminSettings)]`, CSRF-protected. `#[UserRateLimit(limit: 5, period: 3600)]`.
+
+**Request body**:
+```json
+{ "email": "it@example.org", "extension": false, "message": "" }
+```
+
+`message` (up to 2000 characters) is kept only with `extension`. The server adds `uuid`, `members` and the two versions, as for the quote.
+
+**Response 201**:
+- `{ "status": "issued", "expiresAt": 1795000000, "license": { …the GET /admin/license envelope… } }`
+- `{ "status": "extension_requested", "reference": "TH-2611-K7QM" }`
+
+**Failures**:
+- `400` `{ "error": "invalid", "field": "email"|"message" }`
+- `409` `{ "error": "trial_used" }`: this UUID has had its trial
+- `409` `{ "error": "licensed" }`: a paid key is valid or in grace; a trial key would replace it, so nothing was sent
+- `429` `{ "error": "rate_limited" }`
+- `502` `{ "error": "unreachable"|"unavailable"|"rejected"|"invalid_key" }`. `invalid_key`: the service issued a key this instance does not accept (logged; the trial is spent).
+
+### No endpoint for sending a seat report *(and why)*
+
+v4.13.30 briefly had `POST /api/v1/admin/license/report`, to back a **Send report now** button
+on the License tab. Justin removed the button the same day: the member count is a billing matter
+between the instance's operator and us, and a button there makes it look like something a team
+administrator is meant to manage. The endpoint went with it rather than staying on as an
+admin-gated route with no caller.
+
+Sending on demand is an occ command, which is where operator actions belong:
+
+```
+occ teamhub:seat-report            # send now
+occ teamhub:seat-report --dry-run  # show what would be sent, send nothing
+```
+
+It is safe to run repeatedly: the receiver is idempotent per (licence, period) and answers
+`already_recorded` rather than revising a figure, so "the month's latest snapshot" means the
+latest *period*, not the latest POST. It does not bypass the licence conditions either -- a
+banded licence, an unlicensed instance or one expired past its grace window is refused with the
+reason, and a banded licence is told plainly that it does not report at all rather than being
+treated as an error.
+
+The report itself still goes out on `SeatReportJob`'s twelve-hourly tick without anybody asking.
+What is sent, and to where:
+
+**POST `https://portal.doekworks.eu/api/seat-report`**, with the licence JWT as a bearer token:
+
+> **The extensionless path depends on a rewrite on the portal host.** The receiver is
+> `public_html/portal/api/seat-report.php`, MultiViews is off there, and
+> `public_html/portal/api/.htaccess` maps the clean URL onto it. Both halves have to stay in
+> step: the app can only change `SeatReportService::REPORT_URL` by shipping a release, so the
+> host is the side that has to answer what is already in the field. Confirmed working with a
+> real POST on 2026-11-06, which is also the day it was found broken.
+
+```json
+{
+  "lic":               "lic_2026_abc123",
+  "uuid":              "abcd1234efgh",
+  "period":            "2026-10-H2",
+  "counted_at":        1761500000,
+  "effective_members": 437,
+  "app_version":       "4.13.30",
+  "nc_version":        "33.0.1.2",
+  "is_trial":          false
+}
+```
+
+Aggregate only -- no hostname, no instance URL, no user ids, no team names, no content.
+`effective_members` is `TelemetryService::countUniqueTeamMembers()` (DESIGN §2.34), the same
+number the Reporting tab shows the customer, so the figure they read is the figure they are
+invoiced. The License tab prints the stored payload back verbatim, which is the assurance an
+administrator and their DPO need; it just has no button beside it.
 
 ### `GET /api/v1/license/entitlements` *(added 3.100.1)*
 
@@ -2293,7 +3073,7 @@ Deliberately does NOT expose seats, customer, license id, or any admin-only fiel
 ### Removed license endpoints
 
 - **`POST /api/v1/admin/license/refresh`** — removed 4.3.20. Manually scheduled the (now-deleted) `SendTelemetryJob`. The "Refresh now" button it powered was already gone from the UI.
-- **`POST /api/v1/admin/license/trial`** — removed 4.4.0. Server-to-server trial-request endpoint. Superseded by the "Request trial by email" mailto in the License tab, which opens the admin's mail client and sends the instance UUID to `sales@doekworks.eu` (was `teamhub@tldr.host` until 4.11.0); Justin issues the JWT by hand from the licensing dashboard and replies.
+- **`POST /api/v1/admin/license/trial`** — removed 4.4.0. Server-to-server trial-request endpoint. Superseded by the "Request trial by email" mailto in the License tab, which opens the admin's mail client and sends the instance UUID to `sales@doekworks.eu` (was `teamhub@tldr.host` until 4.11.0); Justin issues the JWT by hand from the licensing dashboard and replies. **The path is back in 4.14.12 with a different contract** (see `POST /api/v1/admin/license/trial` above): the portal issues the key from the partner portal's trial registry, and the app installs it.
 
 ---
 
@@ -2562,6 +3342,24 @@ Creates the team's IntraVox documentation page. Pre-existing endpoint; not previ
 **Failures**: `400` — IntraVox not installed, or `PageService` threw (message passed through).
 
 **Note**: creation and content-seeding are two internal calls (`PageService::createPage` then `updatePage`) — `createPage()` does not accept `layout` inline. See DESIGN.md §2.38.
+
+### `POST /api/v1/teams/{teamId}/intravox/subpage` (added 4.13.62)
+
+Creates a page **under** the team's own IntraVox page. This is what the *Create Intranet page* action calls. Until 4.13.61 the browser POSTed straight to `/apps/intravox/api/pages`, deriving the parent path and a slug of its own; that was the only place in the app that named an IntraVox route from the client, and the reason two slug rules governed one page tree.
+
+**Auth**: team **admin** required (`MemberService::requireAdminLevel`) — the same gate as creating and deleting the team's own page. It was a *moderator* action in the interface until 4.13.62, which meant moderators were offered buttons that answered 403; the buttons moved to the admin gate in the same change.
+
+**Body**: `{ "title": "Onboarding" }`. The page's id is derived server-side by `IntravoxService::slugify()`, the same rule the team page's own slug comes from — the client sends no id.
+
+**Response 200**: `{ "success": true, "result": { "page_created": true, "page_id": "onboarding", "team_page_created": false } }`.
+
+`team_page_created` is `true` when this call **also created the team's own page**, which it does when that page is missing. That state is why the endpoint exists: every sub-page is created at `{intravoxParentPath}/{teamSlug}`, and when that page is absent IntraVox refuses the child with *"Permission denied: cannot create pages in this location"* — nothing is denied, the location is not there. The interface had no way out of it, because *Create Intranet page* makes a child and *Delete Intranet page* disables itself once there is nothing left to delete. The repair goes through `IntravoxService::createPage()`, so the page is identical to a provisioned one. The client says so in its toast when the flag comes back true.
+
+**Failures**: `400` — IntraVox absent or unreachable; an empty title; a title or team name with no usable slug (rejected rather than silently renamed, because IntraVox keys a page by its id and a second fallback id under one parent is a collision the user cannot see coming); or IntraVox threw. `403` — not a team admin.
+
+**When the team page itself cannot be created**, the remaining explanation is the configured parent path, so the error names it: *"This team has no intranet page yet and one could not be created under "en/teamhub/acme". Check that this path exists in IntraVox; it is set as the intranet parent path in Admin → TeamHub → Integrations."* It does not claim the path is missing — only that it is the thing to check — because nothing in the bound IntraVox surface resolves a path to a page and can prove it.
+
+**Cache**: invalidates the sub-pages cache on success.
 
 ---
 
@@ -3073,6 +3871,16 @@ Recent runs, newest first.
 
 **Response 200**: `{ "imports": [ … ] }`, each entry the same shape as `import` above.
 
+### `DELETE /api/v1/admin/import/teams` (added 4.13.58)
+
+Clears the *Recent imports* list: deletes every run that is over, and its rows.
+
+**Response 200**: `{ "removed": 3 }` — how many runs went.
+
+A run whose status is `running` is **left alone** — it is in flight, and dropping it would take work off somebody's screen and orphan the button that reopens it. Every other status goes, `validated` included: an unconfirmed preview cannot be reopened from the panel, so it is history like any other row. So `removed` can be lower than the number of rows the list showed, and `0` is a normal answer. If a `validated` run is cleared while another administrator has that preview open, their confirm fails with `404` rather than importing part of a file that no longer exists. The teams a cleared run created are untouched — the run row is bookkeeping about an operation, not the operation's result.
+
+**Failures**: `403` not an admin.
+
 ---
 
 ## Bulk team export endpoints (added 4.6.14, documented 4.6.28)
@@ -3302,9 +4110,11 @@ Each profile carries `fieldCount` and `teams`. Since 4.8.4 `teams` is a real cou
 
 ### `GET /api/v1/admin/policy/templates`
 
-**Response 200**: `{ "templates": [ … ], "liveAtCreation": true, "apps": [ … ], "modules": [ … ], "managedBits": 8568 }`.
+**Response 200**: `{ "templates": [ … ], "liveAtCreation": true, "apps": [ … ], "modules": [ … ], "managedBits": 8568, "teamsByTemplate": { "<templateKey>": 3 } }`.
 
 Each template carries `expiryEnabled` and `expiryDefaultDays` (4.8.3, replacing `offerExpiry`). `liveAtCreation` became `true` in 4.8.3: the wizard and the importer read this table, so an edit here reaches team creation.
+
+`teamsByTemplate` (4.13.24) is one grouped query over `teamhub_team_type`, giving the number of teams created from each key. A key with no teams is absent, so a reader takes it as 0 rather than having to tell "none" from "unknown". It is context for the delete confirmation — never the authority for it; `destroyTemplate` counts again and reports the real figure back.
 
 ### `GET /api/v1/templates`
 
@@ -3326,6 +4136,34 @@ Which policy is *preselected* comes from the chosen template's `defaultProfileKe
 
 `PUT /api/v1/admin/policy/default` existed in 4.8.4 and is **removed**: the default policy is a per-template setting now, edited through `updateTemplate`.
 
+### `POST /api/v1/admin/policy/templates` (4.13.24)
+
+**Body**: `{ templateKey, label, description?, apps?, modules?, expiryEnabled?, expiryDefaultDays?, preselectConfig?, sortIndex?, defaultProfileKey? }`.
+
+**Response 200**: the stored template, in the same shape `listTemplates` returns.
+
+Create a team template. Every field is validated by the same service helpers the `PUT` uses, so the two cannot drift.
+
+There was **no create route until 4.13.24**: `teamhub_template` only ever gained rows from `SeedTemplatesAndProfiles`, so the five templates TeamHub ships were the only kinds of team an estate could have, and an admin screen with an Edit button on every row could rename them and nothing more.
+
+**No migration behind it.** `template_key` is the table's primary key, and the create-team wizard, the CSV importer and the exporter all read the table live (`liveAtCreation`), so a template created here is offered the moment it is saved.
+
+`templateKey` is lower-cased and must match `/^[a-z][a-z0-9_]{1,31}$/` — the same rule a profile key follows. **400** when it is taken, and **400** when it matches one of the keys TeamHub seeds: that one would be re-inserted by the repair step at the next `occ upgrade` and silently merge with what the administrator built.
+
+### `DELETE /api/v1/admin/policy/templates/{templateKey}` (4.13.24)
+
+**Response 200**: `{ template_key, label, teams_affected, inclusions_removed }`.
+
+Three refusals, each **400**:
+
+- a **seeded** template — the repair step re-inserts the shipped set on every upgrade, so a delete would undo itself at the next `occ upgrade` with the administrator's edits gone;
+- the **last** template — the create-team wizard requires one, so an instance with none could not create a team at all. The same promise `destroyProfile` keeps;
+- nothing else. In particular, **teams created from the template do not block it.**
+
+`teamhub_team_type.type` keeps the key, so those teams keep every app, module and setting they were created with — a template describes what a team is *made* with, not what it is, which is the same reason the key is never renamed. What they lose is the *future* relationship to the definition: a policy propagation has no template to push, and the integration packages the template included stop being effective for them, because inclusion is read live.
+
+`inclusions_removed` counts the `teamhub_integ_tmpl` rows dropped. This is the one place the "nothing is deleted when an integration is switched off" promise does not hold, and the template key is the distinction: removing a package *from* a template keeps every per-team preference because the template is still there to re-include it into, whereas a deleted template's key names nothing. A row left behind would be unreachable until somebody created a template with the same key, and would then switch integrations on for teams nobody asked. Per-team shown/hidden preferences and ordering are still untouched — those hang off the capability and the team, not the template.
+
 ### `PUT /api/v1/admin/policy/templates/{templateKey}`
 
 **Body**: `{ label, description?, apps?, modules?, expiryEnabled?, expiryDefaultDays?, preselectConfig?, sortIndex?, defaultProfileKey? }`.
@@ -3345,6 +4183,179 @@ Which policy is *preselected* comes from the chosen template's `defaultProfileKe
 `kind` is `app_not_allowed` — the template provisions an app the profile's allow-list excludes; `detail` lists them. An empty `integrations_allowed` means *all allowed* and can never conflict. There was a second kind, `expiry_forbidden`, until 4.8.3; it cannot happen any more, because expiry moved out of profiles and one side of that disagreement no longer exists.
 
 A warning surface, not a save-blocker: the profile wins at creation, so a conflicting pair still produces a conformant team — it just silently drops something the template offered.
+
+### `GET /api/v1/admin/audit/integrity` (4.13.17)
+
+**Response 200**: `{ verdict, anchors, verifiedAnchors, verifiedRows, unanchoredRows, rowsWithoutHash, firstBreak, lastAnchoredAt, keyFingerprint }`.
+
+Recomputes the audit trail's tamper-evidence chain and reports (DESIGN §2.191). `verdict` is one of `ok` | `broken` | `unkeyed` | `not_anchored` | `key_rotated` | `truncated` — **not a boolean**, because the last four are reasons the question cannot be answered rather than answers, and reporting them as "not ok" would accuse an administrator of tampering that did not happen. `firstBreak` is `{ anchorId, fromId, toId, reason }` or null; `reason` is `row_content` | `row_count` | `range_digest` | `chain_link` | `key_fingerprint`.
+
+Real work — it re-hashes up to `AuditIntegrityService::VERIFY_ROW_BUDGET` (50,000) rows — so it is a button on the Compliance tab rather than part of that tab's summary fetch. The cheap half (`anchors`, `lastAnchoredAt`, `unanchoredRows`, `rowsWithoutHash`, `keyed`) rides `GET /api/v1/admin/compliance/summary` as `audit_integrity`. NC-admin gated in the service, `#[NoCSRFRequired]` because it is a read.
+
+Writing the chain is **not** an endpoint: `AuditMirrorJob` anchors hourly and records the retention purge. There is no way to make the server anchor on request, deliberately — a chain an administrator can advance by hand is a chain whose timing proves less.
+
+## Integration packages (4.13.23, amended 4.13.24)
+
+The package/capability model. Addressed by stable identity (`app_id` /
+`integration_key` / `capability_key`), never by a database id, so a per-team
+preference survives the owning app being disabled, upgraded and reinstalled.
+`developers.md` is the contract an integrating app reads; this section is the
+wire shape.
+
+These went undocumented here when they shipped in 4.13.23 and are written up
+now, with the 4.13.24 amendments marked.
+
+### `GET /api/v1/admin/integrations` · `…/{pkgId}/enable` · `…/{pkgId}/disable` · `…/{pkgId}/disable-preview`
+
+NC-admin. The second governance level: which integrations this server has, and
+which an administrator has switched on. `disable-preview` is a mandatory
+impact preview — a disable is one click that can empty a widget grid and a tab
+bar across every team of several templates.
+
+`capability_summary` counts `widgets`, `menu_items`, `my_work_providers` and
+`other`. **4.13.24**: a `widget_iframe` capability counts under `widgets`. An
+administrator reading "2 widgets" before a disable is counting cards that will
+vanish from a home view, and which side of the frame TeamHub draws is not
+their question.
+
+### `GET /api/v1/admin/integrations/templates` · `…/templates/{templateKey}/include/{pkgId}` (`POST` │ `DELETE`) · `…/preview/{pkgId}` · `…/reconcile/{pkgId}`
+
+NC-admin. The third governance level: which templates include which packages.
+`GET` returns `{ templates: [{ template_key, label, team_count, included: […] }], eligible: […] }`.
+The selector may offer only `eligible` — a package that is available,
+registered, compatible and enabled — so an administrator cannot pick something
+the server would refuse. A template referencing a package that has *since*
+become unavailable keeps the reference and reports `included_but_unavailable`
+with the reason, because silently dropping a saved reference hides exactly the
+problem the administrator needs to see.
+
+**Unchanged in 4.13.24.** What moved is only where the UI lives: the inclusion
+matrix was a section of Administration → TeamHub → Integrations and is now
+inside each template's own editor on the Policy tab. Same routes, same bodies,
+same `templateKey`.
+
+`include` and `remove` take effect for every team of the template immediately —
+inclusion is read live, so a team cannot drift from its template.
+`reconcile` therefore repairs nothing: it fires the lifecycle hooks and records
+the outcome per team, and a run that reports every team `ok` having changed
+nothing is the normal result for a package with no lifecycle provider. It is
+offered only when the change reports `reconcile_recommended`.
+
+### `GET | PUT | POST /api/v1/teams/{teamId}/integrations/presentation[/…]`
+
+**Team-admin.** The fourth level, and the only one a team administrator
+touches: `presentation/{capId}/show`, `presentation/{capId}/hide` and
+`presentation/reorder`.
+
+There is deliberately **no route here that can enable, disable, include or
+remove a package, or touch My Work.** Hiding is refused for a non-visual
+capability rather than quietly stored — a hide that reached a My Work provider
+would be a team administrator switching off something they do not control.
+
+`reorder` takes a `capType` and the capability ids in order. **4.13.24**: it
+matches on the *surface*, not the raw type, so naming either widget type
+reorders both — `widget` and `widget_iframe` are two types on one grid and the
+manager lists them together, so matching on the type would silently skip every
+canvas card in the list the administrator just dragged and write a partial
+order while reporting success.
+
+### `GET /api/v1/teams/{teamId}/integrations/packages`
+
+**Any team member.** What this team actually renders:
+`{ widgets: […], menu_items: […] }`. Hidden capabilities are **absent**, so
+nothing downstream constructs their provider. No `php_class` in the payload:
+an ordinary member has no use for one and publishing it describes the owning
+app's internals.
+
+Each `menu_items` entry carries `url` — the stored `iframe_url` re-validated
+by `IframeUrl` and carrying TeamHub's own verified team id as `?teamId=`. The
+team id comes from the membership check that produced the list, never from the
+stored URL or from request input. A stored URL that no longer passes the rule
+is **dropped and logged**, not rendered with an empty `src`.
+
+**4.13.24**: `widgets` now holds both kinds of card, interleaved by the team's
+own arrangement rather than grouped by kind, and every entry carries
+`cap_type`. A `widget` carries no `url` and its body is fetched from the
+widget-data endpoints below; a `widget_iframe` carries `url` on the same terms
+as a tab and its body is a frame the browser fetches. `cap_type` is what the
+frontend reads to tell them apart — the order cannot, which is why it is in
+the payload.
+
+**4.13.29**: a `widget_iframe` entry also carries `actions` — the header links
+the capability declared at registration, each `{ label, icon, url }`, at most
+ten, in declaration order. Absent capabilities aside, it is `[]` when none were
+declared. Every `url` is treated exactly like the card's own: re-validated by
+`IframeUrl` and carrying the verified `?teamId=`, with an action whose stored
+URL no longer passes **dropped and logged** while the rest of the menu renders.
+A `widget` entry has no `actions` key — a row widget's actions come back from
+its provider at render time through the widget-data endpoints instead, because
+they can depend on what the provider found.
+
+### `GET /api/v1/teams/{teamId}/integrations/packages/all-widget-data`
+
+**Any team member.** Every shown row widget's data in one request: one
+membership check, one effective-state pass, and a per-widget error instead of a
+failed page. Items are capped at 20 and actions at 10 per widget; a provider
+that throws yields an error card and leaves every other widget alone.
+
+**4.13.24**: a `widget_iframe` is skipped here rather than reported as an
+error. It has no provider and nothing to batch.
+
+### `GET /api/v1/teams/{teamId}/integrations/packages/{appId}/{integrationKey}/{capabilityKey}/data` · `…/form` · `…/submit`
+
+**Any team member.** One widget's data, one action's form, one action's
+submission. `mayRender()` rather than `isEffective()`: a hidden widget's
+provider must not be called even by a direct request — both the performance
+property and the "frontend filtering is not a boundary" rule.
+
+**404** for a capability that is not a widget, and **4.13.24** adds a distinct
+404 for a `widget_iframe`: *"That capability draws its own card in an iframe.
+It has no widget data to fetch."* A mistake worth naming rather than an empty
+200.
+
+### `POST /api/v1/ext/integrations/register`
+
+The legacy single-registration route. **`php_class` is not accepted over HTTP**
+since 4.13.23 — a widget names a class TeamHub executes, so it must be
+registered in-process. `menu_item` over HTTP is unaffected. A `widget_iframe`
+is likewise registerable over HTTP, since it names a URL and no class.
+
+### `GET /api/v1/admin/integrations/register` (4.13.17)
+
+**Response 200**: `{ generatedAt, rows: [{ appId, offServer, teamsEnabled, teamsWithData, resources, firstLinkedAt, lastLinkedAt, unhealthy }], hosts: [{ appId, host, teams }] }`.
+
+Where this instance's team data goes (DESIGN §2.194) — the artefact an ISO 27001 A.5.19 supplier review opens with. Derived from `teamhub_team_apps` (intent), `teamhub_team_app_resources` (reality), `teamhub_resource_link` (history) and `teamhub_openproject_link.host`; **no storage of its own**. Off-server integrations sort first. TeamHub's own modules are not listed — see `TeamApps::INTEGRATIONS`.
+
+`teamsEnabled` and `teamsWithData` deliberately disagree: a team can have an integration switched on with nothing provisioned, and can hold a resource that was discovered rather than created here.
+
+### `GET /api/v1/admin/integrations/register/{appId}` (4.13.17)
+
+**Response 200**: `{ appId, teams: [{ teamId, name, enabled, resources, firstLinkedAt, lastLinkedAt, host, project }], truncated }`. **400** for an app id that is not an integration this instance registers. Capped at 500 teams.
+
+### `GET | POST /api/v1/teams/{teamId}/members/review` (4.13.17)
+
+**GET 200**: `{ status: { required, periodMonths, dueAt, overdue, withinNotice, lastReviewedAt, lastReviewedBy, memberCount }, history: […] }` (the ten most recent attestations).
+**POST** takes `{ note?: string }` (≤ 500 characters) and answers `{ status }`.
+
+Membership recertification (DESIGN §2.193). `required` is false — and every other field quiet — unless the team's policy profile governs `member_review_months` with a value above 0; an unclassified team, an ungoverned field and a period of 0 are the same answer. `withinNotice` opens two weeks before `dueAt`, which is when the My Work row appears.
+
+**Team-admin gated**, not NC-admin: the asset owner performs the review, and a server administrator attesting a list they do not know is a control that exists only on paper. `requireAdminLevel()` carries the parent-admin fallback, so an admin of a main team can attest one of its sub-teams. The POST is CSRF-protected and writes both an append-only `teamhub_member_review` row (the evidence, which outlives the audit retention horizon) and a `member.review_completed` audit event (the actor trail).
+
+The same attestation is reachable as the **Confirm membership** action on the My Work row, which is the one place `/mywork-workflows` allows a workflow button outside the row: the opening action belongs where its subject lives, and the subject is the member list.
+
+**Also in 4.13.17, not an endpoint change but a payload one:** every member in `GET /api/v1/teams/{teamId}/members` and `…/members/manage` now carries `joinedAt` — epoch seconds from Circles' own `circles_member.joined`, `0` when that column holds nothing (it is nullable and older rows have none). The frontend renders `0` as *Joined date unknown*, never as 1970.
+
+### `GET | PUT /api/v1/admin/policy/teams-frontend` (4.13.16)
+
+**Response 200**: `{ "available": bool, "enabled": bool, "decided": bool, "systemValue": "" }`. The PUT takes `{ "enabled": bool }` and answers with the same shape.
+
+**The one endpoint pair in this app that writes another app's config value** — `circles`' `frontend_enabled`, which gates Nextcloud's own Teams app: its entry in the app menu, `/apps/circles/teams` (404 when off), all 26 `LocalController` OCS endpoints (`frontend disabled`, which is also what Contacts' own team view calls), the Teams dashboard widget and its controller. Circles' PHP API, the share provider, the share picker, DAV principals and the `circles_*` tables are **not** behind that gate, so TeamHub keeps working with the frontend off. `TeamsFrontendService` has the full list and the reasoning; DESIGN §2.190 has the decision.
+
+`available` is false when the Circles app itself is not enabled, and the PUT then answers **422**. `systemValue` is Circles' `config.php` override (`circles.frontend_enabled`), reported because the app value this endpoint writes takes precedence over it — reported, not obeyed.
+
+`decided` says whether this instance has an explicit answer at all (an app value, or a system value in `config.php`) rather than running on Circles' default of on. It is what the admin-settings **setup checklist** row grades on — either answer counts — and it is why the PUT writes `'0'` instead of deleting the key. Both the Policy tab and the first admin tab read this GET; only the Policy tab writes.
+
+Both are `#[AuthorizedAdminSetting]` with a **full Nextcloud administrator** re-check in the service, exactly like the policy routes: a delegated TeamHub admin passes the attribute and is refused by the service. The GET is `#[NoCSRFRequired]`; the PUT is not. A state change is audited under `AuditService::INSTANCE_SCOPE` as `instance.teams_frontend_changed`; a write that changes nothing is not.
 
 ---
 
@@ -3485,6 +4496,18 @@ Per **user**, not per team. **Query**: `probe` (bool, default 0 — ask OpenProj
 
 **Response 200**: the capability array — `moduleLicensed`, `moduleEnabled`, `moduleAvailable` (4.9.16 — TeamHub's own module; the wizard hides its *OpenProject project* card on `moduleAvailable: false`), `integrationAppInstalled`, `integrationAppEnabled` (the official app's own state, not the module's), `hostConfigured`, `host`, `authMethod`, `userConnected`, `apiReachable` (`null` = not probed), `projectReadAvailable`, `workPackageReadAvailable`, `workPackageCreateAvailable`, `provisioningAvailable`, `openProjectUser`, `errorCode` (`module_unlicensed` / `module_disabled` first, then the app's codes in fixing order), `userMessage`, `administratorMessage`, `probed`, `checkedAt`. No secrets: the host is the URL users are sent to; the OpenProject user is the name they see in OpenProject's header. **Not module-gated** — it is how a client learns the module is off.
 
+### `GET /api/v1/openproject/connection`  *(added 4.13.5; `transport` added 4.13.21)*
+
+Where the **current user** stands with TeamHub's own OpenProject connection, for the personal settings panel. Module-gated; 401 without a session. `POST` on the same path begins the authorization and answers the OpenProject URL to send the browser to (a JSON answer rather than a redirect, so the panel can show a reason instead of navigating into a 422); `DELETE` disconnects.
+
+**Response 200**: `{ "configured", "methodSupported", "transport", "authMethod", "host", "connected", "openProjectUser" }`.
+
+- **`configured` answers a narrower question than it looks** — it is about **TeamHub's own** OAuth client, so it is `false` on a working instance whose OpenProject runs through the official `integration_openproject` app. Reading it as "OpenProject is set up here" is what caused the 4.13.21 bug; use `transport` for that.
+- **`transport`** (4.13.21) — `direct` or `integration_app`, from `OpenProjectTransportSelector::forUser()`. The panel needs it because the two cases want opposite things: on `direct` it offers its own Connect button, on `integration_app` it points at `/settings/user/openproject`, because the official app owns the tokens and a credential written here would be read by nothing. DESIGN §2.198.
+- No secrets: `host` is the URL users are sent to, `openProjectUser` the name they see in OpenProject's own header. The OAuth client secret is never returned by any route.
+
+**Where a user connects is `/settings/user/teamhub#openproject`**, TeamHub's own section — not the official app's page, which on a `direct` instance may not exist at all. `personalSettingsUrl()` in `src/lib/openProject.js` is the single source of that link.
+
 ### `GET /api/v1/openproject/projects`
 
 Projects the **current user may link** — administered by them in OpenProject (the resource carries an `update` link) or public — for the team-creation wizard's picker. Per user, not per team: the team does not exist yet. Gated on the right to create a team. **Query**: `q` (string, ≤ 200 chars, matched on name or identifier), `limit` (int, capped at 25). Rate limit 30/min.
@@ -3495,6 +4518,8 @@ Projects the **current user may link** — administered by them in OpenProject (
 
 Member-gated. **Response 200**: `{ "link": { … } | null, "capabilities": { … } }` — capabilities not probed. A link is `{ projectId, projectIdentifier, projectName, host, stale, createdBy, createdAt, updatedAt, lastValidatedAt, urls: { project, workPackages } }`.
 
+**Layout bundle, `openProjectConfig.project` gains `wikiUrl` in 4.13.13.** `{ id, identifier, name, url, wikiUrl }` for a linked team. `wikiUrl` is the project's wiki table of contents in OpenProject (`/projects/{ref}/wiki/index` — OpenProject routes the index there and leaves the bare `/wiki` without a route). It is a **deep link only**: API v3 mounts wiki pages as `GET /api/v3/wiki_pages/{id}` with no index and no project-scoped collection, so a project's wiki pages cannot be listed, and the Pages widget offers one row out to OpenProject rather than a page list.
+
 **`PUT /api/v1/teams/{teamId}/openproject/link` was removed in 4.9.4.** The link is made by `POST /api/v1/teams` (`openProjectId`, § Team creation) as part of creating the team, and removed only by an NC admin through `DELETE /api/v1/admin/maintenance/teams/{teamId}/openproject-link`. There is no change and no re-link endpoint. The team-delete cascade removes the row.
 
 ### `POST /api/v1/teams/{teamId}/openproject/test`
@@ -3503,13 +4528,17 @@ Team-admin gated, rate limit 10/min. A forced capability probe plus, when linked
 
 ### `GET /api/v1/teams/{teamId}/openproject/overview`
 
-Member-gated, rate limit 60/min. **Query**: `refresh` (bool — bypass the 5-minute per-user cache, subject to a 10 s cooldown). Shape in `OPENPROJECT.md` §3.5: `project`, `counts` (each count may be `null` = could not be read), `dueSoonDays`, `nextMilestone`, `recentlyCompleted`, `files`, `warnings`, `retrievedAt`, `fromCache`.
+Member-gated, rate limit 60/min. **Query**: `refresh` (bool — bypass the 5-minute per-user cache, subject to a 10 s cooldown). Shape in `OPENPROJECT.md` §3.5: `project`, `counts` (each count may be `null` = could not be read), `dueSoonDays`, `nextMilestone`, `version`, `recentlyCompleted`, `files`, `warnings`, `retrievedAt`, `fromCache`.
+
+`version` *(4.13.13)* is the OpenProject version the project is in now — its current sprint or release — or the next one due to start: `{ id, name, startDate, endDate, status, upcoming, url }`, or `null`. Read from `GET /api/v3/projects/{id}/versions`, which answers the project's `shared_versions` (a parent project's included) as an **unpaginated** collection, and needs `view_work_packages` **or** `manage_versions` in the project — a member without either gets `null` and a `version:<code>` warning, never a failed overview. Only `open` versions are considered; among those running (a missing bound is open-ended) the soonest to end wins, and `upcoming` is `true` when nothing is running and the next one to start is shown instead.
 
 ### `GET /api/v1/teams/{teamId}/openproject/work`
 
 Member-gated, rate limit 60/min. **Query**: `section` — `upcoming` (the only section since 4.9.5: the project's open work packages of **every assignee** that carry a due date, soonest first; it feeds the team home's Upcoming tasks widget — the 4.9.3 sections `assigned` / `overdue` / `dueThisWeek` / `recentlyUpdated` are gone with the widget they served, and the viewer's own rows are in My Work through `OpenProjectWorkProvider`); `page` (int ≥ 1, OpenProject page number); `pageSize` (int, 1–25, default 10); `refresh` (bool).
 
 **Response 200**: `{ "section", "items": [ { id, subject, type, status, priority, assignee, responsible, project, startDate, dueDate, date, percentageDone, createdAt, updatedAt, url } ], "total", "page", "pageSize", "hasMore", "retrievedAt", "fromCache", "canCreateWorkPackage" }`. Everything is fetched as the caller, so the list can never contain a work package they could not open in OpenProject. `canCreateWorkPackage` (4.9.15) is whether OpenProject grants the caller *add work packages* on the project (the `createWorkPackage` link on the project resource, read with the page and cached with it; `false` when that read fails) — the Upcoming tasks widget shows its *Create OpenProject work package* action exactly when it is true.
+
+`canEditWorkPackages` (4.13.9) is whether the **OpenProject connection** can send HTTP PATCH at all; each item additionally carries `canEdit`, which is OpenProject's answer for that one work package (its own `update` / `updateImmediately` link). The widget shows a row's *Change* action only when **both** are true, and hides it otherwise rather than disabling it — on a connection that cannot write there is no permission anybody could grant to ungrey it. Items also carry `lockVersion`, which a PATCH must quote.
 
 ### `GET /api/v1/teams/{teamId}/openproject/work-packages/form`  *(added 4.9.15)*
 
@@ -3522,6 +4551,28 @@ OpenProject's create form for the linked project, as the caller: what the Upcomi
 Create one work package in the linked project, **as the caller** — the one OpenProject write a team member makes from the team home. Member-gated, rate limit 30/min, CSRF-checked. **Body**: `subject` (string, 1–255, required), `typeId` (int, required), `assigneeId` (int | null), `dueDate` (`YYYY-MM-DD` | null), `description` (markdown, ≤ 5000). TeamHub checks shape and bounds (400 with `error` on a miss, before OpenProject is asked); OpenProject checks its rules and answers 422, returned as **400** with `code: validation_failed` and OpenProject's own sentence in `error`. One `POST work_packages` (the generic route; OpenProject 17 deprecates `projects/{id}/work_packages`), no notification switch — OpenProject notifies as it would for a work package made in its own UI. Afterwards the team's OpenProject cache generation is bumped, so every member's next `work` and `overview` read is fresh.
 
 **Response 201**: the created work package in the `work` item shape (with `url`).
+
+### `GET /api/v1/teams/{teamId}/openproject/work-packages/{workPackageId}/form`  *(added 4.13.9)*
+
+OpenProject's **edit** form for one work package, as the caller. Member-gated, rate limit 30/min, not cached. One `POST work_packages/{id}/form` with an empty body — the form is the only way to learn two things that must not be guessed: **which status transitions are legal** (a workflow restricts them per type and per role, so the full status list would offer choices OpenProject refuses) and the current **`lockVersion`**, which the PATCH has to carry. Both are read from the same response, so the version belongs to the same moment as the allowed values.
+
+**Response 200**: `{ "workPackage": <work item shape, plus lockVersion and canEdit, with url>, "types": [ { id, name } ], "statuses": [ { id, name } ], "assignees": [ { id, name } ], "assigneesUnavailable": bool }`. A caller OpenProject does not let edit gets its 403 → `permission_denied`. A form that carries no `lockVersion` is refused as `unsupported_response` rather than handed back, because a PATCH cannot be sent safely without one.
+
+### `PATCH /api/v1/teams/{teamId}/openproject/work-packages/{workPackageId}`  *(added 4.13.9)*
+
+Change one work package, **as the caller** — the write DESIGN §2.124 and §2.126 recorded as impossible, because it needs HTTP PATCH and the official integration app's request layer sends GET, POST, PUT and DELETE only. On a connection that cannot send it, this answers **501** with `code: method_unsupported` and **no request is made**; `OPENPROJECT.md` §3.1a has which connection can.
+
+Member-gated, rate limit 30/min, CSRF-checked. **Body**: `lockVersion` (int, **required** — the one from the edit form), plus any of `subject` (1–255), `typeId`, `statusId`, `assigneeId`, `dueDate` (`YYYY-MM-DD`), `percentageDone` (0–100), `description` (markdown, ≤ 5000). **Only the fields present in the body are changed**, and `assigneeId` or `dueDate` sent as `null` **clears** them — absent and null are deliberately different. A body carrying `lockVersion` alone is refused locally (400): OpenProject would accept it and bump the version, which reads as an edit in its activity log.
+
+TeamHub checks shape and bounds before asking. OpenProject then answers:
+
+| Upstream | Returned | Meaning |
+|---|---|---|
+| 409 | **409** `edit_conflict` | the `lockVersion` is behind — somebody changed it first. Optimistic locking working: the edit is refused rather than overwriting theirs. Carries OpenProject's own sentence in `error`. |
+| 422 | 400 `validation_failed` | a rule on OpenProject's side refused the input, with its sentence |
+| 403 | 403 `permission_denied` | OpenProject does not let this caller edit it |
+
+**Response 200**: the updated work package in the `work` item shape (with `url`, `lockVersion` and `canEdit`). Afterwards the team's OpenProject cache generation is bumped, so every member's next `work`, `overview` and My Work read is fresh.
 
 ### `GET /api/v1/teams/{teamId}/openproject/meetings`  *(added 4.9.7)*
 
@@ -3581,6 +4632,16 @@ The caller's own unfinished operations: `{ operations: [ summaries ] }`.
 
 **Body**: `step` (optional key; without it the failed step, or every step that needs attention). 400 when the step is not `failed`/`attention` or said a retry is not safe. Runs on after the reset.
 
+### `POST /api/v1/provisioning/{id}/acknowledge` *(added 4.13.30)*
+
+**Body**: none. Accepts an operation whose status is `attention`, setting it to `completed` so the team page stops reporting it. Answers the operation as `GET /api/v1/provisioning/{id}` does.
+
+**400** when the status is anything but `attention`. A `failed` operation is deliberately refused: an attention note means the workspace is usable and something is worth a look, while a failed required step means it is not, and accepting that away would turn a broken workspace into a silent one. Use retry or rollback there.
+
+**The step rows keep their notes**, so the details pane still shows what did not happen; only the banner stops. Who accepted it and when is in the audit log (`provisioning.acknowledged`, with the open step keys) rather than on the operation row, because `ProvisioningMapper::updateOperation()` writes a fixed set of columns and a new one would have needed a migration for a fact the audit trail already carries.
+
+**Why it exists.** `attention` previously had one exit, retry, and that is not always an exit: a step re-runs against the request frozen when the operation started, so a note about an integration the template no longer carries comes back every time. Reported by Justin on 2026-10-26, on a team that kept reporting Intravox after Pages, Collectives and Intravox had all been removed from its template.
+
 ### `POST /api/v1/provisioning/{id}/rollback`
 
 **Body**: `confirm` (bool). Without `confirm`, a dry run when any created resource may hold activity: `{ status: "confirm_required", needsConfirm: [step keys], verdicts }`. Otherwise the team is removed through the normal delete cascade and the answer is `{ status: "rolled_back", verdicts, … operation }`. Never a linked resource, never the OpenProject project (reported `manual_review`), never a completed operation (400 — delete the team), never after a handover (400 — Maintenance).
@@ -3601,6 +4662,8 @@ Team admins, rate limit 5/min. The one explicit, one-way action: adds the `missi
 
 **Query**: `limit` (≤ 100). **Response 200**: `{ operations: [ summaries ] }`, newest first.
 
+**No UI caller since 4.13.17.** Its only reader was the *Workspace provisioning* panel on the Maintenance tab, removed at Justin's request because none of what it offered — retry, continue, rollback — is a Nextcloud administrator's decision; provisioning is driven by the team's creator from the wizard, and a failed run is picked up from the banner on the team page. The route is kept because it is the only instance-wide view of provisioning that exists and costs nothing to leave in place; its per-operation siblings (`/provisioning/{id}`, `…/retry`, `…/rollback`) are still the team-side recovery path and are very much in use.
+
 ### `GET /api/v1/admin/policy/openproject-roles`
 
 Rate limit 10/min. The OpenProject roles and templates as the administrator's own connected account sees them: `{ roles, templates }`. For the template editor's OpenProject section.
@@ -3610,6 +4673,38 @@ Rate limit 10/min. The OpenProject roles and templates as the administrator's ow
 GET: `{ templateKey, stored, blueprint, vocabulary }`. PUT **body** `{ blueprint }` — validated by name (unknown application, module, widget, role key, copy key or behaviour → 400 naming it; `openproject.required` on any template but `openproject` → 400); `apps`, `modules` and the per-application behaviours are re-derived from the template row on every read, so the section stores only what the row cannot say. DELETE resets to the shipped blueprint (`openproject`) or removes it (the others). Audited as `policy.blueprint_updated` / `policy.blueprint_reset`.
 
 **Audit events added**: `provisioning.started`, `provisioning.step_failed`, `provisioning.completed`, `provisioning.needs_attention`, `provisioning.retried`, `provisioning.rolled_back`, `provisioning.run_as_creator`, `openproject.membership_synced`, `policy.blueprint_updated`, `policy.blueprint_reset`.
+
+## Members on another server (payload and behaviour change, 4.14.16)
+
+Design: DESIGN §2.257. A member whose account is on another Nextcloud is `circles_member.user_type = TYPE_USER` with a non-empty `instance`; **there is no federated member type** (4 is `TYPE_MAIL`). They were always in the member lists. What they were missing from is the **count**, and what could not be done to them is the two writes.
+
+**`effective_count` now includes them.** It is computed from `circles_membership` joined to each principal circle, and a federated member has no principal circle on this server, so they were silently absent: a team of two read `1`. Affects `GET …/members`, `…/members/manage` and `…/members/mail`.
+
+**New fields.** Each person in `GET …/members`, `…/members/all` and the `direct` bucket of `…/members/manage` carries `instance` (the owning server, `''` for a local account) and `isRemote`. `…/members/manage` also carries `userType`, `singleId` and `memberId`; `memberId` is Circles' own handle for the row and is what the two writes below need. A remote row in `…/members/all` has no `email`, `phone`, `ncStatus` or `subline`: there is no local account to read them from. `MemberService::getAllEffectiveMembers()` keeps a **local-only default** for its service callers (decision approvers, shift staffing, presence, file reviews, birthdays) and only the controller behind the members widget and `@mention` passes `includeRemote: true`. A test pins that default.
+
+**`DELETE /api/v1/teams/{teamId}/members/{userId}` takes a fourth `type`: `federated`.** It is the frontend saying *this row showed a globe*; the service re-establishes the fact from the row's `instance` before acting, so a wrong `type` can only make a federated removal fail, never make a local one federate. A federated removal is performed by **Circles**, so the member's own server receives `MemberRemove`; a refusal comes back as **400** with Circles' message and nothing is removed locally. There is no raw fallback.
+
+**`PUT /api/v1/teams/{teamId}/members/{userId}/level`** detects the same case from the row itself and routes the change through Circles' `MemberLevel` event. **A member on another server is capped at Moderator (4)**: level 8 answers **400**, and the frontend does not offer it. **400** also when Circles refuses, or when the row carries no valid `member_id` (the §2.249 repair fixes that, and the message says so). Local members are unchanged on both endpoints.
+
+Both URLs now carry a URL-encoded member id: a federated member's id is a cloud id (`someone@their.server`), not a bare uid.
+
+## A team another server owns (added 4.14.15)
+
+One read-only route for a team this instance holds only as Nextcloud Teams' synced copy. Design: DESIGN §2.256. Gated on the administrator's *Teams from other servers* switch (`federatedTeamsEnabled`, off by default) **and** on the circle being a copy owned elsewhere **and** on the caller being in it; anything else answers **404**, which is also the answer for a team that does not exist, so the route discloses nothing about a team the caller is not in.
+
+Deliberately its own controller: every `/teams/{teamId}` route answers for a team this server owns and runs through the registry gate.
+
+### `GET /api/v1/federated-teams/{teamId}`
+
+`#[NoAdminRequired]`. Reads rows Nextcloud Teams has already synced onto this instance; it never calls the owning server and never writes.
+
+**Response 200**: `{ team: { id, name, description, remote_instance, is_remote: true, level, members: [member] } }`
+
+`member`: `{ userId, displayName, level, role (owner|admin|moderator|member), instance, is_remote }`. The roster is read with `user_type IN (1, 4)`, so accounts on the owning server are in it; `instance` is empty for a local account and the owning host for everybody else. `level` on the team is the caller's own, 0 when their access comes through a group or another team.
+
+**404**: not a synced copy, the switch is off, or the caller is not a member. **401**: no session.
+
+**Also on the team list.** `GET /api/v1/teams` (`TeamService::getSidebarTeams()`) now carries a row per synced copy, after the local ones, each with `is_remote: true` and `remote_instance`. These rows are added to the **sidebar** list only: `getUserTeams()`, the authorisation boundary behind My Work, the Files-app actions and file reviews, is unchanged and still returns local teams only.
 
 ## Teams made outside TeamHub — the adoption grid (added 4.10.50)
 

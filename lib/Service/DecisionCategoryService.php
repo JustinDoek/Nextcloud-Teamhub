@@ -20,8 +20,8 @@ use Psr\Log\LoggerInterface;
  * Per-team predefined Decisions categories and their approver lists.
  *
  * Category lifecycle:
- *  - createCategory()        — caller becomes created_by; team owner is auto-added
- *                              as the default approver. If the request specifies
+ *  - createCategory()        — caller becomes created_by; the team's admins are
+ *                              auto-added as the default approvers (v4.13.56). If the request specifies
  *                              an approver list, it replaces the default (but
  *                              must still be non-empty).
  *  - updateCategory()        — rename, change icon/description, or replace the
@@ -35,7 +35,8 @@ use Psr\Log\LoggerInterface;
  *
  * Empty-approver-list invariant:
  *  - A category never has zero approvers. If a caller submits an empty list,
- *    the team owner is substituted in.
+ *    the team's admins are substituted in (v4.13.56, was the single owner;
+ *    the owner remains the last resort when the admin list cannot be read).
  *  - **One exemption (v4.11.18): the archive category.** Nothing in it is
  *    ever approved — a decision arrives there already retired, and
  *    `is_archive` is what says so — so substituting an approver would name
@@ -150,7 +151,7 @@ class DecisionCategoryService {
      * @param string   $teamId       Team id (== circles_circle.unique_id).
      * @param string   $name         Category name (trimmed; 1–128 chars).
      * @param string   $createdBy    User id of the creating admin.
-     * @param string[] $approvers    Optional approver list. Empty or null → team owner.
+     * @param string[] $approvers    Optional approver list. Empty or null → the team's admins.
      * @param ?string  $icon         Optional emoji (≤8 bytes stored; validated).
      * @param ?string  $description  Optional description (≤500 chars).
      * @param int      $reviewPeriodMonths  v4.11.18 — 0 = no review.
@@ -650,12 +651,31 @@ class DecisionCategoryService {
             return $clean;
         }
 
+        // v4.13.56 — an empty approver list falls back to the team's ADMINS,
+        // not to the single owner (DESIGN §2.223). Nothing inside a team names
+        // an owner any more, so the sentence the UI shows beside this field
+        // ("the team admins are the approvers") had to become true rather than
+        // be reworded around a behaviour that picked one person.
+        //
+        // Practical effect beyond the wording: a category whose approver left
+        // the team used to fall to one member who may not be around either.
+        // Every team admin is a better audience for "somebody must finalize
+        // this" than whichever one of them happens to hold the team.
+        //
+        // The owner is still the last resort, because `findTeamAdminUids()`
+        // can come back empty on a team whose admin list cannot be read, and
+        // a category with no approvers at all is a decision nobody can close.
+        $admins = $this->findTeamAdminUids($teamId);
+        if ($admins !== []) {
+            return $admins;
+        }
+
         $owner = $this->findTeamOwnerUid($teamId);
         if ($owner !== null) {
             return [$owner];
         }
 
-        throw new \RuntimeException('Cannot determine team owner; category has no approvers');
+        throw new \RuntimeException('Cannot determine any team admin; category has no approvers');
     }
 
     /**
@@ -678,7 +698,9 @@ class DecisionCategoryService {
      *
      * @return string[] may be empty; the caller's `resolveApprovers()` then
      *                  falls back to the owner, which is the right answer
-     *                  for a team whose admin list cannot be read.
+     *                  for a team whose admin list cannot be read. Since
+     *                  v4.13.56 this is also the fallback for an empty
+     *                  approver list on any category, not only the seed.
      */
     private function findTeamAdminUids(string $teamId): array {
         try {

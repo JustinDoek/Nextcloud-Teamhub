@@ -305,6 +305,10 @@ class SubTeamController extends Controller {
      * in the service for the same reason: a uid in the wrong list is a 400,
      * because a main team member arriving as a guest — or a stranger arriving
      * as a colleague — is not something to quietly correct.
+     *
+     * v4.13.3 — an `outsiders` entry may carry `type: 'group'`. Only the
+     * local-user type is tested against the parent's roster; a group has no
+     * place on one.
      */
     #[NoAdminRequired]
     public function addMembers(string $teamId, string $subTeamId): JSONResponse {
@@ -331,13 +335,21 @@ class SubTeamController extends Controller {
      *
      * The uid in the path, as `team#removeMember` already does for a team's
      * own members — one shape for "remove this person from this team", not two.
+     *
+     * v4.13.3 — `?type=group` takes an invited Nextcloud group back out, and
+     * the id in the path is then the group's `singleId` (the `groupId` the
+     * members payload carries), not its gid. Same query parameter and same
+     * mapping `team#removeMember` has used since groups could be invited into
+     * a main team; `circle` is deliberately absent, because a team cannot be
+     * invited into a sub-team in the first place.
      */
     #[NoAdminRequired]
     public function removeMember(string $teamId, string $subTeamId, string $userId): JSONResponse {
         try {
             $this->subTeamModule->requireAvailable();
             $this->memberService->requireAdminLevel($teamId);
-            $this->subTeamService->removeMember($teamId, $subTeamId, $userId);
+            $userType = ((string)$this->request->getParam('type', 'user')) === 'group' ? 2 : 1;
+            $this->subTeamService->removeMember($teamId, $subTeamId, $userId, $userType);
             return new JSONResponse(['success' => true]);
         } catch (\Throwable $e) {
             return $this->subTeamError($e, 'Failed to remove the member', [

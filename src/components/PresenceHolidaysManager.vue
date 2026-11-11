@@ -2,7 +2,7 @@
     <div class="presence-holidays-manager">
         <NcSettingsSection
             :name="t('teamhub', 'Holidays')"
-            :description="t('teamhub', 'Public or company holidays. Adding a holiday overwrites everyone\'s entries on that date with the built-in ‘Holiday’ status. Users cannot edit a holiday slot.')">
+            :description="t('teamhub', 'Public or company holidays. These dates are excluded from meeting suggestions and displayed over workplace plans without changing saved workplace entries.')">
 
             <div class="presence-holidays-toolbar">
                 <NcButton
@@ -114,15 +114,8 @@
                         date: formatDate(confirmDialog.date),
                     }) }}
                 </p>
-                <p
-                    v-if="confirmDialog.affectedSlots > 0"
-                    class="presence-confirm-warning"
-                    aria-live="polite">
-                    <!-- TRANSLATORS: shown before committing a holiday that will destructively overwrite user entries -->
-                    {{ overwriteWarning }}
-                </p>
-                <p v-else class="presence-confirm-info" aria-live="polite">
-                    {{ t('teamhub', 'No existing entries on this date — nothing will be overwritten.') }}
+                <p class="presence-confirm-info" aria-live="polite">
+                    {{ t('teamhub', 'The holiday hides workplace assignments on this date, but does not delete or change them.') }}
                 </p>
             </template>
             <template #actions>
@@ -130,7 +123,7 @@
                     {{ t('teamhub', 'Back') }}
                 </NcButton>
                 <NcButton
-                    :variant="confirmDialog.affectedSlots > 0 ? 'error' : 'primary'"
+                    variant="primary"
                     :disabled="committing"
                     @click="commit">
                     <template #icon>
@@ -152,7 +145,7 @@
             @update:open="closeDeleteDialog">
             <template #default>
                 <p>
-                    {{ t('teamhub', 'Delete ‘{name}’ on {date}? Any holiday entries on that date will revert to each user\'s default week template.', {
+                    {{ t('teamhub', 'Delete ‘{name}’ on {date}? Saved workplace assignments will become visible again.', {
                         name: deleteDialog.name,
                         date: formatDate(deleteDialog.date),
                     }) }}
@@ -191,8 +184,8 @@ import ContentSaveIcon   from 'vue-material-design-icons/ContentSave.vue'
  *   1. Admin enters date+name and clicks Next.
  *   2. App calls POST /presence/holidays/preview to find out how many slot
  *      rows currently sit on that date.
- *   3. Confirmation dialog shows "N entries will be overwritten" and asks
- *      for explicit consent before committing.
+ *   3. Confirmation dialog explains that holidays are read-time overlays
+ *      and therefore never destroy saved workplace assignments.
  *
  * The preview always returns 0 in B1 (slots table is empty), but the
  * complete flow is wired so the dialog will work correctly the moment B2
@@ -236,15 +229,7 @@ export default {
                 && this.addDialog.name.trim() !== ''
         },
 
-        overwriteWarning() {
-            return n(
-                'teamhub',
-                'This will overwrite {n} existing entry on this date.',
-                'This will overwrite {n} existing entries on this date.',
-                this.confirmDialog.affectedSlots,
-                { n: this.confirmDialog.affectedSlots },
-            )
-        },
+
     },
     mounted() {
         this.load()

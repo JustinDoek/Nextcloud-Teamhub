@@ -1394,11 +1394,43 @@ class TalkService {
             // FederatedUserService::setLocalCurrentUser() sets up the Circles
             // session context so getCircle() can see the circle regardless of
             // whether its config bitmask hides it from unauthenticated lookups.
+            //
+            // v4.13.76 — **and it puts the context back afterwards.**
+            //
+            // `FederatedUserService` is one object for the whole request, and
+            // its "current user" is the initiator every later Circles call
+            // resolves rights against. This method sets it to somebody who is
+            // not the actor — the member being synced — and left it there, so
+            // every Circles call for the rest of the request ran as that
+            // member.
+            //
+            // What that broke: `MemberService::inviteMembers()` syncs each
+            // new member to Talk inside its loop, so from the first invite
+            // onwards the initiator was the person just invited. A team admin
+            // inviting three people added the first and had the other two
+            // refused with `MemberLevelException: Insufficient rights` —
+            // Circles was right, it was being asked by a level-1 member. That
+            // is the bug reported on 2026-11-02 and the reason the actor's own
+            // level looked correct in every table anybody checked.
+            //
+            // Saved and restored rather than simply re-set by the caller: a
+            // helper that changes a request-scoped global and does not put it
+            // back is a trap for whoever calls it next, and there are five
+            // other call sites of this method.
             $fedUserSvc = $this->container->get(\OCA\Circles\Service\FederatedUserService::class);
+            $previousCurrentUser = $fedUserSvc->getCurrentUser();
             $fedUserSvc->setLocalCurrentUser($userObj);
 
-            $circlesMgr = $this->container->get(\OCA\Circles\CirclesManager::class);
-            $circle     = $circlesMgr->getCircle($teamId);
+            try {
+                $circlesMgr = $this->container->get(\OCA\Circles\CirclesManager::class);
+                $circle     = $circlesMgr->getCircle($teamId);
+            } finally {
+                if ($previousCurrentUser !== null) {
+                    $fedUserSvc->setCurrentUser($previousCurrentUser);
+                } else {
+                    $fedUserSvc->unsetCurrentUser();
+                }
+            }
 
             $this->logger->debug('[TeamHub][TalkService] resolveCircle: resolved', [
                 'teamId' => $teamId, 'circleName' => $circle->getName(),

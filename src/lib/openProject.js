@@ -38,6 +38,18 @@ export const CODES = Object.freeze({
     // v4.9.6 — writes (Phase 2).
     VALIDATION_FAILED: 'validation_failed',
     JOB_FAILED: 'job_failed',
+    // v4.13.4 — the OpenProject connection in force cannot send the HTTP
+    // method this action needs (in practice: PATCH, which the official
+    // integration app refuses). Reads and creates still work.
+    METHOD_UNSUPPORTED: 'method_unsupported',
+    // v4.13.5 — TeamHub's own OpenProject connection is configured with an
+    // authorization method this version cannot perform (OIDC). A
+    // configuration code: the administrator fixes it, the member cannot.
+    AUTH_METHOD_UNSUPPORTED: 'auth_method_unsupported',
+    // v4.13.9 — somebody else changed the work package first. Not a
+    // configuration problem and not the editor's mistake, so it is in
+    // none of the sets below: the form stays open and offers a reload.
+    EDIT_CONFLICT: 'edit_conflict',
 })
 
 /** Codes that mean "nothing a team member can fix from here". */
@@ -48,6 +60,7 @@ const CONFIGURATION_CODES = new Set([
     CODES.INTEGRATION_DISABLED,
     CODES.INTEGRATION_INCOMPATIBLE,
     CODES.HOST_NOT_CONFIGURED,
+    CODES.AUTH_METHOD_UNSUPPORTED,
 ])
 
 /** Codes that mean "this user needs to (re)connect their account". */
@@ -123,6 +136,7 @@ export function errorMessage(code) {
     case CODES.INTEGRATION_DISABLED:
     case CODES.INTEGRATION_INCOMPATIBLE:
     case CODES.HOST_NOT_CONFIGURED:
+    case CODES.AUTH_METHOD_UNSUPPORTED:
         return t('teamhub', 'OpenProject is not available on this Nextcloud. Ask your administrator to set up the OpenProject integration.')
     case CODES.USER_NOT_CONNECTED:
         return t('teamhub', 'Connect your OpenProject account in your personal settings to see this project.')
@@ -146,6 +160,10 @@ export function errorMessage(code) {
         return t('teamhub', 'OpenProject did not accept this.')
     case CODES.JOB_FAILED:
         return t('teamhub', 'OpenProject could not finish copying the template.')
+    case CODES.EDIT_CONFLICT:
+        return t('teamhub', 'Somebody else changed this work package first. Reload to see their version.')
+    case CODES.METHOD_UNSUPPORTED:
+        return t('teamhub', 'This Nextcloud cannot change work packages in OpenProject. Ask your administrator.')
     default:
         return t('teamhub', 'OpenProject data could not be loaded.')
     }
@@ -186,10 +204,39 @@ export function classifyError(e) {
 }
 
 /**
- * Where a user connects their OpenProject account: the official app's
- * personal settings section.
+ * Where a user connects their OpenProject account: **TeamHub's own** personal
+ * settings section.
+ *
+ * v4.13.21 — this pointed at `/settings/user/openproject`, the official
+ * `integration_openproject` app's section, and had done since v4.9.7 when
+ * that app owned every token. v4.13.5 gave TeamHub its own OAuth client and
+ * its own Connect button in Settings → Personal → TeamHub, and this helper
+ * was not moved with it. So on an instance using TeamHub's own transport —
+ * which may not have the official app installed at all — every Connect
+ * button in the app sent the user to another app's page, or to a 404.
+ * Reported by Justin on 2026-10-22 against the Project info widget.
+ *
+ * Unconditional on purpose, rather than branching on the active transport.
+ * Two of the four callers are cross-team views that hold no OpenProject
+ * state, so a transport argument would have to be plumbed to places that
+ * have no way of knowing it. Instead the destination page decides: the panel
+ * reads `transport` from its own status endpoint and, on the integration-app
+ * transport, points onward to {@see integrationAppSettingsUrl} rather than
+ * offering a Connect button that would write a credential nothing reads.
+ * One place knows the difference, and it is the page that can act on it.
  */
 export function personalSettingsUrl() {
+    return generateUrl('/settings/user/teamhub') + '#openproject'
+}
+
+/**
+ * The official `integration_openproject` app's personal settings section.
+ *
+ * Only for the hand-off described above — nothing should link here directly,
+ * because on an instance using TeamHub's own transport this page does not
+ * exist. See {@see personalSettingsUrl}.
+ */
+export function integrationAppSettingsUrl() {
     return generateUrl('/settings/user/openproject')
 }
 
@@ -300,6 +347,87 @@ export function buildWorkPackagePayload(form) {
         payload.description = description
     }
     return payload
+}
+
+/**
+ * The PATCH body for an edit (v4.13.9): `lockVersion` plus **only the
+ * fields the editor actually changed**.
+ *
+ * Sending only changes is not an optimisation. The backend treats an
+ * absent field as "leave it" and an explicit `null` as "clear it", so a
+ * form that posted everything would overwrite values somebody else had
+ * changed in the meantime with the ones this editor happened to load —
+ * which is precisely what `lockVersion` exists to prevent, defeated by
+ * the client.
+ *
+ * `null` is therefore meaningful and must survive: clearing an assignee
+ * or a due date is a change, where leaving it alone is not.
+ *
+ * @param {object} form      the live form values
+ * @param {object} original  the same shape as loaded from the edit form
+ * @param {number} lockVersion the version the form was loaded at
+ * @return {object} the body to PATCH; `lockVersion` only, if nothing changed
+ */
+export function buildWorkPackageEditPayload(form, original, lockVersion) {
+    const payload = { lockVersion: Number(lockVersion) }
+
+    const subject = String(form?.subject ?? '').trim()
+    if (subject !== String(original?.subject ?? '').trim()) {
+        payload.subject = subject
+    }
+
+    const typeId = Number(form?.type?.id) || 0
+    if (typeId > 0 && typeId !== (Number(original?.typeId) || 0)) {
+        payload.typeId = typeId
+    }
+
+    const statusId = Number(form?.status?.id) || 0
+    if (statusId > 0 && statusId !== (Number(original?.statusId) || 0)) {
+        payload.statusId = statusId
+    }
+
+    // 0 is the "Nobody" option, which means clear it — distinct from the
+    // field never having been touched.
+    const assigneeId = Number(form?.assignee?.id) || 0
+    const wasAssignee = Number(original?.assigneeId) || 0
+    if (assigneeId !== wasAssignee) {
+        payload.assigneeId = assigneeId > 0 ? assigneeId : null
+    }
+
+    const dueDate = String(form?.dueDate ?? '').trim()
+    const wasDue = String(original?.dueDate ?? '').trim()
+    if (dueDate !== wasDue) {
+        payload.dueDate = /^\d{4}-\d{2}-\d{2}$/.test(dueDate) ? dueDate : null
+    }
+
+    const percent = form?.percentageDone
+    const typed = percent === '' || percent === null || percent === undefined ? null : Number(percent)
+    const wasPercent = original?.percentageDone === null || original?.percentageDone === undefined
+        ? null
+        : Number(original.percentageDone)
+    if (typed !== wasPercent) {
+        payload.percentageDone = typed
+    }
+
+    const description = String(form?.description ?? '').trim()
+    if (description !== String(original?.description ?? '').trim()) {
+        payload.description = description
+    }
+
+    return payload
+}
+
+/**
+ * Has anything beyond `lockVersion` been changed — i.e. is there an edit
+ * to send at all. The backend refuses a bare `lockVersion` (it would bump
+ * the version and look like an edit in OpenProject's activity log), so
+ * the button is disabled rather than letting that round trip happen.
+ *
+ * @param {object} payload from `buildWorkPackageEditPayload`
+ * @return {boolean}
+ */
+export function hasWorkPackageChanges(payload) {
+    return Object.keys(payload || {}).some(key => key !== 'lockVersion')
 }
 
 /**

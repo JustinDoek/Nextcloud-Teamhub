@@ -246,7 +246,9 @@ export default {
         window.addEventListener('focus', this._onFocus)
     },
 
-    beforeDestroy() {
+    // v4.20.0: was beforeDestroy(), which Vue 3 never calls, so this cleanup
+    // never ran and every listener here outlived the component.
+    beforeUnmount() {
         if (this._onVisibility) {
             document.removeEventListener('visibilitychange', this._onVisibility)
             this._onVisibility = null

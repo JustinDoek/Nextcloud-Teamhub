@@ -35,7 +35,7 @@
         <template v-else-if="entries.length">
             <ul class="prov-roles__members" :aria-label="t('teamhub', 'Members and their OpenProject roles')">
                 <li v-for="e in entries" :key="e.type + ':' + e.id" class="prov-roles__member" :class="'prov-roles__member--' + e.status">
-                    <NcAvatar v-if="e.type === 'user'" :user="e.id" :display-name="e.displayName" :size="24" :hide-status="true" />
+                    <NcAvatar v-if="e.type === 'user'" :user="e.id" :display-name="e.displayName" :size="AVATAR_SM" :hide-status="true" />
                     <span v-else class="prov-roles__avatar-alt"><AccountGroup :size="ICON_BODY" aria-hidden="true" /></span>
                     <span class="prov-roles__member-name">{{ e.displayName }}</span>
                     <span class="prov-roles__member-role">{{ roleLabel(e.teamRole) }}</span>
@@ -86,7 +86,7 @@ import { generateUrl } from '@nextcloud/router'
 import axios from '@nextcloud/axios'
 import { NcAvatar, NcLoadingIcon, NcSelect } from '@nextcloud/vue'
 import AccountGroup from 'vue-material-design-icons/AccountGroup.vue'
-import { ICON_BODY } from '../constants/uiTokens.js'
+import { AVATAR_SM, ICON_BODY } from '../constants/uiTokens.js'
 import { classifyError } from '../lib/openProject.js'
 import { componentLabel, roleLabel } from '../lib/provisioning.js'
 
@@ -127,6 +127,7 @@ export default {
             entries: [],
             roleMapping: {},
             timer: null,
+            AVATAR_SM,
             ICON_BODY,
         }
     },

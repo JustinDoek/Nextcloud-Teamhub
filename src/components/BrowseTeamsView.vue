@@ -64,12 +64,12 @@
                         <div class="team-card__name-row">
                             <h3 class="team-card__name">{{ team.name }}</h3>
                             <!-- v4.0.2 — template badge fed by teamhub_team_type.
-                                 Legacy teams (team.type=null) render nothing. -->
+                                 Legacy teams (team.template=null) render nothing. -->
                             <span
-                                v-if="teamTypeLabel(team.type)"
+                                v-if="templateLabel(team)"
                                 class="team-card__type-badge"
-                                :title="teamTypeTooltip(team.type)">
-                                {{ teamTypeLabel(team.type) }}
+                                :title="templateTooltip(team)">
+                                {{ templateLabel(team) }}
                             </span>
                         </div>
                         <!-- v4.8.0 — Nextcloud tags. Members only: the
@@ -201,6 +201,7 @@
 
 <script>
 import { translate as t } from '@nextcloud/l10n'
+import { templateDisplayName } from '../constants/policy.js'
 import { generateUrl } from '@nextcloud/router'
 import { showSuccess, showError, showWarning } from '@nextcloud/dialogs'
 import axios from '@nextcloud/axios'
@@ -252,10 +253,10 @@ export default {
                 const descMatch  = team.description?.toLowerCase().includes(query)
                 // v4.0.9 — also match on the localized template badge so a
                 // user browsing in Dutch can type "Samenwerking" and land on
-                // every collaboration team. teamTypeLabel returns null for
-                // legacy teams without a stored type — those simply skip the
-                // label check and fall back to name/description matching.
-                const labelMatch = this.teamTypeLabel(team.type)?.toLowerCase().includes(query)
+                // every collaboration team. templateLabel returns '' for
+                // legacy teams without a stored template — those simply skip
+                // the label check and fall back to name/description matching.
+                const labelMatch = this.templateLabel(team).toLowerCase().includes(query)
                 return nameMatch || descMatch || labelMatch
             })
         },
@@ -267,23 +268,30 @@ export default {
         t,
 
         /**
-         * v4.0.2 — team.type comes straight from teamhub_team_type
-         * ('collaboration'|'project'|'department') or null for legacy teams.
-         * Legacy teams show no badge (per team-type feature fallback design).
+         * v4.0.2 — the badge, from `team.template` as the browse endpoint
+         * sends it: { key, label, isSeeded }, or null for a legacy team with
+         * no row, which shows no badge (the team-type fallback design).
+         *
+         * v4.13.28 — this was a four-arm `if` chain over the seeded keys, so
+         * it was blind to `service` (shipped v4.10.23) and to every template
+         * an administrator has been able to create since v4.13.24: both
+         * rendered no badge at all. `templateDisplayName()` is the rule the
+         * admin panels already use — a seeded template's label is translated
+         * by key, an administrator's own label is shown as they wrote it.
+         *
+         * Returns '' rather than null so `filteredTeams` can match on it
+         * without a guard.
          */
-        teamTypeLabel(type) {
-            if (type === 'collaboration') return t('teamhub', 'Collaboration')
-            if (type === 'project')       return t('teamhub', 'Project')
-            if (type === 'department')    return t('teamhub', 'Department')
-            if (type === 'openproject')   return t('teamhub', 'OpenProject project')
-            return null
+        templateLabel(team) {
+            const tmpl = team?.template
+            if (!tmpl?.key) return ''
+            return templateDisplayName(tmpl.key, tmpl.label, tmpl.isSeeded)
         },
-        teamTypeTooltip(type) {
-            if (type === 'collaboration') return t('teamhub', 'Created from the Collaboration template.')
-            if (type === 'project')       return t('teamhub', 'Created from the Project template.')
-            if (type === 'department')    return t('teamhub', 'Created from the Department template.')
-            if (type === 'openproject')   return t('teamhub', 'Created from the OpenProject project template.')
-            return ''
+        templateTooltip(team) {
+            const label = this.templateLabel(team)
+            if (!label) return ''
+            // TRANSLATORS: {template} is the name of the team template, e.g. "Collaboration"
+            return t('teamhub', 'Created from the {template} template.', { template: label })
         },
 
         async loadTeams() {

@@ -2,7 +2,7 @@
 
 ## Requirements
 
-- Nextcloud 33 or later
+- Nextcloud 34 or later
 - PHP 8.1, 8.2, 8.3, 8.4 or 8.5
 - Nextcloud Teams (Circles) app enabled
 - PostgreSQL or MySQL/MariaDB

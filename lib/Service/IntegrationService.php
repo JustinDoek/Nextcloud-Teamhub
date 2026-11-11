@@ -96,6 +96,12 @@ class IntegrationService {
         private IGroupManager             $groupManager,
         private IUserSession              $userSession,
         private ContainerInterface        $container,
+        // v4.13.23 — every successful legacy registration also becomes an
+        // integration package, so an app that has not changed a line appears
+        // on the administration screen, can be included in a template and
+        // gets per-team shown/hidden like any other. See the adapter's
+        // docblock for the identity it lands under.
+        private LegacyIntegrationAdapter  $legacyAdapter,
         private LoggerInterface           $logger,
     ) {}
 
@@ -218,6 +224,25 @@ class IntegrationService {
         // 5/6. Type-specific field validation.
         if ($integrationType === IntegrationRegistryMapper::TYPE_WIDGET) {
 
+            // v4.13.23 — a widget names a PHP class TeamHub resolves from the
+            // container and calls. Accepting one over HTTP means an
+            // authenticated request chooses what TeamHub executes, so the HTTP
+            // path no longer may. Iframe registration (menu_item) is
+            // unaffected: it carries a URL, not a class.
+            //
+            // This is the one deliberate behaviour change in the legacy API.
+            // Nothing in this repository used the HTTP path for a widget — it
+            // cannot work for one anyway, because the class has to be
+            // autoloadable in TeamHub's own process — and the message points
+            // at the supported call.
+            if (!$calledInProcess) {
+                throw new \Exception(
+                    'A widget integration must be registered in-process from your app\'s '
+                    . 'Application::boot() with calledInProcess: true. TeamHub does not accept '
+                    . 'php_class over HTTP, because it names a class TeamHub would execute.'
+                );
+            }
+
             if (empty($phpClass)) {
                 throw new \Exception(
                     "php_class is required for widget integrations — provide the fully-qualified " .
@@ -297,7 +322,7 @@ class IntegrationService {
         // matching the requested type. The other type's row (if any) is untouched.
         $existing = $this->registryMapper->findByAppIdAndType($appId, $integrationType);
         if ($existing !== null) {
-            return $this->registryMapper->update(
+            $row = $this->registryMapper->update(
                 $existing['id'],
                 $title,
                 $description,
@@ -305,9 +330,24 @@ class IntegrationService {
                 $phpClass,
                 $iframeUrl,
             );
+        } else {
+            $row = $this->registryMapper->create(
+                appId:           $appId,
+                integrationType: $integrationType,
+                title:           $title,
+                description:     $description,
+                icon:            $icon,
+                phpClass:        $phpClass,
+                iframeUrl:       $iframeUrl,
+                isBuiltin:       false,
+            );
         }
 
-        return $this->registryMapper->create(
+        // The legacy row is written and every old endpoint works by this
+        // point. Adapting it to a package is additive and never throws — a
+        // failure there must not turn a successful registration into an error
+        // the registering app sees.
+        $this->legacyAdapter->adopt(
             appId:           $appId,
             integrationType: $integrationType,
             title:           $title,
@@ -315,8 +355,9 @@ class IntegrationService {
             icon:            $icon,
             phpClass:        $phpClass,
             iframeUrl:       $iframeUrl,
-            isBuiltin:       false,
         );
+
+        return $row;
     }
 
     /**

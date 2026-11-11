@@ -5,6 +5,7 @@ namespace OCA\TeamHub\BackgroundJob;
 
 use OCA\TeamHub\AppInfo\Application;
 use OCA\TeamHub\Service\AuditIngestionService;
+use OCA\TeamHub\Service\AuditIntegrityService;
 use OCA\TeamHub\Service\AuditService;
 use OCP\AppFramework\Utility\ITimeFactory;
 use OCP\BackgroundJob\TimedJob;
@@ -15,7 +16,10 @@ use Psr\Log\LoggerInterface;
  * Hourly job that:
  *   1. Mirrors oc_activity (app=circles + app=files) into teamhub_audit_log.
  *   2. Snapshot-diffs oc_share to surface share.created/changed/deleted.
- *   3. Purges teamhub_audit_log rows older than the configured retention.
+ *   3. Anchors the tamper-evidence chain over everything appended since the
+ *      last pass (v4.13.17).
+ *   4. Purges teamhub_audit_log rows older than the configured retention, and
+ *      records that purge in the chain.
  *
  * Registered via appinfo/info.xml <background-jobs>. Runs via NC's standard
  * job runner (cron / webcron / ajax).
@@ -39,6 +43,11 @@ class AuditMirrorJob extends TimedJob {
         ITimeFactory                    $time,
         private AuditIngestionService   $ingestion,
         private AuditService            $audit,
+        // v4.13.17 — the tamper-evidence chain. Anchoring is this job's,
+        // because it is the one place in the app that is single-threaded and
+        // already runs hourly: see AuditIntegrityService for why the chain is
+        // not written at insert time.
+        private AuditIntegrityService   $integrity,
         private IAppConfig              $appConfig,
         private LoggerInterface         $logger,
     ) {
@@ -103,11 +112,34 @@ class AuditMirrorJob extends TimedJob {
             ]);
         }
 
-        // 5. Purge — runs every cycle regardless of upstream failures.
+        // 5. Anchor everything appended since the last pass — BEFORE the purge,
+        //    so rows this cycle is about to delete are covered by an anchor the
+        //    purge record then supersedes. Anchoring after would leave the
+        //    deleted range never anchored and therefore never provably deleted.
+        try {
+            $anchored = $this->integrity->anchor();
+            if ($anchored['anchored']) {
+                $this->logger->info('[TeamHub][AuditMirrorJob] Audit chain anchored', [
+                    'from_id' => $anchored['fromId'], 'to_id' => $anchored['toId'],
+                    'rows' => $anchored['rows'], 'app' => Application::APP_ID,
+                ]);
+            }
+        } catch (\Throwable $e) {
+            $this->logger->error('[TeamHub][AuditMirrorJob] Audit anchoring failed', [
+                'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+        }
+
+        // 6. Purge — runs every cycle regardless of upstream failures.
         try {
             $retention = $this->resolveRetentionDays();
+            $boundaryTs = time() - (max(1, $retention) * 86400);
             $purged = $this->audit->purgeOlderThan($retention);
             if ($purged > 0) {
+                // The chain has to say that this deletion was ours. Appended
+                // after the delete, with what the delete actually did.
+                $this->integrity->recordPurge($boundaryTs, $purged);
+
                 $this->logger->info('[TeamHub][AuditMirrorJob] Purged old rows', [
                     'purged' => $purged, 'retention_days' => $retention,
                     'app' => Application::APP_ID,

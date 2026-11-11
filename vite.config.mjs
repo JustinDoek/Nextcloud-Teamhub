@@ -86,6 +86,12 @@ export default createAppConfig(
 		// v4.8.18 — the "Request review" file action, loaded into the Files
 		// app rather than into a TeamHub page.
 		filesactions: 'src/filesactions.js',
+		// v4.13.52 — the collaboration profile section, loaded into the
+		// Nextcloud **profile** page. Like filesactions it runs inside another
+		// app's page, and like filesactions it earns its keep by importing
+		// nothing: no imports means no vendor chunk and no stylesheet, so this
+		// entry has no template to load CSS from and needs none.
+		peopleprofile: 'src/peopleprofile.js',
 	},
 	{
 		// Extract CSS to files (vite-config default — inlineCSS removed). Each

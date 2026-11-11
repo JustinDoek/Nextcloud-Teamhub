@@ -2,7 +2,7 @@
 	<div class="team-import">
 
 		<p class="team-import__intro">
-			{{ t('teamhub', 'Create many teams at once from a CSV file. Every team is set up exactly as the New Team wizard would — apps, modules and privacy settings all follow the template and policy you name in each row — and each team gets the owner and team admins you name, which the wizard cannot do.') }}
+			{{ t('teamhub', 'Create many teams at once from a CSV file. Every team is set up exactly as the New Team wizard would (apps, modules and privacy settings all follow the template and policy you name in each row), and each team gets the owner and team admins you name, which the wizard cannot do.') }}
 		</p>
 
 		<!-- Status region. Transient only, so a screen reader hears the outcome
@@ -41,37 +41,77 @@
 				{{ t('teamhub', 'One row per team, with a header row. Up to {rows} teams and 2 MB per file. Columns may be separated by a comma, a semicolon or a tab.', { rows: maxRows }) }}
 			</p>
 
-			<h4 class="team-import__heading">{{ t('teamhub', 'Columns') }}</h4>
-			<div class="team-import__table-wrap">
-				<table class="team-import__table">
-					<thead>
-						<tr>
-							<th scope="col">{{ t('teamhub', 'Column') }}</th>
-							<th scope="col">{{ t('teamhub', 'Required') }}</th>
-							<th scope="col">{{ t('teamhub', 'Accepted values') }}</th>
-						</tr>
-					</thead>
-					<tbody>
-						<tr v-for="column in columnReference" :key="column.name">
-							<td><code>{{ column.name }}</code></td>
-							<td>{{ column.required ? t('teamhub', 'Yes') : t('teamhub', 'No') }}</td>
-							<td>{{ column.values }}</td>
-						</tr>
-					</tbody>
-				</table>
+			<!-- ── Columns ──────────────────────────────────────────────
+			     v4.13.58 — the column reference is documentation, and it sat as
+			     a seven-row table plus three paragraphs between the file picker
+			     and the history (Justin, 2026-10-31). Behind the (i) it is one
+			     click away for the administrator writing their first CSV and
+			     out of the way of the one who has written twenty. Same
+			     affordance and same component as the Team creation tab's rows. -->
+			<div class="team-import__heading-row">
+				<h4 class="team-import__heading">{{ t('teamhub', 'Columns') }}</h4>
+				<InfoHint
+					controls="team-import-columns"
+					:open="columnsOpen"
+					:label="t('teamhub', 'About the columns a row may name')"
+					@toggle="columnsOpen = !columnsOpen" />
 			</div>
+			<div v-if="columnsOpen" id="team-import-columns" class="team-import__hint-panel">
+				<div class="team-import__table-wrap">
+					<table class="team-import__table">
+						<thead>
+							<tr>
+								<th scope="col">{{ t('teamhub', 'Column') }}</th>
+								<th scope="col">{{ t('teamhub', 'Required') }}</th>
+								<th scope="col">{{ t('teamhub', 'Accepted values') }}</th>
+							</tr>
+						</thead>
+						<tbody>
+							<tr v-for="column in columnReference" :key="column.name">
+								<td><code>{{ column.name }}</code></td>
+								<td>{{ column.required ? t('teamhub', 'Yes') : t('teamhub', 'No') }}</td>
+								<td>{{ column.values }}</td>
+							</tr>
+						</tbody>
+					</table>
+				</div>
 
-			<p class="team-import__hint">
-				{{ t('teamhub', 'Cells that hold more than one value are split on a semicolon or a vertical bar, so one of the two always works whichever column separator your spreadsheet used.') }}
-			</p>
+				<p class="team-import__hint">
+					{{ t('teamhub', 'Cells that hold more than one value are split on a semicolon or a vertical bar, so one of the two always works whichever column separator your spreadsheet used.') }}
+				</p>
 
-			<p class="team-import__hint">
-				{{ t('teamhub', 'Every name in the admin column and every member is checked against a real account before anything is created. Names are matched without regard to case, and the preview shows you which account each one resolved to. A row whose first admin matches no account is never created; a later admin or a member with no matching account is dropped and the rest of the team is created without them.') }}
-			</p>
+				<p class="team-import__hint">
+					{{ t('teamhub', 'Every name in the admin column and every member is checked against a real account before anything is created. Names are matched without regard to case, and the preview shows you which account each one resolved to. A row whose first admin matches no account is never created; a later admin or a member with no matching account is dropped and the rest of the team is created without them.') }}
+				</p>
+			</div>
 
 			<!-- ── Recent runs ─────────────────────────────────────────── -->
 			<template v-if="recent.length">
-				<h4 class="team-import__heading">{{ t('teamhub', 'Recent imports') }}</h4>
+				<div class="team-import__heading-row">
+					<h4 class="team-import__heading">{{ t('teamhub', 'Recent imports') }}</h4>
+					<!-- v4.13.58 — the history is a courtesy, not a record: the
+					     run that matters is the one on screen, and a finished
+					     run's rows are kept only so the counts can be read back.
+					     Clearing drops every run except one still `running`, so
+					     the Open button below can never be orphaned by this. An
+					     unconfirmed preview goes with the rest: it is not live
+					     work, it is a file somebody walked away from. -->
+					<!-- `title` only, no `aria-label`: the button has visible
+					     text, and an aria-label would replace what a voice-control
+					     user reads off the screen. The pair is for icon-only
+					     buttons (/ui-standards). -->
+					<NcButton
+						variant="tertiary"
+						:disabled="clearingRecent || !clearableRuns"
+						:title="t('teamhub', 'Clear the list of recent imports')"
+						@click="clearRecent">
+						<template #icon>
+							<NcLoadingIcon v-if="clearingRecent" :size="iconBody" />
+							<TrashCanOutlineIcon v-else :size="iconBody" />
+						</template>
+						{{ t('teamhub', 'Clear list') }}
+					</NcButton>
+				</div>
 				<div class="team-import__table-wrap">
 					<table class="team-import__table">
 						<thead>
@@ -174,7 +214,7 @@
 							     rule resolved to, and a cell that reads back what
 							     was typed cannot do that. Em dash, not empty, so
 							     the cell is never mistaken for a rendering fault. -->
-							<td>{{ row.admins && row.admins.length ? row.admins.join(', ') : '—' }}</td>
+							<td>{{ row.admins && row.admins.length ? row.admins.join(', ') : 'Not set' }}</td>
 							<td>{{ row.member_count }}</td>
 							<td>
 								<!-- The word is the signal; the colour only reinforces it. -->
@@ -230,8 +270,8 @@
 				<h3 class="team-import__confirm-title">{{ t('teamhub', 'Create these teams?') }}</h3>
 				<p class="team-import__confirm-body">
 					{{ n('teamhub',
-						'{n} team will be created, with its apps, privacy settings and modules. This cannot be undone from here — a team created by mistake has to be deleted individually.',
-						'{n} teams will be created, each with its apps, privacy settings and modules. This cannot be undone from here — a team created by mistake has to be deleted individually.',
+						'{n} team will be created, with its apps, privacy settings and modules. This cannot be undone from here. A team created by mistake has to be deleted individually.',
+						'{n} teams will be created, each with its apps, privacy settings and modules. This cannot be undone from here. A team created by mistake has to be deleted individually.',
 						summary.ready, { n: summary.ready }) }}
 				</p>
 				<div class="team-import__actions">
@@ -256,6 +296,8 @@ import axios from '@nextcloud/axios'
 import { NcButton, NcEmptyContent, NcLoadingIcon, NcModal, NcProgressBar } from '@nextcloud/vue'
 import DownloadIcon from 'vue-material-design-icons/Download.vue'
 import FileTableOutlineIcon from 'vue-material-design-icons/FileTableOutline.vue'
+import TrashCanOutlineIcon from 'vue-material-design-icons/TrashCanOutline.vue'
+import InfoHint from './InfoHint.vue'
 
 import { ICON_BODY, ICON_HERO } from '../../constants/uiTokens.js'
 
@@ -281,12 +323,15 @@ import { ICON_BODY, ICON_HERO } from '../../constants/uiTokens.js'
  */
 export default {
 	name: 'TeamImportPanel',
-	components: { NcButton, NcEmptyContent, NcLoadingIcon, NcModal, NcProgressBar, DownloadIcon, FileTableOutlineIcon },
+	components: { NcButton, NcEmptyContent, NcLoadingIcon, NcModal, NcProgressBar, DownloadIcon, FileTableOutlineIcon, TrashCanOutlineIcon, InfoHint },
 
 	data() {
 		return {
 			uploading: false,
 			processing: false,
+			/** Whether the column reference behind the (i) is open (v4.13.58). */
+			columnsOpen: false,
+			clearingRecent: false,
 			// Set when the admin cancels or resets, so a /process response that
 			// was already in flight cannot bring the dismissed run back.
 			abandoned: false,
@@ -361,6 +406,21 @@ export default {
 		},
 
 		/**
+		 * Is there anything *Clear list* would actually remove? (v4.13.58)
+		 *
+		 * A `running` run is in flight: the server refuses to clear it and the
+		 * *Open the import that is still running* button below would be orphaned
+		 * if it went. Everything else is history, `validated` included — a
+		 * validated run is a preview nobody confirmed, and nothing in this panel
+		 * can reach one again, so leaving them protected (as v4.13.58 first did)
+		 * meant a list of abandoned previews disabled the button that exists to
+		 * empty it. Mirrors `deleteFinishedImports()`; keep the two in step.
+		 */
+		clearableRuns() {
+			return this.recent.some(run => run.status !== 'running')
+		},
+
+		/**
 		 * Template keys as a readable list, from the instance's own templates.
 		 *
 		 * Not a hard-coded string: the three keys have been admin-editable rows
@@ -392,7 +452,7 @@ export default {
 				{ name: 'project_mode', required: false, values: t('teamhub', 'advanced or basic. Only read for the project template; defaults to advanced.') },
 				{ name: 'admin',        required: true,  values: t('teamhub', 'One or more account names. The first becomes the team owner; the rest become team admins. Capitals, spaces and accents are all fine, and names are matched without regard to case.') },
 				{ name: 'members',      required: false, values: t('teamhub', 'Account names, group:<group name> or team:<team name>. All three are matched without regard to case; team: also accepts a team ID. A name cannot itself contain a semicolon or a vertical bar.') },
-				{ name: 'expires',      required: false, values: t('teamhub', 'A date as YYYY-MM-DD, in the future. Empty means the team has no end date. Only read when the row’s template allows an expiration date — a date on any other row is ignored with a warning.') },
+				{ name: 'expires',      required: false, values: t('teamhub', 'A date as YYYY-MM-DD, in the future. Empty means the team has no end date. Only read when the row’s template allows an expiration date. A date on any other row is ignored with a warning.') },
 				{
 					name: 'policy',
 					required: false,
@@ -431,6 +491,31 @@ export default {
 				this.recent = []
 			} finally {
 				this.loadingRecent = false
+			}
+		},
+
+		/**
+		 * Drop the finished runs from the history (v4.13.58).
+		 *
+		 * The server decides what "finished" means and leaves a validated or
+		 * running run alone, so this cannot take the run the Open button below
+		 * points at. The list is re-read rather than spliced locally: the
+		 * response says how many went, and a reload is the only thing that
+		 * cannot disagree with the server about what is left.
+		 */
+		async clearRecent() {
+			this.clearingRecent = true
+			this.error = null
+			this.notice = null
+			try {
+				const { data } = await axios.delete(generateUrl('/apps/teamhub/api/v1/admin/import/teams'))
+				await this.fetchRecent()
+				const removed = Number(data?.removed) || 0
+				this.notice = n('teamhub', '{n} import removed from the list', '{n} imports removed from the list', removed, { n: removed })
+			} catch (e) {
+				this.error = this.errorMessage(e, t('teamhub', 'The list could not be cleared.'))
+			} finally {
+				this.clearingRecent = false
 			}
 		},
 
@@ -680,7 +765,7 @@ export default {
 				department: t('teamhub', 'Department'),
 			}
 			const live = this.templates.find(tpl => tpl.templateKey === template)?.label
-			const base = live || labels[template] || template || '—'
+			const base = live || labels[template] || template || 'Not set'
 			if (template !== 'project' || !projectMode) return base
 			const mode = projectMode === 'advanced'
 				// TRANSLATORS: project setup mode — the full guided project experience
@@ -724,7 +809,7 @@ export default {
 		},
 
 		formatTimestamp(seconds) {
-			if (!seconds) return '—'
+			if (!seconds) return 'Not set'
 			return formatDateTime(seconds * 1000)
 		},
 
@@ -769,6 +854,33 @@ export default {
 	margin: 8px 0 0;
 	font-size: var(--th-font-heading, 16px);
 	font-weight: var(--th-font-weight-bold, 700);
+}
+
+/* v4.13.58 — a sub-heading with something beside it: the (i) over the column
+   reference, and Clear list over the history. The row owns the top margin and
+   the heading gives up its own, so `align-items: center` lines the control up
+   on the heading's text rather than on a box that is 8px taller than it. */
+.team-import__heading-row {
+	display: flex;
+	align-items: center;
+	gap: var(--th-space-sm, 8px);
+	flex-wrap: wrap;
+	margin-block-start: var(--th-space-sm, 8px);
+}
+
+.team-import__heading-row .team-import__heading {
+	margin: 0;
+}
+
+/* What the (i) opens. Same tinted block as `.admin-grid__hint` on the Team
+   creation tab, so an explanation looks the same wherever it is opened. */
+.team-import__hint-panel {
+	display: flex;
+	flex-direction: column;
+	gap: var(--th-space-md, 12px);
+	padding: var(--th-space-md, 12px);
+	border-radius: var(--th-radius-card);
+	background: var(--color-background-hover);
 }
 
 .team-import__hint {

@@ -55,7 +55,13 @@ use Psr\Log\LoggerInterface;
  * `attention` on a step does not stop the run (the workspace is usable);
  * `failed` does. An operation whose steps all ended but one of them needs
  * attention is `attention`, and the team page says so until a person has
- * retried or acknowledged it.
+ * retried it ({@see retry()}) or accepted it ({@see acknowledge()}).
+ *
+ * **`acknowledge()` was missing until v4.13.30**, although this paragraph
+ * described it from v4.9.6 on. A retry is not always an exit: a step re-runs
+ * against the frozen request, so a note about something the template no longer
+ * carries comes back every time. Without an accept, such an operation says
+ * "something to look at" for ever.
  *
  * ## Retry and rollback
  *
@@ -276,6 +282,68 @@ class ProvisioningService {
         $this->audit->log(AuditService::INSTANCE_SCOPE, 'provisioning.retried', $this->currentUserId(), 'provisioning', (string)$id, ['step' => $stepKey, 'reset' => $reset]);
 
         return $this->run($id);
+    }
+
+    /**
+     * Accept an operation that finished with something to look at, and stop
+     * the team page saying so.
+     *
+     * **This is the "or acknowledged it" that the State section above has
+     * promised since v4.9.6 and that was never built.** Until now `attention`
+     * had exactly one exit, `retry()`, and that is not always an exit at all:
+     * a step re-runs against `$ctx`, the request frozen when the operation
+     * started, so a note about an integration the template no longer carries
+     * comes straight back. Justin, 2026-10-26: an OpenProject demo team kept
+     * reporting Intravox after Pages, Collectives and Intravox had all been
+     * taken out of the template, and nothing in the product could clear it.
+     *
+     * Only `attention`, never `failed`. An attention note means the workspace
+     * is usable and something is worth a look; a failed required step means it
+     * is not, and letting that be waved away would turn a broken workspace
+     * into a silent one.
+     *
+     * The step rows are left exactly as they are. What the operation did and
+     * did not manage is a record, and a person deciding it does not matter is
+     * not the same as it having worked: the steps keep saying `attention` and
+     * the details pane still shows them, while the banner stops nagging.
+     *
+     * **Who accepted it and when lives in the audit log, not on the row.**
+     * There is deliberately no `acknowledged_by` column: it would need a
+     * migration for a fact the audit trail already carries, and
+     * `ProvisioningMapper::updateOperation()` writes only a fixed set of
+     * columns and silently drops anything else, so a field added here without
+     * one would look recorded and record nothing.
+     *
+     * @return array<string,mixed> The operation as `status()` returns it.
+     */
+    public function acknowledge(int $id): array {
+        $op = $this->requireRunnable($id);
+        if ($op['status'] !== self::OP_ATTENTION) {
+            throw new ValidationException(
+                'Only an operation that finished with something to look at can be accepted'
+            );
+        }
+
+        $this->mapper->updateOperation($id, [
+            'status'       => self::OP_COMPLETED,
+            'completed_at' => time(),
+        ]);
+        $this->audit->log(
+            AuditService::INSTANCE_SCOPE,
+            'provisioning.acknowledged',
+            $this->currentUserId(),
+            'provisioning',
+            (string)$id,
+            ['openSteps' => array_values(array_map(
+                static fn (array $s): string => $s['key'],
+                array_filter(
+                    $this->mapper->findSteps($id),
+                    static fn (array $s): bool => $s['status'] === 'attention',
+                ),
+            ))],
+        );
+
+        return $this->status($id);
     }
 
     // ─────────────────────────────────────────────────────────────────────

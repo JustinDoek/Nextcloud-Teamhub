@@ -6,6 +6,8 @@ import { getCurrentUser } from '@nextcloud/auth'
 import { getCanonicalLocale } from '@nextcloud/l10n'
 import { teamImageUrl, uploadTeamsAvatar } from '../lib/teamAvatar.js'
 import { fileOpenUrl, isNarrowViewport, withoutSidebarRequest } from '../lib/filesCollab.js'
+import { reconcileTeams } from '../lib/teamListReconcile.js'
+import { mergeMessages } from '../lib/messageStreamMerge.js'
 import {
     buildAllTabDescriptors,
     buildAvailableTabs,
@@ -121,6 +123,15 @@ export default createStore({
         teamTasks: [],         // VTODO tasks from the team calendar (NC Tasks app)
         teamWidgets: [],        // enabled sidebar widgets for the current team
         teamMenuItems: [],      // enabled menu_item integrations for the current team
+        // v4.13.23 — the package model's half of the same two surfaces. Kept
+        // in separate arrays rather than merged into the two above, because a
+        // capability is addressed by app_id/integration_key/capability_key and
+        // a legacy registration by registry_id: merging them would mean every
+        // consumer carrying both shapes and branching on which one it got.
+        // Legacy rows keep rendering exactly as before; a renderer that wants
+        // the new ones opts in.
+        packageWidgets: [],     // shown widget capabilities for the current team
+        packageTabs: [],        // shown iframe-tab capabilities for the current team
         intravoxAvailable: false,
         intravoxParentPath: 'en/teamhub',
         presenceConfig: { presence_enabled: false, hide_reasons: false },
@@ -182,6 +193,7 @@ export default createStore({
         //   default_tab    — tab key opened when a member enters the team
         // Rides along with the layout bundle, same pattern as messagesConfig.
         dashboardConfig: { hidden_widgets: [], default_tab: 'msgstream' },
+        dashboardLayoutRevision: 0,
         // Published so Manage Team → Settings → Dashboard can offer exactly the
         // tabs/widgets this member actually has, without re-deriving the
         // (complex) activation logic there. Built by src/lib/teamTabs.js.
@@ -203,10 +215,21 @@ export default createStore({
         // the pair (pendingTeamAction, currentTeamId), fires the action once
         // the team is mounted, then clears the flag. Values: 'invite'|'leave'|null.
         pendingTeamAction: null,
-        // Team template label (v4.0.2): 'collaboration'|'project'|'department'|null.
-        // Set once by CreateTeamView after team creation; null for legacy
-        // teams so the frontend renders no template badge.
+        // Team template key (v4.0.2): any key in `teamhub_template`, or null
+        // for a legacy team with no row, so the frontend renders no badge.
+        // Set once by CreateTeamView after team creation.
         teamType: null,
+        // v4.13.28 — the same template as { key, label, isSeeded }, or null.
+        // The key alone stopped being enough to render a badge from when
+        // v4.13.24 let an administrator create and rename a template: the
+        // label is theirs, and only a seeded key has a translation. Rides the
+        // layout bundle beside teamType; see TeamTypeService::getTemplateFor.
+        teamTemplate: null,
+        // v4.13.1 - the current team's banner: { url } from the layout
+        // bundle, url null when the team has none. Deliberately not on the
+        // teams list: one app-data lookup per team open is cheap, one per
+        // sidebar row is not, and only the open team's banner is ever drawn.
+        teamBanner: { url: null },
         // v4.6.13 — optional expiration date for the current team, or null.
         // Rides the layout bundle next to teamType. Shape:
         // { expiresAt, expiresOn, daysRemaining, expired, warning, setBy, … }
@@ -333,8 +356,13 @@ export default createStore({
          * the list that shipped before it — there is no catch-all container.
          *
          * `hasUpdates` is derived here rather than stored, from the same
-         * `unread` the per-team counter bubble reads. That is what stops the
-         * bold group name and the badge inside it ever disagreeing.
+         * numbers the per-team counter bubbles read. That is what stops the
+         * bold group name and the badge inside it ever disagreeing: unread
+         * messages, and — since v4.13.15 — a service team's unclaimed
+         * requests, which is the other badge a row can carry. A collapsed
+         * group hides its rows, so a mark that answered only to `unread`
+         * left a new service request invisible until the reader opened the
+         * group.
          *
          * @return {{groups: Array<object>, ungrouped: Array<object>}}
          */
@@ -344,7 +372,7 @@ export default createStore({
         /** v4.12.2 - the sub-teams of one team, as the Sub-teams tab lists them. */
         subTeamsOf: (state) => (parentId) => (state.subTeamsByParent || {})[parentId] || [],
 
-        sidebarTeamGroups: (state) => {
+        sidebarTeamGroups: (state, getters) => {
             const teams = state.teams || []
 
             // Not fetched yet — every team loose. See the state comment.
@@ -377,12 +405,17 @@ export default createStore({
                 .slice()
                 .sort((a, b) => (a.name || '').localeCompare(b.name || '', locale))
 
+            // A namespaced getter is reachable from a root getter by its
+            // full path, but only once that module has registered — guarded
+            // so a store built without it still renders a sidebar.
+            const unclaimedFor = getters['serviceTeams/unclaimedFor'] || (() => 0)
+
             const withTeams = (g) => {
                 const groupTeams = buckets[g.id] || []
                 return {
                     ...g,
                     teams: groupTeams,
-                    hasUpdates: groupTeams.some(t => (t.unread || 0) > 0),
+                    hasUpdates: groupTeams.some(t => (t.unread || 0) > 0 || unclaimedFor(t.id) > 0),
                 }
             }
 
@@ -579,13 +612,18 @@ export default createStore({
         // Patch only the unread count on each team — does NOT replace the
         // teams array, so Vue does not tear down and re-mount navigation
         // items. Safe to call on a background poll.
-        UPDATE_UNREAD_COUNTS(state, teams) {
+        /**
+         * v4.13.18 — what the 60s sidebar poll commits, and what makes a team
+         * joined or left since page load appear or go without a reload.
+         *
+         * Replaces `UPDATE_UNREAD_COUNTS`, which is deleted rather than kept
+         * beside it: the two differ only in that this one is correct. The
+         * three rules and the reason each exists are in
+         * `src/lib/teamListReconcile.js`.
+         */
+        RECONCILE_TEAMS(state, teams) {
             if (!Array.isArray(teams)) return
-            const map = {}
-            teams.forEach(t => { map[t.id] = t.unread || 0 })
-            state.teams.forEach(t => {
-                t.unread = map[t.id] ?? t.unread ?? 0 // Vue 3: proxy reactivity — Vue.set not needed
-            })
+            state.teams = reconcileTeams(state.teams, teams, state.currentTeamId)
         },
         UPDATE_TEAM_IMAGE(state, { teamId, imageUrl }) {
             const team = state.teams.find(t => t.id === teamId)
@@ -641,6 +679,17 @@ export default createStore({
         SET_CALENDAR_EMBED_EVENT(state, ev) { state.calendarEmbedEvent = ev },
         SET_DECK_EMBED_CARD_URL(state, url) { state.deckEmbedCardUrl = url },
         SET_MESSAGES(state, messages) { state.messages = messages },
+        /**
+         * v4.13.20 — what the silent refresh of the open team's stream
+         * commits. Distinct from `SET_MESSAGES`, which replaces the array and
+         * every object in it: that is right when the reader asked for a
+         * different page and wrong once a minute underneath them. The two
+         * rules are in `src/lib/messageStreamMerge.js`.
+         */
+        MERGE_MESSAGES(state, messages) {
+            if (!Array.isArray(messages)) return
+            state.messages = mergeMessages(state.messages, messages)
+        },
         SET_PINNED_MESSAGE(state, message) { state.pinnedMessage = message },
         SET_MESSAGES_PAGE(state, page) { state.messagesPage = page },
         SET_MESSAGES_TOTAL(state, total) { state.messagesTotal = total },
@@ -777,6 +826,8 @@ export default createStore({
         SET_TEAM_TASKS(state, tasks) { state.teamTasks = tasks },
         SET_TEAM_WIDGETS(state, widgets) { state.teamWidgets = widgets },
         SET_TEAM_MENU_ITEMS(state, items) { state.teamMenuItems = items },
+        SET_PACKAGE_WIDGETS(state, widgets) { state.packageWidgets = widgets },
+        SET_PACKAGE_TABS(state, tabs) { state.packageTabs = tabs },
         SET_PRESENCE_CONFIG(state, config) { state.presenceConfig = config },
         SET_PRESENCE_MODULE_ENABLED(state, val) { state.presenceModuleEnabled = val },
         SET_DECISIONS_CONFIG(state, config) { state.decisionsConfig = config },
@@ -800,12 +851,17 @@ export default createStore({
         },
         SET_COLLECTIVES_EMBED_PAGE_URL(state, url) { state.collectivesEmbedPageUrl = url },
         SET_DASHBOARD_CONFIG(state, config) { state.dashboardConfig = config },
+        INCREMENT_DASHBOARD_LAYOUT_REVISION(state) { state.dashboardLayoutRevision += 1 },
         SET_AVAILABLE_TABS(state, tabs) { state.availableTabs = tabs },
         SET_DASHBOARD_WIDGET_CATALOG(state, catalog) { state.dashboardWidgetCatalog = catalog },
         SET_AVAILABLE_TABS_TEAM_ID(state, teamId) { state.availableTabsTeamId = teamId },
         SET_TEAM_TAB_ORDER(state, order) { state.teamTabOrder = Array.isArray(order) ? order : [] },
         SET_PENDING_TEAM_ACTION(state, action) { state.pendingTeamAction = action },
         SET_TEAM_TYPE(state, teamType) { state.teamType = teamType },
+        SET_TEAM_TEMPLATE(state, teamTemplate) { state.teamTemplate = teamTemplate },
+        SET_TEAM_BANNER(state, banner) {
+            state.teamBanner = { url: (banner && typeof banner.url === 'string' && banner.url) ? banner.url : null }
+        },
         SET_TEAM_EXPIRY(state, teamExpiry) { state.teamExpiry = teamExpiry },
         SET_BUDGET_CONFIG(state, config) { state.budgetConfig = config },
         SET_TIME_CONFIG(state, config) { state.timeConfig = config },
@@ -1210,10 +1266,18 @@ export default createStore({
             return data?.results || []
         },
 
-        /** v4.12.5 - remove one person from a sub-team. */
-        async removeSubTeamMember({ dispatch }, { teamId, subTeamId, userId }) {
+        /**
+         * v4.12.5 - remove one person from a sub-team.
+         *
+         * v4.13.3 - or one invited group, with `type: 'group'`. The id is
+         * then the group's `singleId` (the members payload's `groupId`),
+         * because that is the key the `circles_member` row is deleted by -
+         * the same shape `team#removeMember` takes for a main team.
+         */
+        async removeSubTeamMember({ dispatch }, { teamId, subTeamId, userId, type = 'user' }) {
             await axios.delete(
                 generateUrl(`/apps/teamhub/api/v1/teams/${encodeURIComponent(teamId)}/sub-teams/${encodeURIComponent(subTeamId)}/members/${encodeURIComponent(userId)}`),
+                { params: type === 'group' ? { type: 'group' } : {} },
             )
             await dispatch('fetchSubTeams', teamId)
         },
@@ -1314,7 +1378,7 @@ export default createStore({
             }))
         },
 
-        async selectTeam({ commit, dispatch }, teamId) {
+        async selectTeam({ commit, dispatch, state }, teamId) {
             commit('SET_CURRENT_TEAM', teamId)
             commit('SET_VIEW', 'msgstream')
             commit('SET_MESSAGES', [])
@@ -1331,6 +1395,8 @@ export default createStore({
             commit('SET_WEB_LINKS', [])
             commit('SET_TEAM_WIDGETS', [])
             commit('SET_TEAM_MENU_ITEMS', [])
+            commit('SET_PACKAGE_WIDGETS', [])
+            commit('SET_PACKAGE_TABS', [])
             // Reset project fact so a previous team's stepper never flashes before
             // the layout bundle for the newly selected team arrives.
             commit('SET_PROJECT', { isProject: false, mode: null, phase: null, startDate: null, targetEnd: null })
@@ -1342,6 +1408,19 @@ export default createStore({
             commit('SET_AVAILABLE_TABS_TEAM_ID', null)
             commit('SET_TEAM_TAB_ORDER', [])
             commit('SET_DASHBOARD_CONFIG', { hidden_widgets: [], default_tab: 'msgstream' })
+
+            // v4.14.15 - a team another server owns stops here, with the
+            // resets above done and none of the fetches below started
+            // (DESIGN 2.256). Every one of them reads a TeamHub table keyed
+            // by team_id on *this* instance, and for this team those tables
+            // live on the owner's: the requests would answer empty at best
+            // and 404 at worst, and `markTeamSeen` would write a local
+            // last-seen row for a message stream that is not here. App.vue
+            // renders RemoteTeamView for these, which fetches the one
+            // read-only endpoint that does apply.
+            if (state.teams.find(team => team.id === teamId)?.is_remote === true) {
+                return
+            }
 
             // Mark seen immediately (optimistic) + fire-and-forget to backend
             commit('MARK_TEAM_SEEN', teamId)
@@ -1409,11 +1488,19 @@ export default createStore({
             // teams). Reset the store so switching from a labelled team to a
             // legacy one clears the badge.
             commit('SET_TEAM_TYPE', data.teamType ?? null)
+            // v4.13.28 — and the template's own facts, reset for the same
+            // reason: switching to a legacy team must clear the badge.
+            commit('SET_TEAM_TEMPLATE', data.teamTemplate ?? null)
             // v4.6.13 — expiration date, always emitted (null for teams without
             // one). Reset for the same reason as the type above: switching from
             // an expiring team to one with no date must clear the banner rather
             // than leave the previous team's.
             commit('SET_TEAM_EXPIRY', data.teamExpiry ?? null)
+            // v4.13.1 - the banner, always reset for the same reason as the
+            // two facts above: switching from a team with a banner to one
+            // without must clear the strip, not leave the previous team's
+            // picture on screen.
+            commit('SET_TEAM_BANNER', data.teamBanner ?? null)
             // Budget integration (v3.92.0) — per-team toggle rides along
             // with the layout, same pattern as timelineConfig.
             if (data.budgetConfig) {
@@ -1530,6 +1617,52 @@ export default createStore({
                 commit('SET_ERROR', 'Failed to load messages')
             } finally {
                 commit('SET_LOADING', { key: 'messages', value: false })
+            }
+        },
+
+        /**
+         * Silently re-read the open team's newest message page (v4.13.20).
+         *
+         * The gap this closes: `fetchMessages` ran on team select and on a
+         * pager click and nothing else, so a message somebody else posted in
+         * the team you were *reading* never appeared until a reload — while
+         * the sidebar's unread bubble updated on the 60s tick and told you it
+         * was there. Reported by Justin on 2026-10-22.
+         *
+         * Deliberately **not** `fetchMessages`. That one sets
+         * `SET_LOADING: messages`, which swaps the stream for a spinner, and
+         * commits `SET_MESSAGES`, which replaces every message object. Doing
+         * either once a minute underneath a reader is worse than the bug:
+         * the stream would blink, and any card state — an expanded comment
+         * thread, a half-typed reply — would be thrown away.
+         *
+         * Three guards, each of which is the whole point:
+         *
+         *  - **Page 1 only.** On page 3 of the history, pulling in newer
+         *    messages moves the ground under the reader. The newest page is
+         *    the only one where "newer things arrived" means "show them".
+         *  - **A team must be open**, or there is nothing to refresh.
+         *  - **The team is re-checked after the await.** A click on another
+         *    team while this request is in flight would otherwise merge one
+         *    team's messages into another team's stream.
+         */
+        async refreshMessages({ commit, state }) {
+            const teamId = state.currentTeamId
+            if (!teamId) return
+            if ((state.messagesPage || 1) !== 1) return
+            try {
+                const { data } = await axios.get(
+                    generateUrl(`/apps/teamhub/api/v1/teams/${teamId}/messages`),
+                    { params: { page: 1, limit: state.messagesLimit } }
+                )
+                if (state.currentTeamId !== teamId) return
+                commit('MERGE_MESSAGES', Array.isArray(data.messages) ? data.messages : [])
+                commit('SET_MESSAGES_TOTAL', data.total || 0)
+                commit('SET_PINNED_MESSAGE', data.pinned || null)
+            } catch (e) {
+                // Non-critical — silently ignore, exactly as the sidebar poll
+                // does. A failed background refresh must not raise a banner
+                // over a stream the reader can still read.
             }
         },
 
@@ -1703,16 +1836,21 @@ export default createStore({
         },
 
         /**
-         * Silently re-fetch the team list to refresh unread counts in the
-         * sidebar. Does NOT set the loading spinner — this runs in the
-         * background every 60s. Only updates the teams array in place so
-         * the sidebar re-renders its NcCounterBubble values.
+         * Silently re-fetch the team list. Does NOT set the loading spinner —
+         * this runs in the background every 60s and whenever the tab comes
+         * back to the foreground.
+         *
+         * v4.13.18 — commits `RECONCILE_TEAMS`, so a team joined or left since
+         * the page loaded appears or goes without a reload. It used to commit
+         * `UPDATE_UNREAD_COUNTS`, which only ever refreshed the counter
+         * bubbles; see `RECONCILE_TEAMS` for what that cost. The action keeps
+         * its name because the counters are still what it is for.
          */
         async refreshUnreadCounts({ commit }) {
             try {
                 const { data } = await axios.get(generateUrl('/apps/teamhub/api/v1/teams'))
                 if (Array.isArray(data)) {
-                    commit('UPDATE_UNREAD_COUNTS', data)
+                    commit('RECONCILE_TEAMS', data)
                 }
             } catch (e) {
                 // Non-critical — silently ignore
@@ -1850,16 +1988,35 @@ export default createStore({
          * Response shape: { widgets: [...], menu_items: [...] }
          */
         async fetchTeamIntegrations({ commit }, teamId) {
-            try {
-                const { data } = await axios.get(
-                    generateUrl(`/apps/teamhub/api/v1/teams/${teamId}/integrations`)
-                )
+            // Two reads, two independent failures. The legacy registry and the
+            // package model are separate mechanisms and an instance can have
+            // either, both or neither; one of them erroring must not blank the
+            // other's widgets.
+            //
+            // Settled rather than awaited in series for the same reason, and
+            // because a team's home should not wait for the slower of the two.
+            const [legacy, packages] = await Promise.allSettled([
+                axios.get(generateUrl(`/apps/teamhub/api/v1/teams/${teamId}/integrations`)),
+                axios.get(generateUrl(`/apps/teamhub/api/v1/teams/${teamId}/integrations/packages`)),
+            ])
+
+            if (legacy.status === 'fulfilled') {
+                const data = legacy.value.data || {}
                 commit('SET_TEAM_WIDGETS',    Array.isArray(data.widgets)    ? data.widgets    : [])
                 commit('SET_TEAM_MENU_ITEMS', Array.isArray(data.menu_items) ? data.menu_items : [])
-            } catch (e) {
+            } else {
                 // Non-fatal — integrations are optional.
                 commit('SET_TEAM_WIDGETS', [])
                 commit('SET_TEAM_MENU_ITEMS', [])
+            }
+
+            if (packages.status === 'fulfilled') {
+                const data = packages.value.data || {}
+                commit('SET_PACKAGE_WIDGETS', Array.isArray(data.widgets)    ? data.widgets    : [])
+                commit('SET_PACKAGE_TABS',    Array.isArray(data.menu_items) ? data.menu_items : [])
+            } else {
+                commit('SET_PACKAGE_WIDGETS', [])
+                commit('SET_PACKAGE_TABS', [])
             }
         },
 
