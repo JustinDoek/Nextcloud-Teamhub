@@ -25,6 +25,10 @@
 
 import { createApp } from 'vue'
 import RequestFileReviewModal from './components/RequestFileReviewModal.vue'
+import { installPluralGuard } from './lib/pluralGuard.js'
+
+// Issue #112, see src/lib/pluralGuard.js.
+installPluralGuard()
 
 /**
  * Mount the request modal for one file.

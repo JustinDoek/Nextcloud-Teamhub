@@ -1627,6 +1627,13 @@ export default {
 
                 window.location.href = data.url
             } catch (e) {
+                // v4.20.0 — a team admin switched it off after this page
+                // loaded. Say so, and refresh the rows so the action goes.
+                if (e?.response?.status === 403) {
+                    showError(t('teamhub', 'Emailing all members is switched off for this team.'))
+                    this.$store.dispatch('fetchTeams')
+                    return
+                }
                 showError(t('teamhub', 'Could not work out who to write to. Try again.'))
             }
         },

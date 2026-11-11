@@ -73,7 +73,9 @@
                 <template #icon><AccountPlus :size="iconNav" /></template>
                 {{ t('teamhub', 'Invite members') }}
             </NcActionButton>
+            <!-- v4.20.0 — hidden when the sub-team switched it off. -->
             <NcActionButton
+                v-if="team.member_mail_enabled !== false"
                 close-after-click
                 :aria-label="t('teamhub', 'Email all team members')"
                 @click="$emit('email-members', team.id)">

@@ -123,6 +123,10 @@ class TeamService {
         // asked on the sidebar path and nowhere else: getUserTeams() is this
         // app's authorisation boundary and a remote team must not widen it.
         private FederatedTeamService $federatedTeams,
+        // v4.20.0 - whether each team offers "Email all members", so the
+        // sidebar hides the action rather than letting it fail. A DI leaf
+        // (IConfig only).
+        private TeamMailSettingService $memberMail,
     ) {
     }
 
@@ -459,6 +463,10 @@ class TeamService {
                     // the sidebar 3-dot action menu to gate Manage team (>=8),
                     // Invite (>=4), Copy link (>=1) and Leave team (1..8).
                     'level'       => $level,
+                    // v4.20.0 - whether the team offers "Email all members".
+                    // Off hides the sidebar action for everyone in the team
+                    // (CLAUDE.md § Permissions); the endpoint refuses as well.
+                    'member_mail_enabled' => $this->memberMail->isEnabled($id),
                     // ── v4.12.2, sub-teams (DESIGN §2.175) ────────────────
                     // This list stays flat. Callers other than the sidebar are
                     // authorisation boundaries — MyWorkService::resolveTeams(),

@@ -6614,5 +6614,9 @@
     "Show teams owned by another Nextcloud server to the people here who belong to them.": "Mostra i team di proprietà di un altro server Nextcloud alle persone qui che ne fanno parte.",
     "TeamHub also checks daily whether such a team still exists on its own server, and removes the local copy once that server says it is gone. A server that cannot be reached is left alone.": "TeamHub verifica anche ogni giorno se un team di questo tipo esiste ancora sul proprio server e rimuove la copia locale non appena quel server segnala che non c’è più. Un server non raggiungibile viene lasciato intatto.",
     "About teams from other servers": "Informazioni sui team di altri server",
+    "Let members write one email to the whole team from the team menu in the sidebar.": "Consenti ai membri di inviare un’unica e-mail a tutto il gruppo dal menu del gruppo nella barra laterale.",
+    "Allow emailing all members of this team": "Consenti l’invio di e-mail a tutti i membri di questo gruppo",
+    "Could not save the email setting. Try again.": "Impossibile salvare l’impostazione e-mail. Riprova.",
+    "Emailing all members is switched off for this team.": "L’invio di e-mail a tutti i membri è disattivato per questo gruppo.",
 },
     "nplurals=2; plural=(n != 1);");

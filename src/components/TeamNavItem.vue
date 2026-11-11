@@ -93,9 +93,12 @@
                  work with is not a privileged act, and the roster
                  of addresses is already member-visible in the
                  Members widget. Ungated like Copy link above,
-                 rather than moderator-gated like Invite. -->
+                 rather than moderator-gated like Invite.
+                 v4.20.0 — unless the team switched it off under Manage
+                 team → Settings; then hidden for everyone, not left to
+                 fail. Only an explicit false is off. -->
             <NcActionButton
-                v-if="!isRemote"
+                v-if="!isRemote && team.member_mail_enabled !== false"
                 close-after-click
                 :aria-label="t('teamhub', 'Email all team members')"
                 @click="$emit('email-members', team.id)">

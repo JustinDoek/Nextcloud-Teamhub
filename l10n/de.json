@@ -6687,7 +6687,11 @@
         "{day} in the afternoon": "{day} am Nachmittag",
         "Show teams owned by another Nextcloud server to the people here who belong to them.": "Teams, die einem anderen Nextcloud-Server gehören, den Personen hier anzeigen, die zu ihnen gehören.",
         "TeamHub also checks daily whether such a team still exists on its own server, and removes the local copy once that server says it is gone. A server that cannot be reached is left alone.": "TeamHub prüft außerdem täglich, ob ein solches Team auf seinem eigenen Server noch vorhanden ist, und entfernt die lokale Kopie, sobald dieser Server meldet, dass es nicht mehr existiert. Ein Server, der nicht erreichbar ist, bleibt unberührt.",
-        "About teams from other servers": "Über Teams von anderen Servern"
+        "About teams from other servers": "Über Teams von anderen Servern",
+        "Let members write one email to the whole team from the team menu in the sidebar.": "Mitglieder können über das Teammenü in der Seitenleiste eine E-Mail an das ganze Team senden.",
+        "Allow emailing all members of this team": "E-Mails an alle Mitglieder dieses Teams erlauben",
+        "Could not save the email setting. Try again.": "Die E-Mail-Einstellung konnte nicht gespeichert werden. Versuchen Sie es erneut.",
+        "Emailing all members is switched off for this team.": "E-Mails an alle Mitglieder sind für dieses Team ausgeschaltet."
     },
     "pluralForm": "nplurals=2; plural=(n != 1);"
 }

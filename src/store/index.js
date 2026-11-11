@@ -625,6 +625,23 @@ export default createStore({
             if (!Array.isArray(teams)) return
             state.teams = reconcileTeams(state.teams, teams, state.currentTeamId)
         },
+        /**
+         * v4.20.0 — Email all members switched on or off in Manage team.
+         * Looks inside `sub_teams` too: the sidebar nests sub-team rows
+         * under their parent, and each carries its own flag.
+         */
+        SET_TEAM_MEMBER_MAIL_ENABLED(state, { teamId, enabled }) {
+            for (const team of state.teams) {
+                if (team.id === teamId) {
+                    team.member_mail_enabled = !!enabled
+                }
+                for (const sub of team.sub_teams || []) {
+                    if (sub.id === teamId) {
+                        sub.member_mail_enabled = !!enabled
+                    }
+                }
+            }
+        },
         UPDATE_TEAM_IMAGE(state, { teamId, imageUrl }) {
             const team = state.teams.find(t => t.id === teamId)
             if (team) {

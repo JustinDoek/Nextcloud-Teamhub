@@ -1,11 +1,15 @@
 import { createApp } from 'vue'
 import PersonalSettingsPanel from './components/PersonalSettingsPanel.vue'
+import { installPluralGuard } from './lib/pluralGuard.js'
 
 // Shared design tokens (typography, radii, colour assignments).
 // Same import as main.js — each entry point owns its own CSS chunk
 // (see vite.config.mjs), so the token block has to be imported once
 // per entry to land in that entry's stylesheet.
 import './styles/widget-tokens.css'
+
+// Issue #112, see src/lib/pluralGuard.js.
+installPluralGuard()
 
 const el = document.getElementById('teamhub-personal-settings')
 if (el) {

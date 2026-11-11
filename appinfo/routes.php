@@ -63,6 +63,9 @@ return [
         // v4.6.26 — literal segment, like /all and /manage above. Safe beside
         // the {userId} route below it: that one is DELETE-only.
         ['name' => 'team#getTeamMailComposeUrl',   'url' => '/api/v1/teams/{teamId}/members/mail',            'verb' => 'GET'],
+        // v4.20.3 — the team's switch for it. Three segments after members/,
+        // so it cannot collide with {userId} (DELETE) or {userId}/level (PUT).
+        ['name' => 'team#saveMemberMailConfig',    'url' => '/api/v1/teams/{teamId}/members/mail/config',     'verb' => 'PUT'],
         ['name' => 'team#removeMember',           'url' => '/api/v1/teams/{teamId}/members/{userId}',        'verb' => 'DELETE'],
         ['name' => 'team#updateMemberLevel',      'url' => '/api/v1/teams/{teamId}/members/{userId}/level',  'verb' => 'PUT'],
         ['name' => 'team#getPendingRequests',     'url' => '/api/v1/teams/{teamId}/pending-requests',        'verb' => 'GET'],

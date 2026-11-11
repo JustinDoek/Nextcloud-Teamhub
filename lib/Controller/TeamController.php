@@ -16,6 +16,7 @@ use OCA\TeamHub\Service\FilesService;
 use OCA\TeamHub\Service\IntravoxService;
 use OCA\TeamHub\Service\LicenseService;
 use OCA\TeamHub\Service\MailClientService;
+use OCA\TeamHub\Service\TeamMailSettingService;
 use OCA\TeamHub\Service\MaintenanceService;
 use OCA\TeamHub\Service\MemberService;
 use OCA\TeamHub\Service\MessageService;
@@ -103,6 +104,9 @@ class TeamController extends Controller {
         // v4.6.26 — decides whether a compose URL points at Nextcloud Mail or
         // hands off to the OS handler. Backs the sidebar's Email all members.
         private MailClientService $mailClientService,
+        // v4.20.0 — whether the team offers Email all members at all. A DI
+        // leaf (IConfig only).
+        private TeamMailSettingService $memberMail,
         // v4.9.4 — an OpenProject team is created with its project or not at
         // all: the link is checked before the circle exists and made right
         // after, inside createTeam(). See TeamOpenProjectLinkService.
@@ -515,6 +519,11 @@ class TeamController extends Controller {
     #[NoAdminRequired]
     public function getTeamMailComposeUrl(string $teamId): JSONResponse {
         try {
+            // v4.20.0 — membership first, so a non-member learns nothing about
+            // the team's setting; then the team's own switch.
+            $this->memberService->requireMemberLevel($teamId);
+            $this->memberMail->requireEnabled($teamId);
+
             $resolved = $this->memberService->getTeamMemberEmailAddresses($teamId);
 
             return new JSONResponse([
@@ -525,6 +534,38 @@ class TeamController extends Controller {
             ]);
         } catch (\Throwable $e) {
             return $this->exceptionResponse($e, 'Failed to build the team mail compose URL', [
+                'teamId' => $teamId,
+            ]);
+        }
+    }
+
+    /**
+     * PUT /api/v1/teams/{teamId}/members/mail/config
+     * Body: { member_mail_enabled: bool }
+     *
+     * v4.20.0 — switch Email all members on or off for this team. Team admin
+     * required, the same gate as the rest of Manage team → Settings. The
+     * current value reaches the client on each sidebar team row
+     * (`member_mail_enabled`), so there is no GET beside this.
+     */
+    #[NoAdminRequired]
+    public function saveMemberMailConfig(string $teamId): JSONResponse {
+        try {
+            $this->memberService->requireAdminLevel($teamId);
+
+            $raw = $this->request->getParam('member_mail_enabled');
+            if ($raw === null) {
+                return new JSONResponse(['error' => 'member_mail_enabled is required'], Http::STATUS_BAD_REQUEST);
+            }
+            $enabled = filter_var($raw, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+            if ($enabled === null) {
+                return new JSONResponse(['error' => 'member_mail_enabled must be a boolean'], Http::STATUS_BAD_REQUEST);
+            }
+            $this->memberMail->setEnabled($teamId, $enabled);
+
+            return new JSONResponse(['member_mail_enabled' => $enabled]);
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Failed to save the email all members setting', [
                 'teamId' => $teamId,
             ]);
         }

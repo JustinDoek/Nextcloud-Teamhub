@@ -6687,7 +6687,11 @@
         "{day} in the afternoon": "{day} om eftermiddagen",
         "Show teams owned by another Nextcloud server to the people here who belong to them.": "Vis teams, der ejes af en anden Nextcloud-server, til de personer her, som er medlem af dem.",
         "TeamHub also checks daily whether such a team still exists on its own server, and removes the local copy once that server says it is gone. A server that cannot be reached is left alone.": "TeamHub kontrollerer også dagligt, om et sådant team stadig findes på sin egen server, og fjerner den lokale kopi, når den server siger, at det er væk. En server, der ikke kan nås, røres ikke.",
-        "About teams from other servers": "Om teams fra andre servere"
+        "About teams from other servers": "Om teams fra andre servere",
+        "Let members write one email to the whole team from the team menu in the sidebar.": "Lad medlemmer sende én e-mail til hele teamet fra teammenuen i sidepanelet.",
+        "Allow emailing all members of this team": "Tillad e-mail til alle medlemmer af dette team",
+        "Could not save the email setting. Try again.": "Kunne ikke gemme e-mailindstillingen. Prøv igen.",
+        "Emailing all members is switched off for this team.": "E-mail til alle medlemmer er slået fra for dette team."
     },
     "pluralForm": "nplurals=2; plural=(n != 1);"
 }

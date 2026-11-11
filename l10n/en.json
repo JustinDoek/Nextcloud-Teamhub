@@ -6648,7 +6648,11 @@
         "{day} in the afternoon": "{day} in the afternoon",
         "Show teams owned by another Nextcloud server to the people here who belong to them.": "Show teams owned by another Nextcloud server to the people here who belong to them.",
         "TeamHub also checks daily whether such a team still exists on its own server, and removes the local copy once that server says it is gone. A server that cannot be reached is left alone.": "TeamHub also checks daily whether such a team still exists on its own server, and removes the local copy once that server says it is gone. A server that cannot be reached is left alone.",
-        "About teams from other servers": "About teams from other servers"
+        "About teams from other servers": "About teams from other servers",
+        "Let members write one email to the whole team from the team menu in the sidebar.": "Let members write one email to the whole team from the team menu in the sidebar.",
+        "Allow emailing all members of this team": "Allow emailing all members of this team",
+        "Could not save the email setting. Try again.": "Could not save the email setting. Try again.",
+        "Emailing all members is switched off for this team.": "Emailing all members is switched off for this team."
     },
     "pluralForm": "nplurals=2; plural=(n != 1);"
 }
