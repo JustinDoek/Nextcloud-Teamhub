@@ -526,9 +526,9 @@ export default {
 		},
 
 		/** `files` from the dialog's paperclip. */
-		submitWorkflowAction(text, files = []) {
+		submitWorkflowAction(text, files = [], approver = '', answers = null) {
 			if (this.workflowAction) {
-				this.run(this.workflowAction.workflow, this.workflowAction.action, text, files)
+				this.run(this.workflowAction.workflow, this.workflowAction.action, text, files, approver, answers)
 			}
 		},
 
@@ -549,7 +549,7 @@ export default {
 			}
 		},
 
-		async run(workflow, action, text, files = []) {
+		async run(workflow, action, text, files = [], approver = '', answers = null) {
 			try {
 				const updated = await this.$store.dispatch('workflows/act', {
 					id: workflow.id,
@@ -557,6 +557,8 @@ export default {
 					text,
 					step: workflow.viewer?.stepKey || '',
 					fileIds: (files || []).map(f => f.fileId),
+					approver,
+					answers,
 				})
 				this.workflowAction = null
 				showSuccess(t('teamhub', 'Done: {title}', { title: updated?.title || workflow.title }))

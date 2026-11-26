@@ -8,6 +8,7 @@ use OCA\TeamHub\Db\WorkflowAttachment;
 use OCA\TeamHub\Db\WorkflowAttachmentMapper;
 use OCA\TeamHub\Db\WorkflowInstance;
 use OCA\TeamHub\Exception\ValidationException;
+use OCA\TeamHub\Workflow\WorkflowActor;
 use OCA\TeamHub\Workflow\WorkflowAttachmentVisibility;
 use OCP\AppFramework\Utility\ITimeFactory;
 use OCP\Constants;
@@ -221,6 +222,70 @@ class WorkflowShareService {
                 ]);
             }
             $this->record($row, $instanceId, $file, $uid, $visibility, $stepKey, $shareId, $shareId !== '' ? $expiry->getTimestamp() : null);
+        }
+    }
+
+    /**
+     * Let whoever approves view the files the requester attached (v4.20.58,
+     * `docs/service-builder.md` § 14.4): a share of their own, view only,
+     * until the same day. The request form says that approvers can. Only the
+     * requester's files, and only those still shared for the request.
+     *
+     * A share Nextcloud refuses is logged and left out; the approver then
+     * reads the file's name on the request and can ask.
+     *
+     * @return string[] the share ids, for the engine to keep and remove
+     */
+    public function shareForApprover(WorkflowInstance $instance, WorkflowActor $approver): array {
+        $group = $approver->type === WorkflowActor::TYPE_GROUP;
+        if (!$group && $approver->type !== WorkflowActor::TYPE_USER) {
+            return [];
+        }
+        $owner = $instance->getStartedBy();
+        $ids   = [];
+        foreach ($this->liveShares((int)$instance->getId()) as $row) {
+            if ($row->getAddedBy() !== $owner || $row->getVisibility() === WorkflowAttachmentVisibility::INTERNAL
+                || (!$group && $approver->id === $owner)) {
+                continue;
+            }
+            try {
+                $node = $this->rootFolder->getUserFolder($owner)->getFirstNodeById($row->getFileId());
+                if (!$node instanceof File || !$node->isShareable()) {
+                    throw new \RuntimeException('file not found for its owner, or not theirs to share');
+                }
+                $share = $this->shareManager->newShare();
+                $share->setNode($node)
+                    ->setShareType($group ? IShare::TYPE_GROUP : IShare::TYPE_USER)
+                    ->setSharedWith($approver->id)
+                    ->setSharedBy($owner)
+                    ->setShareOwner($node->getOwner()?->getUID() ?? $owner)
+                    ->setPermissions(Constants::PERMISSION_READ);
+                if ($row->getShareUntil() !== null) {
+                    $share->setExpirationDate(new \DateTime('@' . $row->getShareUntil()));
+                }
+                $ids[] = $this->shareManager->createShare($share)->getFullId();
+            } catch (\Throwable $e) {
+                $this->logger->warning('[TeamHub][WorkflowShare] a file could not be shared with an approver', [
+                    'instance' => $instance->getId(), 'fileId' => $row->getFileId(),
+                    'error' => $e->getMessage(), 'app' => Application::APP_ID,
+                ]);
+            }
+        }
+        return $ids;
+    }
+
+    /** @param string[] $ids shares `shareForApprover()` made */
+    public function removeShareIds(array $ids): void {
+        foreach ($ids as $id) {
+            try {
+                $this->shareManager->deleteShare($this->shareManager->getShareById($id));
+            } catch (ShareNotFound) {
+                // Already gone: expired and dropped by Nextcloud, or removed by hand.
+            } catch (\Throwable $e) {
+                $this->logger->warning('[TeamHub][WorkflowShare] an approver\'s share could not be removed', [
+                    'share' => $id, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+                ]);
+            }
         }
     }
 

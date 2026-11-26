@@ -12,14 +12,18 @@
  * takes the whole component down with it: in #112 every poll vanished for a
  * Polish user.
  *
- * The fix: when the user's language is not one we ship, register a two-form
- * plural rule for `teamhub` that matches the bundle that really loaded. For a
- * shipped language nothing changes, core's own rule is already right.
+ * The fix: when the user's language is not one we ship, set a two-form plural
+ * rule for `teamhub` that matches the bundle that really loaded. For a shipped
+ * language nothing changes, core's own rule is already right.
  *
- * `register()` merges translations, so passing `{}` keeps the loaded bundle
- * and only replaces the plural function.
+ * v4.20.53: the rule goes straight into the registry `@nextcloud/l10n` keeps
+ * on the page. Its `register(app, bundle)` takes no plural function and always
+ * installs the user language's own, so the 4.20.0 guard, which passed one as a
+ * third argument, changed nothing. The library offers no other way in.
+ * tests/js/pluralGuard.test.mjs runs the real library and fails if an upgrade
+ * moves the registry.
  */
-import { getLanguage, register } from '@nextcloud/l10n'
+import { getLanguage } from '@nextcloud/l10n'
 
 // Languages with an l10n/<lang>.json in this app. tests/js/pluralGuard.test.mjs
 // fails when this list and the l10n folder disagree. Every one of them has
@@ -60,6 +64,7 @@ export function installPluralGuard(language = getLanguage()) {
 	if (!needsPluralGuard(language)) {
 		return false
 	}
-	register('teamhub', {}, twoFormPlural)
+	globalThis._oc_l10n_registry_plural_functions ??= {}
+	globalThis._oc_l10n_registry_plural_functions.teamhub = twoFormPlural
 	return true
 }

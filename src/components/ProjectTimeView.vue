@@ -1174,7 +1174,6 @@ export default {
     display: flex;
     flex-direction: column;
     gap: 4px;
-    border-inline-start-width: 4px;
 }
 .th-time__kpi-head {
     display: flex;
@@ -1203,35 +1202,20 @@ export default {
     font-size: 0.85em;
     color: var(--color-text-lighter);
 }
-.th-time__kpi--available {
-    border-inline-start-color: var(--color-primary-element);
-}
 .th-time__kpi--available .th-time__kpi-swatch {
     background: var(--color-primary-element);
-}
-.th-time__kpi--logged {
-    border-inline-start-color: var(--color-text-success);
 }
 .th-time__kpi--logged .th-time__kpi-swatch {
     background: var(--color-text-success);
 }
-.th-time__kpi--remaining {
-    border-inline-start-color: var(--color-text-warning);
-}
 .th-time__kpi--remaining .th-time__kpi-swatch {
     background: var(--color-text-warning);
-}
-.th-time__kpi--remaining-over {
-    border-inline-start-color: var(--color-text-error);
 }
 .th-time__kpi--remaining-over .th-time__kpi-swatch {
     background: var(--color-text-error);
 }
 .th-time__kpi--remaining-over .th-time__kpi-value {
     color: var(--color-text-error);
-}
-.th-time__kpi--utilisation {
-    border-inline-start-color: var(--color-primary-element);
 }
 .th-time__kpi--utilisation .th-time__kpi-swatch {
     background: var(--color-primary-element);

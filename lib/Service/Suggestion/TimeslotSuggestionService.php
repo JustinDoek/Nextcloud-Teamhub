@@ -36,13 +36,12 @@ use Psr\Log\LoggerInterface;
  *   Reads only boolean free/busy results through Nextcloud's supported
  *   calendar manager API. Event content is never accessed or returned.
  *
- * Fall-back rule:
- *   The half-day was already chosen because presence said these
- *   attendees are available for it. If a user's calendar cannot be read
- *   (no personal calendar, app not installed, parse failure), this
- *   service treats them as having no events in the window — i.e. the
- *   presence verdict stands. This matches the layered design agreed in
- *   the design session for this feature.
+ * Who counts as available (v4.20.14, DESIGN §2.266):
+ *   Presence says they are working then AND Nextcloud says their calendar
+ *   is free. A calendar Nextcloud cannot answer for (usually an account
+ *   without an email address) is never read as free; it is reported as
+ *   `unchecked` in `unavailable`, beside `off` and `calendar`, so the wizard
+ *   can say which it is. AttendeeAvailability holds the rule.
  */
 class TimeslotSuggestionService {
 
@@ -73,6 +72,7 @@ class TimeslotSuggestionService {
         private TimezoneService   $timezoneService,
         private NextcloudAvailabilityService $nativeAvailability,
         private HolidayMapper $holidays,
+        private AttendeeAvailability $availability,
         private LoggerInterface   $logger,
     ) {
     }
@@ -93,7 +93,8 @@ class TimeslotSuggestionService {
      *       endTs: int,
      *       availableCount: int,
      *       attendeeCount: int,
-     *       conflictCount: int
+     *       conflictCount: int,
+     *       unavailable: list<array{userId: string, displayName: string, reason: string}>
      *   }>,
      *   attendeeCount: int,
      *   durationMinutes: int
@@ -170,11 +171,21 @@ class TimeslotSuggestionService {
         for ($startTs = $searchStartTs; $startTs + $durationSec <= $searchEndTs; $startTs += $gridSec) {
             $endTs = $startTs + $durationSec;
             $verdicts = $this->nativeAvailability->checkMany($organiserUid, $attendees, $startTs, $endTs);
-            $available = count(array_filter($verdicts, static fn ($v) => $v === true));
+            // v4.20.14 (DESIGN §2.266) — presence too, by the same rule as the
+            // half-day list: somebody not working then is not available, even
+            // with an empty calendar. Before this the list read calendars only.
+            $off = $this->availability->offAt($attendees, intdiv($startTs + $endTs, 2));
+            $available = 0;
+            foreach ($attendees as $uid) {
+                if (($verdicts[$uid] ?? null) === true && !($off[$uid] ?? false)) {
+                    $available++;
+                }
+            }
             $isOnHour = ((int)(($startTs - $searchStartTs) % 3600) === 0) ? 1 : 0;
             $candidates[] = [
                 'startTs' => $startTs, 'endTs' => $endTs,
                 'available' => $available, 'onHour' => $isOnHour,
+                'native' => $verdicts, 'off' => $off,
             ];
         }
 
@@ -230,6 +241,9 @@ class TimeslotSuggestionService {
                 'availableCount' => $p['available'],
                 'attendeeCount'  => $attendeeCount,
                 'conflictCount'  => $attendeeCount - $p['available'],
+                // v4.20.14 — who cannot come and why (off / unchecked /
+                // calendar). conflictCount stays the total for older callers.
+                'unavailable'    => $this->availability->unavailable($attendees, $p['native'], $p['off']),
             ];
             if ($emitBuilding) {
                 $row['bestBuildingName'] = $buildingName;

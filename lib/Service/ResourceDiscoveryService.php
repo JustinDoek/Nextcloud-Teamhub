@@ -7,6 +7,7 @@ use OCA\TeamHub\Db\WorkflowInstanceMapper;
 use OCA\TeamHub\Workflow\Definition\QuotaRequestDefinition;
 use OCA\TeamHub\Workflow\WorkflowStatus;
 use OCA\TeamHub\AppInfo\Application;
+use OCA\TeamHub\Constants\TeamApps;
 use OCA\TeamHub\Db\TeamAppResourceMapper;
 use OCA\TeamHub\Db\TeamAppResource;
 use OCP\App\IAppManager;
@@ -26,6 +27,10 @@ use Psr\Log\LoggerInterface;
  *       otherwise                          → status=pending, origin=discovered_pending
  *   - In DB_LOCAL but not DB_REAL → delete row (ACL was withdrawn externally)
  *   - In both                     → re-evaluate risk_status from current owner state
+ *
+ * A Team folder another app claims (ManagedFolderService, v4.20.48) gets
+ * status=managed instead of pending: shown read-only, never reviewed. See
+ * syncManagedFolders().
  *
  * Two apps have no personal owner to run that test against, because the
  * resource belongs to a circle rather than a person: group-folder-backed
@@ -52,6 +57,8 @@ class ResourceDiscoveryService {
         // service-team graph into this class, and all this needs is "is one
         // open, and at which step".
         private readonly WorkflowInstanceMapper $workflowInstances,
+        // v4.20.48 — the apps that claim Team folders as their own.
+        private readonly ManagedFolderService   $managedFolders,
     ) {}
 
     // -------------------------------------------------------------------------
@@ -200,6 +207,17 @@ class ResourceDiscoveryService {
         }
         if ($row->getStatus() !== 'pending') {
             throw new \RuntimeException("Resource is not pending (status={$row->getStatus()})");
+        }
+
+        // ── Files: another app manages this folder (v4.20.48) ─────────────
+        // Asked live: the row can have been written before the app claimed
+        // the folder, and accepting it would make it this team's own folder.
+        $managingApp = $this->managingAppOf($teamId, $appId, $resourceId);
+        if ($managingApp !== null) {
+            $this->markManaged($teamId, $row, $managingApp);
+            throw new \RuntimeException(
+                'This folder is managed by ' . $this->managedFolders->appName($managingApp) . ' and cannot be accepted.'
+            );
         }
 
         // ── Files: enforce 1:1 at the accept layer ────────────────────────
@@ -390,6 +408,11 @@ class ResourceDiscoveryService {
 
             $realIdSet = array_flip($realIds);
 
+            // ── Files: folders another app manages (v4.20.48) ───────────
+            if ($appId === 'files') {
+                $localByResourceId = $this->syncManagedFolders($teamId, $realIds, $localByResourceId);
+            }
+
             // ── Files: snapshot the current active resource before inserting new ones ──
             // This drives the 1:1 enforcement and the migration-trigger logic.
             $activeFilesRow = null;
@@ -405,6 +428,9 @@ class ResourceDiscoveryService {
             // — Resources in NC reality but not in our table → insert —
             foreach ($realIds as $resourceId) {
                 if (isset($localByResourceId[$resourceId])) {
+                    if ($localByResourceId[$resourceId]->getStatus() === TeamAppResource::STATUS_MANAGED) {
+                        continue; // Another app's folder: no owner of ours to watch.
+                    }
                     // Already tracked — refresh risk_status.
                     $this->refreshRiskStatus($teamId, $appId, $resourceId, $localByResourceId[$resourceId]);
                     if ($appId === 'collectives') {
@@ -484,6 +510,116 @@ class ResourceDiscoveryService {
                 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
         }
+    }
+
+    /**
+     * Bring the `managed` rows of one team in step with what the apps claim
+     * (v4.20.48, DESIGN §2.283).
+     *
+     * Candidates are the team's Team folders without a row, or with one that
+     * is not active and not TeamHub's own. A claim makes the row `managed`
+     * whatever it was (pending, ignored, disconnected): the team has the
+     * access, and who decides about it is now known. An active row is left
+     * alone, because a team admin accepted that folder and the team works in
+     * it; disconnecting it hands it over.
+     *
+     * A managed row nobody claims any more is deleted, so the caller's normal
+     * path discovers the folder from scratch and the usual rules decide
+     * between review and suppression. See
+     * ManagedFolderService::keepsWithoutAnswer() for when silence is not
+     * "not mine".
+     *
+     * @param list<string>                   $realIds
+     * @param array<string, TeamAppResource> $local
+     * @return array<string, TeamAppResource> the rows as they are afterwards
+     */
+    private function syncManagedFolders(string $teamId, array $realIds, array $local): array {
+        $candidates = [];
+        $hasManaged = false;
+        foreach ($realIds as $resourceId) {
+            $resourceId = (string)$resourceId;
+            if (!str_starts_with($resourceId, 'gf:')) {
+                continue;
+            }
+            $row = $local[$resourceId] ?? null;
+            if ($row !== null && ($row->getStatus() === 'active' || $row->getOrigin() === TeamApps::ORIGIN_CREATED)) {
+                continue;
+            }
+            $candidates[(int)substr($resourceId, 3)] = $resourceId;
+            $hasManaged = $hasManaged || $row?->getStatus() === TeamAppResource::STATUS_MANAGED;
+        }
+        // The common case, and it costs nothing: no app claims folders.
+        if ($candidates === [] || (!$hasManaged && !$this->managedFolders->hasProviders())) {
+            return $local;
+        }
+
+        $answer = $this->managedFolders->claims($teamId, array_keys($candidates));
+        foreach ($candidates as $folderId => $resourceId) {
+            $row   = $local[$resourceId] ?? null;
+            $claim = $answer['claims'][$folderId] ?? null;
+
+            if ($claim !== null) {
+                $local[$resourceId] = $this->markManaged($teamId, $row, $claim, $resourceId);
+                continue;
+            }
+            $managedBy = $row?->managingAppId();
+            if ($row === null || $managedBy === null
+                || $this->managedFolders->keepsWithoutAnswer($managedBy, $answer['unanswered'])) {
+                continue;
+            }
+            $this->resourceMapper->deleteById($row->getId());
+            unset($local[$resourceId]);
+            $this->auditService->log(
+                $teamId, 'resource.managed_released', null, 'resource', "files:{$resourceId}",
+                ['app_id' => 'files', 'resource_id' => $resourceId, 'managed_by' => $managedBy],
+            );
+            $this->logger->info('[TeamHub][ResourceDiscoveryService] folder no longer managed by another app', [
+                'teamId' => $teamId, 'resourceId' => $resourceId, 'managedBy' => $managedBy,
+                'app' => Application::APP_ID,
+            ]);
+        }
+        return $local;
+    }
+
+    /**
+     * Record that an app manages this folder: insert the row, or turn the
+     * existing one. Writes nothing when it already says so.
+     */
+    private function markManaged(string $teamId, ?TeamAppResource $row, string $claimingApp, string $resourceId = ''): TeamAppResource {
+        if ($row?->managingAppId() === $claimingApp) {
+            return $row;
+        }
+        $resourceId = $row?->getResourceId() ?? $resourceId;
+        $decidedBy  = TeamAppResource::managedBy($claimingApp);
+        $previous   = $row?->getStatus();
+        if ($row === null) {
+            $row = $this->resourceMapper->insertResource(
+                teamId:     $teamId,
+                appId:      'files',
+                resourceId: $resourceId,
+                origin:     TeamAppResource::ORIGIN_MANAGED,
+                status:     TeamAppResource::STATUS_MANAGED,
+                decidedBy:  $decidedBy,
+                decidedAt:  time(),
+            );
+        } else {
+            $this->resourceMapper->updateStatus($row->getId(), TeamAppResource::STATUS_MANAGED, $decidedBy, time());
+            $row->setStatus(TeamAppResource::STATUS_MANAGED);
+            $row->setDecidedBy($decidedBy);
+        }
+        $this->auditService->log(
+            $teamId, 'resource.managed', null, 'resource', "files:{$resourceId}",
+            ['app_id' => 'files', 'resource_id' => $resourceId, 'managed_by' => $claimingApp, 'previous_status' => $previous],
+        );
+        return $row;
+    }
+
+    /** The app managing this resource right now, or null. Team folders only. */
+    private function managingAppOf(string $teamId, string $appId, string $resourceId): ?string {
+        if ($appId !== 'files' || !str_starts_with($resourceId, 'gf:')) {
+            return null;
+        }
+        return $this->managedFolders->managingApp($teamId, (int)substr($resourceId, 3));
     }
 
     /**
@@ -1444,6 +1580,12 @@ class ResourceDiscoveryService {
             'createdAt'    => $row->getCreatedAt(),
             'updatedAt'    => $row->getUpdatedAt(),
         ];
+
+        // v4.20.48 — who manages a claimed folder, by name.
+        $managingApp = $row->managingAppId();
+        if ($managingApp !== null) {
+            $out['managedBy'] = ['id' => $managingApp, 'name' => $this->managedFolders->appName($managingApp)];
+        }
 
         // v4.10.1 — a group folder that is the team's Nextcloud 35 team space
         // says so, with its quota, so Manage team can label it. Absent (not

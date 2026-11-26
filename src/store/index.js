@@ -8,6 +8,9 @@ import { teamImageUrl, uploadTeamsAvatar } from '../lib/teamAvatar.js'
 import { fileOpenUrl, isNarrowViewport, withoutSidebarRequest } from '../lib/filesCollab.js'
 import { reconcileTeams } from '../lib/teamListReconcile.js'
 import { mergeMessages } from '../lib/messageStreamMerge.js'
+import { withKeptReactions } from '../lib/reactions.js'
+import { fetchTalkRoom } from '../lib/talkApi.js'
+import { roomStatus } from '../lib/talkChat.js'
 import {
     buildAllTabDescriptors,
     buildAvailableTabs,
@@ -91,6 +94,10 @@ export default createStore({
         // user closes it.
         calendarEmbedEvent: null,
         deckEmbedCardUrl: null,
+        // v4.20.22 — where the Chat tab opens, from the Communication widget:
+        // { threadId, messageId } (v4.20.23: a pinned message too), or null
+        // for the conversation itself.
+        talkEmbedTarget: null,
         // Bumped whenever the user lands on the home view — a tab click back to
         // Home, or picking a team (selectTeam commits SET_VIEW 'msgstream').
         // Widgets that should show fresh data on return watch this; see
@@ -230,6 +237,19 @@ export default createStore({
         // teams list: one app-data lookup per team open is cheap, one per
         // sidebar row is not, and only the open team's banner is ever drawn.
         teamBanner: { url: null },
+        // v4.20.2 - the team conversation's state for the viewer, read from
+        // Talk's own API (src/lib/talkApi.js) by `fetchTalkStatus`. One fetch
+        // feeds both the Chat tab's unread badge and the Home view's Chat
+        // widget. `available` is null until the first answer, false when the
+        // team has no room or Talk refused this viewer (not a participant).
+        talkStatus: {
+            token: null, available: null,
+            unread: 0, mention: false, hasCall: false, callStartTime: 0,
+            lastMessageId: 0, readOnly: false,
+            canStartCall: false, canJoinCall: false, inCall: false,
+            canChat: false, lastPinnedId: 0, hiddenPinnedId: 0,
+            actorType: '', actorId: '', isModerator: false,
+        },
         // v4.6.13 — optional expiration date for the current team, or null.
         // Rides the layout bundle next to teamType. Shape:
         // { expiresAt, expiresOn, daysRemaining, expired, warning, setBy, … }
@@ -258,6 +278,12 @@ export default createStore({
         // on); when it is false the backend already reports `eligible` and
         // `linked` false, so every widget hides without asking.
         openProjectConfig: { moduleAvailable: false, available: false, eligible: false, linked: false, stale: false, project: null },
+        // v4.20.8 — the instance has an active licence (or is in grace), from
+        // App.vue's entitlements fetch. Starts false, the opposite of App.vue's
+        // own brand gate: a licensed control appearing a moment late is fine,
+        // one offered to an unlicensed instance and then refused is not. Only
+        // hides controls; every licensed endpoint checks the licence itself.
+        licensed: false,
         // v4.10.27 — is the team on screen a service desk the viewer works,
         // and do they administer it. From the layout bundle; gates the queue
         // and statistics widgets (src/lib/activeWidgets.js).
@@ -333,6 +359,9 @@ export default createStore({
             payload: null,
             providers: [],
             loadedAt: 0,
+            // v4.20.31 — the open tab (src/lib/myWorkTabs.js). In memory for
+            // the session, never written to preferences.
+            tab: 'todo',
         },
         loading: {
             teams: false,
@@ -346,6 +375,10 @@ export default createStore({
 
     getters: {
         currentTeam: state => state.teams.find(t => t.id === state.currentTeamId) || null,
+        // v4.20.29/30 — somewhere to store a task for the team on screen: the
+        // Tasks app and a team calendar. One answer for the tab bar's quick
+        // task and every follow-up entry (message, comment, decision).
+        canCreateTeamTask: state => !!state.resources?.tasks && (state.resources?.calendar || []).length > 0,
 
         /**
          * The sidebar's teams, bucketed into the user's own groups (v4.7.3).
@@ -562,6 +595,8 @@ export default createStore({
     mutations: {
         SET_TEAMS(state, teams) { state.teams = teams },
 
+        SET_LICENSED(state, licensed) { state.licensed = !!licensed },
+
         // v4.7.3 — the whole grouping state, as returned by every one of the
         // team-group endpoints. They all answer with the full state rather
         // than a delta, so the client never has to reconstruct what the
@@ -670,6 +705,12 @@ export default createStore({
             if (view !== 'deck') {
                 state.deckEmbedCardUrl = null
             }
+            // v4.20.22 — and for the Talk thread: the Chat tab reverts to the
+            // conversation itself, in place (AppEmbed routes /call/ without a
+            // reload, so a running call is not dropped).
+            if (view !== 'talk') {
+                state.talkEmbedTarget = null
+            }
             // v4.11.7 — the Services tab has two panes (the team's services,
             // and the desk's request grid). Leaving the tab returns it to its
             // own default, the same clear-on-leave as the deep-links above.
@@ -695,6 +736,13 @@ export default createStore({
         SET_FILES_EMBED_FILE_URL(state, url) { state.filesEmbedFileUrl = url },
         SET_CALENDAR_EMBED_EVENT(state, ev) { state.calendarEmbedEvent = ev },
         SET_DECK_EMBED_CARD_URL(state, url) { state.deckEmbedCardUrl = url },
+        /** v4.20.22 — see `talkEmbedTarget`. Ids that are not positive integers are dropped. */
+        SET_TALK_EMBED_TARGET(state, target) {
+            const id = v => (Number.isSafeInteger(Number(v)) && Number(v) > 0 ? Number(v) : 0)
+            const threadId = id(target?.threadId)
+            const messageId = id(target?.messageId)
+            state.talkEmbedTarget = threadId || messageId ? { threadId, messageId } : null
+        },
         SET_MESSAGES(state, messages) { state.messages = messages },
         /**
          * v4.13.20 — what the silent refresh of the open team's stream
@@ -751,6 +799,15 @@ export default createStore({
          * in-flight comment draft, and the server's answer to a subscribe
          * carries only the one field that changed.
          */
+        SET_MESSAGE_REACTIONS(state, { messageId, reactions }) {
+            const idx = state.messages.findIndex(m => m.id === messageId)
+            if (idx !== -1) {
+                state.messages[idx] = { ...state.messages[idx], reactions }
+            }
+            if (state.pinnedMessage && state.pinnedMessage.id === messageId) {
+                state.pinnedMessage = { ...state.pinnedMessage, reactions }
+            }
+        },
         SET_MESSAGE_SUBSCRIPTION(state, { messageId, subscribed }) {
             const idx = state.messages.findIndex(m => m.id === messageId)
             if (idx !== -1) {
@@ -763,6 +820,9 @@ export default createStore({
         // Called after a successful pin: move the message out of the regular list
         // and into the pinned slot, clearing any previous pin from the regular list.
         PIN_MESSAGE(state, message) {
+            // v4.20.27 — the pin endpoint's row carries no `reactions`; keep
+            // the ones the card already had, or the pinned card shows none.
+            message = withKeptReactions(message, state.messages.find(m => m.id === message.id))
             // Remove old pinned message from regular list if it ended up there
             state.messages = state.messages.filter(m => m.id !== message.id)
             // Unpin the previous pinned message back into the top of the regular list
@@ -773,13 +833,25 @@ export default createStore({
         },
         // Called after a successful unpin: move the message back into the regular list.
         UNPIN_MESSAGE(state, message) {
+            const previous = state.pinnedMessage && state.pinnedMessage.id === message.id ? state.pinnedMessage : null
             state.pinnedMessage = null
-            state.messages.unshift({ ...message, pinned: false })
+            state.messages.unshift({ ...withKeptReactions(message, previous), pinned: false })
         },
         // Mark a team as read in the sidebar list (optimistic update)
         MARK_TEAM_SEEN(state, teamId) {
             const team = state.teams.find(t => t.id === teamId)
             if (team) team.unread = 0 // Vue 3: proxy reactivity — Vue.set not needed
+        },
+        // v4.20.27 — a comment's reactions after the viewer changed them. The
+        // thread is keyed by message, and the caller knows only the comment.
+        SET_COMMENT_REACTIONS(state, { commentId, reactions }) {
+            for (const list of Object.values(state.comments)) {
+                const idx = Array.isArray(list) ? list.findIndex(c => c.id === commentId) : -1
+                if (idx !== -1) {
+                    list[idx] = { ...list[idx], reactions }
+                    return
+                }
+            }
         },
         UPDATE_COMMENT(state, { messageId, comment }) {
             const list = state.comments[messageId]
@@ -878,6 +950,17 @@ export default createStore({
         SET_TEAM_TEMPLATE(state, teamTemplate) { state.teamTemplate = teamTemplate },
         SET_TEAM_BANNER(state, banner) {
             state.teamBanner = { url: (banner && typeof banner.url === 'string' && banner.url) ? banner.url : null }
+        },
+        SET_TALK_STATUS(state, status) {
+            state.talkStatus = {
+                token: null, available: null,
+                unread: 0, mention: false, hasCall: false, callStartTime: 0,
+                lastMessageId: 0, readOnly: false,
+                canStartCall: false, canJoinCall: false, inCall: false,
+                canChat: false, lastPinnedId: 0, hiddenPinnedId: 0,
+                actorType: '', actorId: '', isModerator: false,
+                ...(status || {}),
+            }
         },
         SET_TEAM_EXPIRY(state, teamExpiry) { state.teamExpiry = teamExpiry },
         SET_BUDGET_CONFIG(state, config) { state.budgetConfig = config },
@@ -984,6 +1067,7 @@ export default createStore({
         SET_MYWORK_GROUP_BY(state, groupBy) { state.myWork.groupBy = groupBy },
         SET_MYWORK_SORT_BY(state, sortBy) { state.myWork.sortBy = sortBy },
         SET_MYWORK_PAGE(state, page) { state.myWork.page = page },
+        SET_MYWORK_TAB(state, tab) { state.myWork.tab = tab },
         SET_MYWORK_SCROLL(state, top) { state.myWork.scrollTop = top },
         SET_MYWORK_COLLAPSED_GROUPS(state, keys) {
             state.myWork.collapsedGroups = Array.isArray(keys) ? keys.map(String) : []
@@ -1106,6 +1190,43 @@ export default createStore({
                 })
             case 'collectives':
                 return dispatch('openCollectivePageInEmbed', target.path)
+            }
+        },
+
+        /**
+         * v4.20.2 — refresh `talkStatus` for the current team's room.
+         *
+         * Talk's own API, from the browser, as the viewer (see talkApi.js).
+         * A 404 or 403 is Talk saying this person is not a participant:
+         * `available: false`, so the badge stays away and the widget says
+         * why rather than showing a spinner forever. Any other failure keeps
+         * the last known state; a network blip must not blank the badge.
+         *
+         * Answers that land after the team has changed are dropped, so a slow
+         * request for the previous team cannot paint its unread count on this
+         * one's tab.
+         */
+        async fetchTalkStatus({ state, commit }) {
+            const token = state.resources?.talk?.token || null
+            if (!token) {
+                if (state.talkStatus.token !== null || state.talkStatus.available !== false) {
+                    commit('SET_TALK_STATUS', { token: null, available: false })
+                }
+                return
+            }
+            if (state.talkStatus.token !== token) {
+                commit('SET_TALK_STATUS', { token, available: null })
+            }
+            try {
+                const room = await fetchTalkRoom(token)
+                if (state.resources?.talk?.token !== token) return
+                commit('SET_TALK_STATUS', { token, available: !!room, ...roomStatus(room) })
+            } catch (e) {
+                if (state.resources?.talk?.token !== token) return
+                const status = e?.response?.status
+                if (status === 404 || status === 403) {
+                    commit('SET_TALK_STATUS', { token, available: false })
+                }
             }
         },
 
@@ -1409,6 +1530,14 @@ export default createStore({
             commit('SET_MEMBERS', [])
             commit('SET_ALL_EFFECTIVE_MEMBERS', [])
             commit('SET_RESOURCES', {})
+            // v4.20.52 (issue 102) - the board picked in the previous team and
+            // the cards its Upcoming tasks widget listed. `deckUrl` prefers the
+            // picked board over the team's own, so a team with one board opened
+            // the previous team's; a listed card opened it just the same.
+            commit('SET_SELECTED_DECK_BOARD', null)
+            commit('SET_DECK_TASKS', [])
+            commit('SET_DECK_UNASSIGNED', {})
+            commit('SET_TEAM_TASKS', [])
             commit('SET_WEB_LINKS', [])
             commit('SET_TEAM_WIDGETS', [])
             commit('SET_TEAM_MENU_ITEMS', [])
@@ -1697,6 +1826,25 @@ export default createStore({
          * silently swallowing it would leave the button showing a state the
          * server never accepted.
          */
+        /**
+         * v4.20.27 — add or take back the viewer's emoji on a message or a
+         * comment. Answers with the target's reactions as the server holds
+         * them, and commits them to the row, so a card that remounts (a pin,
+         * a comment leaving edit mode) shows them.
+         */
+        async setReaction({ commit }, { targetType, targetId, emoji, add }) {
+            const base = targetType === 'comment' ? 'comments' : 'messages'
+            const url = generateUrl(`/apps/teamhub/api/v1/${base}/${targetId}/reactions`)
+            const { data } = add
+                ? await axios.post(url, { emoji })
+                : await axios.delete(url, { params: { emoji } })
+            const reactions = Array.isArray(data?.reactions) ? data.reactions : []
+            commit(targetType === 'comment' ? 'SET_COMMENT_REACTIONS' : 'SET_MESSAGE_REACTIONS', targetType === 'comment'
+                ? { commentId: targetId, reactions }
+                : { messageId: targetId, reactions })
+            return reactions
+        },
+
         async setMessageSubscription({ commit }, { messageId, subscribed }) {
             const url = generateUrl(`/apps/teamhub/api/v1/messages/${messageId}/subscription`)
             const { data } = subscribed
@@ -1963,10 +2111,17 @@ export default createStore({
             }
         },
 
-        async fetchResources({ commit, dispatch }, teamId) {
+        /**
+         * v4.20.52 (issue 102) - an answer that arrives after the person has
+         * moved to another team is dropped, here and in the two task fetches
+         * below. Committed, it put the previous team's board, folder and
+         * conversation under the new team's tabs until the next reload.
+         */
+        async fetchResources({ commit, dispatch, state }, teamId) {
             commit('SET_LOADING', { key: 'resources', value: true })
             try {
                 const { data } = await axios.get(generateUrl(`/apps/teamhub/api/v1/teams/${teamId}/resources`))
+                if (state.currentTeamId !== teamId) return
                 // Strip _warnings before storing as resources — it's a meta key, not a resource.
                 const { _warnings, ...resourceData } = data || {}
                 commit('SET_RESOURCES', resourceData)
@@ -1982,11 +2137,16 @@ export default createStore({
                     commit('SET_TEAM_TASKS', [])
                 }
             } catch (e) {
+                if (state.currentTeamId !== teamId) return
                 commit('SET_RESOURCES', {})
                 commit('SET_RESOURCE_WARNINGS', { pending: 0, atRisk: 0 })
                 commit('SET_TEAM_TASKS', [])
             } finally {
-                commit('SET_LOADING', { key: 'resources', value: false })
+                // The flag belongs to the team on screen: its own fetch is
+                // still running when an earlier team's answer comes in.
+                if (state.currentTeamId === teamId) {
+                    commit('SET_LOADING', { key: 'resources', value: false })
+                }
             }
         },
 
@@ -2037,7 +2197,9 @@ export default createStore({
             }
         },
 
-        async fetchDeckTasks({ commit }, boards) {
+        async fetchDeckTasks({ commit, state }, boards) {
+            // The boards are the current team's; see fetchResources.
+            const teamId = state.currentTeamId
             // boards can be a single boardId (legacy) or array of board objects.
             const boardList = Array.isArray(boards)
                 ? boards
@@ -2061,6 +2223,7 @@ export default createStore({
                 const unassignedCounts = {}
 
                 for (const board of boardList) {
+                    if (state.currentTeamId !== teamId) return
                     const boardId = board.board_id ?? board
                     try {
                         const { data } = await axios.get(
@@ -2108,10 +2271,12 @@ export default createStore({
                     }
                 }
 
+                if (state.currentTeamId !== teamId) return
                 allCards.sort((a, b) => new Date(a.duedate) - new Date(b.duedate))
                 commit('SET_DECK_TASKS', allCards.slice(0, 20))
                 commit('SET_DECK_UNASSIGNED', unassignedCounts)
             } catch (e) {
+                if (state.currentTeamId !== teamId) return
                 commit('SET_DECK_TASKS', [])
                 commit('SET_DECK_UNASSIGNED', {})
             }
@@ -2121,14 +2286,16 @@ export default createStore({
          * Fetch VTODO tasks from the team calendar via the TeamHub backend.
          * Only called when resources.tasks === true AND resources.calendar is set.
          */
-        async fetchTeamTasks({ commit }, teamId) {
+        async fetchTeamTasks({ commit, state }, teamId) {
             try {
                 const { data } = await axios.get(
                     generateUrl(`/apps/teamhub/api/v1/teams/${teamId}/tasks`),
                 )
+                if (state.currentTeamId !== teamId) return
                 const tasks = Array.isArray(data) ? data : []
                 commit('SET_TEAM_TASKS', tasks)
             } catch (e) {
+                if (state.currentTeamId !== teamId) return
                 commit('SET_TEAM_TASKS', [])
             }
         },

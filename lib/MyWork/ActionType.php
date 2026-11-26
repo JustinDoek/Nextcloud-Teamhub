@@ -99,13 +99,24 @@ final class ActionType {
      * request from their queue without having answered it.
      */
     public const CLOSE           = 'close';
-
+    /**
+     * v4.20.10 — answering a meeting invitation: yes, maybe, no.
+     *
+     * Real source actions: each records a PARTSTAT on the team calendar's copy
+     * of the event through Nextcloud's own iTIP broker (MeetingReplyService),
+     * so they are restrictable and audited like the rest of SOURCE_MUTATING.
+     * Three verbs rather than one with a parameter, so each gets its own
+     * button label and an administrator could restrict one without the others.
+     */
+    public const ACCEPT          = 'accept';
+    public const TENTATIVE       = 'tentative';
+    public const DECLINE         = 'decline';
     public const ALL = [
         self::OPEN, self::COMPLETE, self::APPROVE, self::REJECT,
         self::REQUEST_CHANGES, self::COMMENT, self::DELEGATE,
         self::SNOOZE, self::UNSNOOZE, self::FINALIZE,
         self::JOIN, self::AGENDA, self::EMAIL, self::REQUEST_EXTENSION,
-        self::CLOSE,
+        self::CLOSE, self::ACCEPT, self::TENTATIVE, self::DECLINE,
     ];
 
     /** Handled by TeamHub itself; a provider never sees these. */
@@ -137,6 +148,8 @@ final class ActionType {
         // v4.8.18 — closes a file review, which withdraws it from the queues
         // of everyone who had not answered. State-changing and worth auditing.
         self::CLOSE,
+        // v4.20.10 — answers to a meeting invitation.
+        self::ACCEPT, self::TENTATIVE, self::DECLINE,
     ];
 
     public static function isValid(string $action): bool {

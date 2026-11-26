@@ -11,13 +11,37 @@
          that has just read it from the heading. -->
     <section
         v-if="bannerUrl"
+        id="teamhub-team-banner"
         class="th-banner"
-        :class="{ 'th-banner--compact': compact }">
+        :class="{
+            'th-banner--compact': compact && !collapsed,
+            'th-banner--collapsed': collapsed,
+        }">
         <img class="th-banner__img" :src="bannerUrl" alt="" />
 
         <!-- The gradient that makes the name legible over an arbitrary
              photograph. aria-hidden: it is paint, not content. -->
         <div class="th-banner__scrim" aria-hidden="true"></div>
+
+        <!-- v4.20.1 — collapse to a name strip. Secondary, not tertiary:
+             a tertiary button has no fill of its own and its dark ink would
+             vanish into the scrim; secondary brings its own themed surface,
+             readable over any photograph. Small, because the collapsed strip
+             is 48px and the button must fit inside it. -->
+        <NcButton
+            class="th-banner__toggle"
+            variant="secondary"
+            size="small"
+            aria-controls="teamhub-team-banner"
+            :aria-expanded="collapsed ? 'false' : 'true'"
+            :aria-label="toggleLabel"
+            :title="toggleLabel"
+            @click="toggleCollapsed">
+            <template #icon>
+                <ChevronDown v-if="collapsed" :size="ICON_BODY" />
+                <ChevronUp v-else :size="ICON_BODY" />
+            </template>
+        </NcButton>
 
         <!-- v4.13.60 — the description is no longer a flex sibling of the
              name. Sharing one row made the two compete for a single
@@ -26,7 +50,7 @@
              its own box against the inline-end edge now (Justin), so the
              name has the whole bottom line and the description's length
              changes nothing but its own height. -->
-        <aside v-if="description" class="th-banner__aside">
+        <aside v-if="description && !collapsed" class="th-banner__aside">
             <p class="th-banner__description">{{ description }}</p>
         </aside>
 
@@ -38,11 +62,60 @@
 
 <script>
 import { mapGetters, mapState } from 'vuex'
+import { translate as t } from '@nextcloud/l10n'
+import NcButton from '@nextcloud/vue/components/NcButton'
+import ChevronUp from 'vue-material-design-icons/ChevronUp.vue'
+import ChevronDown from 'vue-material-design-icons/ChevronDown.vue'
+import { ICON_BODY } from '../constants/uiTokens.js'
+
+/**
+ * v4.20.1 — whether the banner is collapsed, remembered per viewer and kept
+ * apart for two kinds of tab. Home is where the banner is the team's
+ * picture, so it opens full there. Every other tab is a work surface (an
+ * embedded Files, Talk or Deck, a roster, a timeline) where the 224px is
+ * height the frame below does not get, so it opens as the name strip there.
+ * A click changes only the kind of tab it was made on: expanding it on Files
+ * keeps it expanded on Talk, and leaves Home alone.
+ *
+ * localStorage, like the embed toolbar's own collapse (AppEmbed): a
+ * standing preference about screen space, the same for every team, that
+ * must hold across a reload without a round-trip.
+ */
+const COLLAPSED_KEY = {
+    home: 'teamhub:banner-collapsed:home',
+    work: 'teamhub:banner-collapsed:work',
+}
+const COLLAPSED_DEFAULT = { home: false, work: true }
+
+function readCollapsed(kind) {
+    try {
+        const v = window.localStorage?.getItem(COLLAPSED_KEY[kind])
+        return v === null || v === undefined ? COLLAPSED_DEFAULT[kind] : v === '1'
+    } catch (e) {
+        return COLLAPSED_DEFAULT[kind] // storage blocked (private mode, cookie policy)
+    }
+}
+
+function writeCollapsed(kind, collapsed) {
+    try {
+        window.localStorage?.setItem(COLLAPSED_KEY[kind], collapsed ? '1' : '0')
+    } catch (e) {
+        // Non-fatal: the toggle still works for this session.
+    }
+}
 
 export default {
     name: 'TeamBanner',
 
+    components: { NcButton, ChevronUp, ChevronDown },
+
     props: {
+        /**
+         * True on every tab but Home. The parent knows the current view;
+         * this component only decides what each kind of tab looks like.
+         */
+        workView: { type: Boolean, default: false },
+
         /**
          * Shorter strip for narrow viewports. The parent decides, because it
          * is the one that already knows whether it is in tablet or mobile
@@ -51,7 +124,31 @@ export default {
         compact: { type: Boolean, default: false },
     },
 
+    data() {
+        return {
+            ICON_BODY,
+            collapsedByKind: {
+                home: readCollapsed('home'),
+                work: readCollapsed('work'),
+            },
+        }
+    },
+
     computed: {
+        viewKind() {
+            return this.workView ? 'work' : 'home'
+        },
+
+        collapsed() {
+            return this.collapsedByKind[this.viewKind]
+        },
+
+        toggleLabel() {
+            return this.collapsed
+                ? t('teamhub', 'Expand banner')
+                : t('teamhub', 'Collapse banner')
+        },
+
         ...mapState(['teamBanner']),
         ...mapGetters(['currentTeam']),
 
@@ -75,6 +172,17 @@ export default {
             return typeof d === 'string' && d.trim() !== '' ? d.trim() : null
         },
     },
+
+    methods: {
+        t,
+
+        toggleCollapsed() {
+            const kind = this.viewKind
+            const next = !this.collapsedByKind[kind]
+            this.collapsedByKind = { ...this.collapsedByKind, [kind]: next }
+            writeCollapsed(kind, next)
+        },
+    },
 }
 </script>
 
@@ -86,10 +194,60 @@ export default {
     overflow: hidden;
     background: var(--color-background-dark);
     border-bottom: 1px solid var(--color-border);
+    transition: height var(--animation-quick) ease;
 }
 
 .th-banner--compact {
     height: var(--th-banner-height-compact);
+}
+
+/* v4.20.1 — the name strip. The picture stays (centred, so the strip shows
+   the middle band of it) and the scrim goes uniformly dark, because the
+   full banner's transparent top 30% would otherwise sit right behind the
+   name in a strip this short. */
+.th-banner--collapsed {
+    height: var(--th-banner-height-collapsed);
+}
+
+.th-banner--collapsed .th-banner__scrim {
+    background: linear-gradient(
+        to bottom,
+        var(--th-banner-scrim-mid) 0%,
+        var(--th-banner-scrim-to) 100%
+    );
+}
+
+.th-banner--collapsed .th-banner__overlay {
+    inset-block: 0;
+    align-items: center;
+    padding-block: 0;
+    /* Room for the toggle on the inline-end side, not the description
+       card's reservation: the card is not shown in the strip. */
+    padding-inline-end: calc(var(--clickable-area-small) + 2 * var(--th-space-lg));
+}
+
+.th-banner--collapsed .th-banner__name {
+    font-size: var(--th-font-heading);
+}
+
+/* Top corner on the full banner, where nothing else sits (the description
+   card holds the bottom one); vertically centred in the strip. */
+.th-banner__toggle {
+    position: absolute;
+    inset-block-start: var(--th-space-sm);
+    inset-inline-end: var(--th-space-sm);
+    z-index: 1;
+}
+
+.th-banner--collapsed .th-banner__toggle {
+    inset-block-start: 50%;
+    transform: translateY(-50%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .th-banner {
+        transition: none;
+    }
 }
 
 .th-banner__img {
@@ -211,6 +369,11 @@ export default {
        also clears the `padding-inline-end` set above. */
     .th-banner__overlay {
         padding-inline: var(--th-space-lg);
+    }
+
+    /* …except for the toggle, which is on the strip at every width. */
+    .th-banner--collapsed .th-banner__overlay {
+        padding-inline-end: calc(var(--clickable-area-small) + 2 * var(--th-space-lg));
     }
 }
 </style>

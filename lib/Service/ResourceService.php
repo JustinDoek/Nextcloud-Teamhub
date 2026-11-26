@@ -4,6 +4,8 @@ declare(strict_types=1);
 namespace OCA\TeamHub\Service;
 
 use OCA\TeamHub\AppInfo\Application;
+use OCA\TeamHub\Constants\TeamApps;
+use OCA\TeamHub\Db\TeamAppResource;
 use OCA\TeamHub\Db\TeamAppResourceMapper;
 use OCA\TeamHub\Service\ResourceDiscoveryService;
 use OCP\App\IAppManager;
@@ -250,6 +252,8 @@ class ResourceService {
         // v4.8.24 — the profile's classification tag, applied when the team
         // folder it belongs on is created. A DI leaf.
         private ConfidentialFilesService $confidentialFiles,
+        // v4.20.48 — a Team folder another app manages is never connected.
+        private ManagedFolderService $managedFolders,
     ) {}
 
     /**
@@ -842,6 +846,15 @@ class ResourceService {
                 if (is_string($resourceId) && str_starts_with((string)$resourceId, 'gf:')) {
                     $folderId  = (int) substr((string)$resourceId, 3);
                     $teamSpace = false;
+                    // v4.20.48 — asked live, because the picker can be older
+                    // than the claim.
+                    $managingApp = $this->managedFolders->managingApp($teamId, $folderId);
+                    if ($managingApp !== null) {
+                        return [
+                            'success' => false,
+                            'error'   => 'This folder is managed by ' . $this->managedFolders->appName($managingApp) . ' and cannot be connected.',
+                        ];
+                    }
                     try {
                         // assignCircleToFolder may throw if already assigned — treat as success.
                         // v4.10.1 — on Nextcloud 35 it also links the folder as
@@ -963,25 +976,24 @@ class ResourceService {
             return ['success' => false, 'error' => 'Resource row not found'];
         }
 
+        // v4.20.48 — the managing app grants this access; taking it away here
+        // would only be put back, so it is refused.
+        if ($row->getStatus() === TeamAppResource::STATUS_MANAGED) {
+            return self::MANAGED_REFUSAL;
+        }
+
         // Count how many OTHER teams also have this resource connected.
-        // This is purely informational for the audit log — it does not change behaviour.
+        // Informational here (audit log); null when it could not be read.
         // The remove methods already only strip this team's ACL row.
         $otherTeamCount = $this->countOtherTeamsWithResource($db, $app, $resourceId, $teamId);
 
-        $stripped = false;
+        // v4.20.38 — a strip that fails leaves the row as it was and says so.
+        // It used to be logged and the row marked disconnected anyway, so the
+        // team could keep its access while TeamHub showed the resource gone.
         try {
-            $stripped = match ($app) {
-                'talk'     => $this->talkService->removeRoomAccess($teamId, $resourceId, $db),
-                'files'    => $this->removeFilesAccess($teamId, $resourceId, $db),
-                'calendar' => $this->calendarService->removeCalendarAccess($teamId, (int)$resourceId, $db),
-                'deck'     => $this->deckService->removeBoardAccess($teamId, (int)$resourceId, $db),
-                default    => false,
-            };
+            $stripped = $this->stripTeamAccess($teamId, $app, $resourceId, $db);
         } catch (\Throwable $e) {
-            $this->logger->warning('[TeamHub][ResourceService] removeTeamAccess ACL strip failed', [
-                'teamId' => $teamId, 'app' => $app, 'resourceId' => $resourceId,
-                'error' => $e->getMessage(), 'app_id' => Application::APP_ID,
-            ]);
+            return $this->accessStripFailed('removeTeamAccess', $teamId, $app, $resourceId, $e);
         }
 
         // v3.100.10 — soft-delete instead of hard-delete. Marking the row
@@ -1011,8 +1023,101 @@ class ResourceService {
         return [
             'success'         => true,
             'aclStripped'     => $stripped,
-            'sharedWithOther' => $otherTeamCount > 0,
+            'sharedWithOther' => $otherTeamCount === null ? null : $otherTeamCount > 0,
             'otherTeamCount'  => $otherTeamCount,
+        ];
+    }
+
+    /**
+     * Take this team's own access off a resource (its ACL row, share, circle
+     * attendee or group-folder mapping) and nothing else. Other teams' and
+     * users' access, and the resource itself, are untouched.
+     *
+     * Returns false when there was nothing to remove. **Throws** when the
+     * removal itself failed (v4.20.38); callers report that and leave the
+     * registry row as it was.
+     */
+    private function stripTeamAccess(string $teamId, string $app, string $resourceId, \OCP\IDBConnection $db): bool {
+        return match ($app) {
+            'talk'     => $this->talkService->removeRoomAccess($teamId, $resourceId, $db),
+            'files'    => $this->removeFilesAccess($teamId, $resourceId, $db),
+            'calendar' => $this->calendarService->removeCalendarAccess($teamId, (int)$resourceId, $db),
+            'deck'     => $this->deckService->removeBoardAccess($teamId, (int)$resourceId, $db),
+            default    => false,
+        };
+    }
+
+    /** The answer for a resource another app manages (v4.20.48). */
+    private const MANAGED_REFUSAL = [
+        'success' => false,
+        'error'   => 'Another app manages this folder. Change the access there.',
+    ];
+
+    /**
+     * Team deletion: drop the rows of folders other apps manage, and leave
+     * the folders and their shares alone (v4.20.48). The team is going, so
+     * the access ends with it; the share itself is the managing app's.
+     */
+    public function forgetManagedResources(string $teamId): int {
+        $count = 0;
+        foreach ($this->resourceMapper->findAllByTeamAndApp($teamId, 'files') as $row) {
+            if ($row->getStatus() === TeamAppResource::STATUS_MANAGED) {
+                $this->resourceMapper->deleteById($row->getId());
+                $count++;
+            }
+        }
+        return $count;
+    }
+
+    /** The answer when this team's access could not be removed: logged, row untouched. */
+    private function accessStripFailed(string $where, string $teamId, string $app, string $resourceId, \Throwable $e): array {
+        $this->logger->error('[TeamHub][ResourceService] ' . $where . ': team access could not be removed, registry row left as it was', [
+            'teamId' => $teamId, 'resourceApp' => $app, 'resourceId' => $resourceId,
+            'error' => $e->getMessage(), 'app' => Application::APP_ID,
+        ]);
+        return ['success' => false, 'error' => 'Could not remove team access'];
+    }
+
+    /**
+     * v4.20.37 — a row the team never accepted (pending), turned down
+     * (ignored), already let go of (disconnected) or with any other status is
+     * never a way to destroy the resource. Only `active` is.
+     */
+    private function isActive(TeamAppResource $row): bool {
+        return $row->getStatus() === 'active';
+    }
+
+    /**
+     * Let go of a resource through a row that is not active: strip whatever
+     * access this team actually holds and drop the registry row. Never
+     * destroys. A pending row's resource belongs to whoever shared it and to
+     * the teams that accepted it; deleting it, or deleting the team, must not
+     * take it from them.
+     *
+     * @return array { success: true, mode: 'released', reason: 'not_active', status: string, aclStripped: bool }
+     *         or { success: false, error } when the access could not be removed
+     */
+    private function releaseNonActive(string $teamId, string $app, string $resourceId, TeamAppResource $row): array {
+        $db = $this->container->get(\OCP\IDBConnection::class);
+        try {
+            $stripped = $this->stripTeamAccess($teamId, $app, $resourceId, $db);
+        } catch (\Throwable $e) {
+            return $this->accessStripFailed('releaseNonActive', $teamId, $app, $resourceId, $e);
+        }
+        $this->resourceMapper->deleteById($row->getId());
+
+        $this->logger->info('[TeamHub][ResourceService] non-active row released, resource kept', [
+            'teamId' => $teamId, 'resourceApp' => $app, 'resourceId' => $resourceId,
+            'status' => $row->getStatus(), 'aclStripped' => $stripped, 'app' => Application::APP_ID,
+        ]);
+
+        return [
+            'success'     => true,
+            'mode'        => 'released',
+            'reason'      => 'not_active',
+            'status'      => $row->getStatus(),
+            'origin'      => $row->getOrigin(),
+            'aclStripped' => $stripped,
         ];
     }
 
@@ -1020,14 +1125,20 @@ class ResourceService {
      * Count how many teams (other than $excludeTeamId) currently have the given
      * resource connected via teamhub_team_app_resources.
      *
-     * Used purely for audit logging in removeTeamAccess — does not affect behaviour.
+     * Half of the other-team check in deleteSpecificResource(), and the
+     * audit figure in removeTeamAccess().
+     *
+     * @return int|null null when the count could not be read (logged at error
+     *         level). v4.20.38: it used to answer 0, "no other team", which is
+     *         the answer that allows a destroy; the decision now treats null
+     *         as "another team may hold this" and detaches.
      */
     private function countOtherTeamsWithResource(
         \OCP\IDBConnection $db,
         string             $app,
         string             $resourceId,
         string             $excludeTeamId
-    ): int {
+    ): ?int {
         try {
             $qb = $db->getQueryBuilder();
             $qb->select($qb->func()->count('*', 'cnt'))
@@ -1040,76 +1151,134 @@ class ResourceService {
             $count  = (int) $result->fetchOne();
             $result->closeCursor();
             return $count;
-        } catch (\Throwable) {
-            return 0;
+        } catch (\Throwable $e) {
+            $this->logger->error('[TeamHub][ResourceService] countOtherTeamsWithResource failed, treating the resource as shared', [
+                'resourceApp' => $app, 'resourceId' => $resourceId, 'excludeTeamId' => $excludeTeamId,
+                'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return null;
         }
     }
 
     /**
-     * Fully delete a team resource. Delegates to the appropriate sub-service.
-     * Legacy method — operates on the first resource for the given app.
-     * Prefer deleteSpecificResource for multi-resource teams.
+     * Remove an app's resources from a team: the app-disable switch, the
+     * per-app DELETE route, team deletion, the pending-deletion job, orphan
+     * cleanup and template rollouts all come through here.
+     *
+     * v4.20.34 — registry-driven. Every active registry row for the app goes
+     * through deleteSpecificResource(), which destroys only what TeamHub
+     * created and unlinks everything else (see isTeamHubCreated()). Until this
+     * version the talk/calendar/deck/shared-folder branches found their target
+     * by the team's ACL (`dav_shares`, `deck_board_acl`, the circle share) and
+     * destroyed it without asking where it came from, so a calendar or board
+     * somebody had connected to the team was deleted for its owner too.
+     *
+     * A resource with no registry row has no origin, and so is never
+     * destroyed here (fail closed). IntraVox has no registry rows and keeps
+     * its own page delete.
+     *
+     * @return array{deleted: bool, mode: string, destroyed: list<string>, unlinked: list<string>, detached: list<string>, failed: list<string>, detail: string}
+     *         `deleted` is true when anything was destroyed; `unlinked` lists
+     *         resources TeamHub did not create, `detached` (files, calendar, deck)
+     *         resources another team still has; both are left in place.
      */
     public function deleteTeamResource(string $teamId, string $app): array {
-        $db = $this->container->get(\OCP\IDBConnection::class);
-        switch ($app) {
-            case 'talk':
-                $result = $this->talkService->deleteTalkRoom($teamId, $db);
-                if (!empty($result['deleted'])) {
-                    $this->removeResourceRowsByTeamAndApp($teamId, 'talk');
-                }
-                return $result;
-            case 'files':
-                // Handle both group-folder-backed (gf:) and legacy share-backed resources.
-                $fileRows = $this->resourceMapper->findActiveByTeamAndApp($teamId, 'files');
-                if (!empty($fileRows)) {
-                    $firstId = $fileRows[0]->getResourceId();
-                    if (str_starts_with($firstId, 'gf:')) {
-                        $folderId = (int) substr($firstId, 3);
-                        try {
-                            $this->groupFolderService->deleteGroupFolder($folderId, $teamId);
-                            $result = ['deleted' => true, 'detail' => "Group folder {$folderId} deleted"];
-                        } catch (\Throwable $e) {
-                            $result = ['deleted' => false, 'detail' => $e->getMessage()];
-                        }
-                    } else {
-                        $result = $this->filesService->deleteSharedFolder($teamId, $db);
-                    }
-                } else {
-                    $result = $this->filesService->deleteSharedFolder($teamId, $db);
-                }
-                if (!empty($result['deleted'])) {
-                    $this->removeResourceRowsByTeamAndApp($teamId, 'files');
-                }
-                return $result;
-            case 'calendar':
-                $result = $this->calendarService->deleteCalendar($teamId, $db);
-                if (!empty($result['deleted'])) {
-                    $this->removeResourceRowsByTeamAndApp($teamId, 'calendar');
-                }
-                return $result;
-            case 'deck':
-                $result = $this->deckService->deleteDeckBoard($teamId, $db);
-                if (!empty($result['deleted'])) {
-                    $this->removeResourceRowsByTeamAndApp($teamId, 'deck');
-                }
-                return $result;
-            case 'intravox':
-                return $this->intravoxService->deletePage($teamId, $this->getTeamName($teamId, $db));
-            default:
-                return ['deleted' => false, 'detail' => "Unknown app: {$app}"];
+        if ($app === 'intravox') {
+            $db = $this->container->get(\OCP\IDBConnection::class);
+            return $this->intravoxService->deletePage($teamId, $this->getTeamName($teamId, $db));
         }
+        if (!in_array($app, ['talk', 'files', 'calendar', 'deck'], true)) {
+            return ['deleted' => false, 'mode' => 'none', 'destroyed' => [], 'unlinked' => [], 'detached' => [], 'failed' => [], 'detail' => "Unknown app: {$app}"];
+        }
+
+        $destroyed = [];
+        $unlinked  = [];
+        $detached  = [];
+        $failed    = [];
+        foreach ($this->resourceMapper->findActiveByTeamAndApp($teamId, $app) as $row) {
+            $resourceId = $row->getResourceId();
+            // v4.20.38 — every app, Talk included, takes the one decision.
+            $result = $this->deleteSpecificResource($teamId, $app, $resourceId);
+            if (!($result['success'] ?? false)) {
+                $failed[] = $resourceId;
+                continue;
+            }
+            // Only an explicit 'destroyed' counts as destroyed; any other
+            // mode left the resource in place.
+            match ($result['mode'] ?? '') {
+                'destroyed' => $destroyed[] = $resourceId,
+                'detached'  => $detached[] = $resourceId,
+                default     => $unlinked[] = $resourceId,
+            };
+        }
+
+        $kept = count($unlinked) + count($detached);
+        $mode = match (true) {
+            $destroyed !== [] && $kept > 0 => 'mixed',
+            $destroyed !== []              => 'destroyed',
+            $unlinked !== [] && $detached !== [] => 'mixed',
+            $unlinked !== []               => 'unlinked',
+            $detached !== []               => 'detached',
+            default                        => 'none',
+        };
+        $detail = $mode === 'none' && $failed === []
+            ? "No registered {$app} resource for this team; nothing destroyed"
+            : sprintf('%d destroyed, %d unlinked, %d detached, %d failed', count($destroyed), count($unlinked), count($detached), count($failed));
+
+        return [
+            'deleted'   => $destroyed !== [],
+            'mode'      => $mode,
+            'destroyed' => $destroyed,
+            'unlinked'  => $unlinked,
+            'detached'  => $detached,
+            'failed'    => $failed,
+            'detail'    => $detail,
+        ];
     }
 
     /**
-     * Delete a specific resource by resourceId (multi-resource-aware).
-     * Destroys the underlying NC resource (room, calendar, folder, board)
-     * and deletes the registry row.
+     * May TeamHub destroy the resource behind this registry row?
+     *
+     * Only when TeamHub provisioned it (`origin = 'teamhub_create'`). A
+     * resource the team connected (`teamhub_connect`), one reconcile found
+     * (`discovered_auto_accepted`, `discovered_pending`), and a row with an
+     * empty or unknown origin all belong to somebody else as far as TeamHub
+     * can prove, so they are unlinked, never destroyed. Fail closed: a wrong
+     * "no" leaves a resource to remove by hand; a wrong "yes" deletes
+     * another person's folder for everyone.
+     */
+    private function isTeamHubCreated(TeamAppResource $row): bool {
+        return $row->getOrigin() === TeamApps::ORIGIN_CREATED;
+    }
+
+    /**
+     * Take a resource away from a team: **the one destroy-or-keep decision.**
+     *
+     * The /delete route, deleteTeamResource() (app disable, the per-app
+     * DELETE route, the legacy per-app pass of team delete, PendingDeletionJob,
+     * orphan cleanup, template rollouts) and the team-delete cascade in
+     * TeamService all call this, and nothing else in the app reaches
+     * destroyResource(). In order (v4.20.38):
+     *
+     *   0. **Managed.** A folder another app manages is refused: the app
+     *      grants that access, TeamHub does not take it (v4.20.48).
+     *   1. **Status.** A row that is not `active` (pending, ignored, anything
+     *      else) is released: this team's access stripped, the row dropped.
+     *   2. **Other teams.** Another team on the resource, in the registry
+     *      (countOtherTeamsWithResource) or in the app's own sharing
+     *      (hasOtherCircleOwners: group_folders_groups, share, dav_shares,
+     *      deck_board_acl, talk_attendees), detaches this team only. Either
+     *      lookup failing counts as "another team" (both fail closed).
+     *   3. **Origin.** Anything TeamHub did not create is unlinked.
+     *   4. Only then is the resource destroyed and the row deleted.
+     *
+     * Individual users invited to the resource do not save it: it is the
+     * team's, and the team is letting it go.
      *
      * @param string $teamId
      * @param string $app         talk | files | calendar | deck
      * @param string $resourceId  Resource identifier
-     * @return array { success: bool, error?: string }
+     * @return array { success: bool, mode?: 'destroyed'|'detached'|'unlinked'|'released', reason?: string, origin?: string, error?: string }
      */
     public function deleteSpecificResource(string $teamId, string $app, string $resourceId): array {
         $db  = $this->container->get(\OCP\IDBConnection::class);
@@ -1119,6 +1288,57 @@ class ResourceService {
             return ['success' => false, 'error' => 'Resource row not found'];
         }
 
+        // 0. Another app's folder: refused, nothing stripped (v4.20.48).
+        if ($row->getStatus() === TeamAppResource::STATUS_MANAGED) {
+            return self::MANAGED_REFUSAL;
+        }
+
+        // 1. Status.
+        if (!$this->isActive($row)) {
+            return $this->releaseNonActive($teamId, $app, $resourceId, $row);
+        }
+
+        // 2. Other teams. v4.0.7 added the native half after a calendar shared
+        // with another team in the Calendar app was destroyed on team delete
+        // because only the registry was asked. A null count could not be read.
+        $otherTeamCount    = $this->countOtherTeamsWithResource($db, $app, $resourceId, $teamId);
+        $nativeOtherOwners = $this->hasOtherCircleOwners($db, $app, $resourceId, $teamId);
+        if ($otherTeamCount !== 0 || $nativeOtherOwners) {
+            $this->logger->info('[TeamHub][ResourceService] deleteSpecificResource: another team may hold this, detaching instead of destroying', [
+                'teamId' => $teamId, 'resourceApp' => $app, 'resourceId' => $resourceId,
+                'otherTeamCount' => $otherTeamCount, 'nativeOtherOwners' => $nativeOtherOwners,
+                'app' => Application::APP_ID,
+            ]);
+            $result = $this->removeTeamAccess($teamId, $app, $resourceId);
+            return array_merge($result, [
+                'mode'              => 'detached',
+                'reason'            => 'shared_with_other_team',
+                'origin'            => $row->getOrigin(),
+                'otherTeamCount'    => $otherTeamCount,
+                'nativeOtherOwners' => $nativeOtherOwners,
+            ]);
+        }
+
+        // 3. Origin.
+        if (!$this->isTeamHubCreated($row)) {
+            $this->logger->info('[TeamHub][ResourceService] deleteSpecificResource: not created by TeamHub, unlinking instead of destroying', [
+                'teamId' => $teamId, 'resourceApp' => $app, 'resourceId' => $resourceId,
+                'origin' => $row->getOrigin(), 'app' => Application::APP_ID,
+            ]);
+            $result = $this->removeTeamAccess($teamId, $app, $resourceId);
+            return array_merge($result, ['mode' => 'unlinked', 'reason' => 'not_created_by_teamhub', 'origin' => $row->getOrigin()]);
+        }
+
+        // 4. Destroy.
+        return $this->destroyResource($teamId, $app, $resourceId, $row, $db);
+    }
+
+    /**
+     * Destroy the Nextcloud resource behind an active, TeamHub-created row no
+     * other team holds, and delete the row. Private on purpose: the only way
+     * in is deleteSpecificResource(), after its three checks.
+     */
+    private function destroyResource(string $teamId, string $app, string $resourceId, TeamAppResource $row, \OCP\IDBConnection $db): array {
         try {
             $result = match ($app) {
                 'talk'     => $this->talkService->deleteRoomById($resourceId, $db),
@@ -1128,78 +1348,25 @@ class ResourceService {
                 default    => ['deleted' => false, 'detail' => "Unknown app: {$app}"],
             };
         } catch (\Throwable $e) {
-            $this->logger->error('[TeamHub][ResourceService] deleteSpecificResource failed', [
+            $this->logger->error('[TeamHub][ResourceService] destroyResource failed', [
                 // 'app' is the logger's own channel key, so the resource's app has
                 // to travel under a different name or it is overwritten and lost.
                 'teamId' => $teamId, 'resourceApp' => $app, 'resourceId' => $resourceId,
                 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
-            return ['success' => false, 'error' => $e->getMessage()];
+            return ['success' => false, 'error' => 'Could not delete the resource'];
         }
 
         // Delete the registry row whether or not the underlying delete succeeded
         // (if the resource was already gone, we still want to clean up our row).
         $this->resourceMapper->deleteById($row->getId());
 
-        $this->logger->info('[TeamHub][ResourceService] deleteSpecificResource completed', [
-            'teamId' => $teamId, 'app' => $app, 'resourceId' => $resourceId,
-            'result' => $result, 'app_id' => Application::APP_ID,
+        $this->logger->info('[TeamHub][ResourceService] destroyResource completed', [
+            'teamId' => $teamId, 'resourceApp' => $app, 'resourceId' => $resourceId,
+            'result' => $result, 'app' => Application::APP_ID,
         ]);
 
-        return ['success' => true, 'detail' => $result];
-    }
-
-    /**
-     * v4.0.4 — safety-checked variant of deleteSpecificResource, intended for
-     * the team-delete cascade.
-     *
-     * Decides between two outcomes based on whether *another team* still has
-     * the same resource connected via teamhub_team_app_resources:
-     *   - No other teams share it  → deleteSpecificResource (destroys the
-     *     underlying NC resource).
-     *   - Another team shares it   → removeTeamAccess (strips this team's
-     *     ACL row, leaves the resource intact for the surviving teams).
-     *
-     * Only team-to-team sharing counts. Individual users invited to a Deck
-     * board, a Talk room, or the folder do not preserve the resource — the
-     * team that owned it is being deleted and the shared registry says no
-     * other team was co-owning. Those individuals will lose access as a
-     * consequence of the destroy, same as if the team owner had used the
-     * "Delete resource" action in Manage Team.
-     *
-     * @return array {mode: 'destroyed'|'detached', ...}
-     */
-    public function destroyOrDetachOnTeamDelete(string $teamId, string $app, string $resourceId): array {
-        $db = $this->container->get(\OCP\IDBConnection::class);
-
-        // Two-source safety check:
-        //  1. teamhub_team_app_resources — the registry we control. Fast and
-        //     covers every connection made through TeamHub itself.
-        //  2. Native NC storage (dav_shares / deck_board_acl / talk_attendees
-        //     / share) — catches teams whose access predates our registry OR
-        //     was granted via NC's own sharing UI without touching TeamHub.
-        //     v4.0.7 — added after a calendar that was shared with another
-        //     team via NC-native sharing was destroyed on team-delete because
-        //     only the registry check ran.
-        $otherTeamCount = $this->countOtherTeamsWithResource($db, $app, $resourceId, $teamId);
-        $nativeOtherOwners = $this->hasOtherCircleOwners($db, $app, $resourceId, $teamId);
-
-        if ($otherTeamCount > 0 || $nativeOtherOwners) {
-            $result = $this->removeTeamAccess($teamId, $app, $resourceId);
-            $this->logger->info('[TeamHub][ResourceService] team-delete cascade: resource preserved for other teams', [
-                'teamId' => $teamId, 'app' => $app, 'resourceId' => $resourceId,
-                'otherTeamCount' => $otherTeamCount,
-                'nativeOtherOwners' => $nativeOtherOwners,
-                'app_id' => Application::APP_ID,
-            ]);
-            return array_merge(
-                ['mode' => 'detached', 'otherTeamCount' => $otherTeamCount, 'nativeOtherOwners' => $nativeOtherOwners],
-                $result,
-            );
-        }
-
-        $result = $this->deleteSpecificResource($teamId, $app, $resourceId);
-        return array_merge(['mode' => 'destroyed'], $result);
+        return ['success' => true, 'mode' => 'destroyed', 'origin' => $row->getOrigin(), 'detail' => $result];
     }
 
     /**
@@ -1209,13 +1376,19 @@ class ResourceService {
      *   calendar → dav_shares.principaluri LIKE 'principals/circles/%'
      *   deck     → deck_board_acl / deck_acl participant + type=7 (circle)
      *   talk     → talk_attendees actor_type='circles'
-     *   files    → share.share_with + share_type=7 (circle) — legacy shares,
-     *              plus circles_group in group-folders for gf: resource IDs
+     *   files    → gf: ids: group_folders_groups.circle_id (the table
+     *              GroupFolderService::getRealGroupFolderResourceIds() reads);
+     *              other ids: share.share_with + share_type=7 (legacy shares)
      *
      * Individual user / group principals are ignored per Justin's rule:
      * shared resources are preserved only when another *team* still owns them.
-     * Any error returns false (fail open into destroy) — better to hard-delete
-     * a lone resource than to leave orphans when the check itself is broken.
+     *
+     * Fails closed: any lookup that cannot run (missing table, renamed column,
+     * driver error) returns true, so the caller detaches instead of destroying.
+     * Destroying is irreversible; an orphaned resource can still be cleaned up
+     * by hand. Until this version the gf: branch queried two tables that do not
+     * exist in groupfolders 23, swallowed both errors and answered false, so
+     * the guard never fired for a team folder.
      */
     private function hasOtherCircleOwners(
         \OCP\IDBConnection $db,
@@ -1239,21 +1412,29 @@ class ResourceService {
                     return $c > 0;
 
                 case 'deck':
+                    // Two table-name variants; one missing is expected. A
+                    // missing table is skipped by asking (v4.20.38), not by
+                    // catching; a failure on a table that exists throws to
+                    // the outer catch. Neither table there is unknown, not safe.
+                    $deckLookupRan = false;
                     foreach (['deck_board_acl', 'deck_acl'] as $tbl) {
-                        try {
-                            $qb = $db->getQueryBuilder();
-                            $qb->select($qb->func()->count('*', 'cnt'))
-                                ->from($tbl)
-                                ->where($qb->expr()->eq('board_id', $qb->createNamedParameter((int)$resourceId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
-                                ->andWhere($qb->expr()->eq('type', $qb->createNamedParameter(7, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
-                                ->andWhere($qb->expr()->neq('participant', $qb->createNamedParameter($excludeTeamId)));
-                            $r = $qb->executeQuery();
-                            $c = (int)$r->fetchOne();
-                            $r->closeCursor();
-                            if ($c > 0) return true;
-                        } catch (\Throwable) {
-                            // Table doesn't exist on this NC/Deck version — try next.
+                        if (!$db->tableExists($tbl)) {
+                            continue;
                         }
+                        $qb = $db->getQueryBuilder();
+                        $qb->select($qb->func()->count('*', 'cnt'))
+                            ->from($tbl)
+                            ->where($qb->expr()->eq('board_id', $qb->createNamedParameter((int)$resourceId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                            ->andWhere($qb->expr()->eq('type', $qb->createNamedParameter(7, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                            ->andWhere($qb->expr()->neq('participant', $qb->createNamedParameter($excludeTeamId)));
+                        $r = $qb->executeQuery();
+                        $c = (int)$r->fetchOne();
+                        $r->closeCursor();
+                        $deckLookupRan = true;
+                        if ($c > 0) return true;
+                    }
+                    if (!$deckLookupRan) {
+                        throw new \RuntimeException('no Deck ACL table exists (deck_board_acl, deck_acl)');
                     }
                     return false;
 
@@ -1281,51 +1462,46 @@ class ResourceService {
                     return $c > 0;
 
                 case 'files':
-                    // Group Folder-backed: check groupfolders_circles for other
-                    // circles on the same folder id. Legacy share-based: check
-                    // share table for other circle-typed shares of the same node.
+                    // Group Folder-backed: groupfolders keeps a team on a folder
+                    // as a group_folders_groups row with circle_id set (group_id
+                    // ''); a group's row has circle_id '' (NULL on Oracle). Same
+                    // relationship GroupFolderService::getRealGroupFolderResourceIds()
+                    // reads. Errors fall through to the outer catch (fail closed).
                     if (str_starts_with($resourceId, 'gf:')) {
                         $folderId = (int) substr($resourceId, 3);
-                        foreach (['group_folders_circles', 'groupfolders_circles'] as $tbl) {
-                            try {
-                                $qb = $db->getQueryBuilder();
-                                $qb->select($qb->func()->count('*', 'cnt'))
-                                    ->from($tbl)
-                                    ->where($qb->expr()->eq('folder_id', $qb->createNamedParameter($folderId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
-                                    ->andWhere($qb->expr()->neq('circle_id', $qb->createNamedParameter($excludeTeamId)));
-                                $r = $qb->executeQuery();
-                                $c = (int)$r->fetchOne();
-                                $r->closeCursor();
-                                if ($c > 0) return true;
-                            } catch (\Throwable) { /* try next table name variant */ }
-                        }
-                        return false;
-                    }
-                    // Legacy shared folder: share_type=7 is circle share.
-                    try {
                         $qb = $db->getQueryBuilder();
                         $qb->select($qb->func()->count('*', 'cnt'))
-                            ->from('share')
-                            ->where($qb->expr()->eq('file_source', $qb->createNamedParameter((int)$resourceId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
-                            ->andWhere($qb->expr()->eq('share_type', $qb->createNamedParameter(7, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
-                            ->andWhere($qb->expr()->neq('share_with', $qb->createNamedParameter($excludeTeamId)));
+                            ->from('group_folders_groups')
+                            ->where($qb->expr()->eq('folder_id', $qb->createNamedParameter($folderId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                            ->andWhere($qb->expr()->isNotNull('circle_id'))
+                            ->andWhere($qb->expr()->neq('circle_id', $qb->createNamedParameter('')))
+                            ->andWhere($qb->expr()->neq('circle_id', $qb->createNamedParameter($excludeTeamId)));
                         $r = $qb->executeQuery();
                         $c = (int)$r->fetchOne();
                         $r->closeCursor();
                         return $c > 0;
-                    } catch (\Throwable) {
-                        return false;
                     }
+                    // Legacy shared folder: share_type=7 is circle share.
+                    $qb = $db->getQueryBuilder();
+                    $qb->select($qb->func()->count('*', 'cnt'))
+                        ->from('share')
+                        ->where($qb->expr()->eq('file_source', $qb->createNamedParameter((int)$resourceId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                        ->andWhere($qb->expr()->eq('share_type', $qb->createNamedParameter(7, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                        ->andWhere($qb->expr()->neq('share_with', $qb->createNamedParameter($excludeTeamId)));
+                    $r = $qb->executeQuery();
+                    $c = (int)$r->fetchOne();
+                    $r->closeCursor();
+                    return $c > 0;
 
                 default:
                     return false;
             }
         } catch (\Throwable $e) {
-            $this->logger->warning('[TeamHub][ResourceService] hasOtherCircleOwners lookup failed — failing open to destroy', [
+            $this->logger->error('[TeamHub][ResourceService] hasOtherCircleOwners lookup failed — failing closed, resource will be detached, not destroyed', [
                 'app' => $app, 'resourceId' => $resourceId, 'excludeTeamId' => $excludeTeamId,
                 'error' => $e->getMessage(), 'app_id' => Application::APP_ID,
             ]);
-            return false;
+            return true;
         }
     }
 
@@ -1339,16 +1515,10 @@ class ResourceService {
             $this->logger->debug('[TeamHub][ResourceService] removeFilesAccess — removing circle from group folder', [
                 'teamId' => $teamId, 'folderId' => $folderId, 'app_id' => Application::APP_ID,
             ]);
-            try {
-                $this->groupFolderService->removeCircleFromFolder($folderId, $teamId);
-                return true;
-            } catch (\Throwable $e) {
-                $this->logger->warning('[TeamHub][ResourceService] removeFilesAccess group folder failed', [
-                    'teamId' => $teamId, 'folderId' => $folderId,
-                    'error' => $e->getMessage(), 'app_id' => Application::APP_ID,
-                ]);
-                return false;
-            }
+            // v4.20.38: a failure throws to stripTeamAccess()'s caller, which
+            // reports it and leaves the registry row as it was.
+            $this->groupFolderService->removeCircleFromFolder($folderId, $teamId);
+            return true;
         }
         return $this->filesService->removeFilesAccess($teamId, (int)$resourceId, $db);
     }
@@ -1377,28 +1547,6 @@ class ResourceService {
             }
         }
         return $this->filesService->deleteFolderById((int)$resourceId, $teamId, $db);
-    }
-
-    /**
-     * Remove all registry rows for a team + app after a hard delete.
-     * Errors are logged and swallowed — the NC-side resource is already gone.
-     */
-    private function removeResourceRowsByTeamAndApp(string $teamId, string $appId): void {
-        try {
-            $rows = $this->resourceMapper->findAllByTeamAndApp($teamId, $appId);
-            foreach ($rows as $row) {
-                $this->resourceMapper->deleteById($row->getId());
-            }
-            $this->logger->debug('[TeamHub][ResourceService] removeResourceRowsByTeamAndApp — removed', [
-                'teamId' => $teamId, 'appId' => $appId, 'count' => count($rows),
-                'app' => Application::APP_ID,
-            ]);
-        } catch (\Throwable $e) {
-            $this->logger->warning('[TeamHub][ResourceService] removeResourceRowsByTeamAndApp failed', [
-                'teamId' => $teamId, 'appId' => $appId, 'error' => $e->getMessage(),
-                'app' => Application::APP_ID,
-            ]);
-        }
     }
 
     // -------------------------------------------------------------------------

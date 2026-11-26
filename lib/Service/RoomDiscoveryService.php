@@ -50,7 +50,12 @@ class RoomDiscoveryService {
     }
 
     /**
-     * @return array<int, array{id: string, displayName: string, email: string, source: string}>
+     * `kind` says which principal collection the entry lives in: a CRM
+     * resource (a projector, a car) is a `calendar-resources` principal, every
+     * room is a `calendar-rooms` one. `RoomAvailabilityService` needs it to
+     * find the right calendar (v4.20.0).
+     *
+     * @return array<int, array{id: string, displayName: string, email: string, source: string, kind: string}>
      */
     public function listAvailableRooms(): array {
         $crmInstalled = $this->appManager->isInstalled('calendar_resource_management');
@@ -148,7 +153,7 @@ class RoomDiscoveryService {
                         continue;
                     }
                     $seen[$key] = true;
-                    $rooms[] = ['id' => $id, 'displayName' => $name, 'email' => $email, 'source' => 'roomvox'];
+                    $rooms[] = ['id' => $id, 'displayName' => $name, 'email' => $email, 'source' => 'roomvox', 'kind' => 'room'];
                 } catch (\Throwable $e) {
                     $this->logger->debug('[TeamHub][RoomDiscoveryService] RoomVox entry parse failed', [
                         'err' => $e->getMessage(), 'app' => Application::APP_ID,
@@ -186,7 +191,7 @@ class RoomDiscoveryService {
                     continue;
                 }
                 $seen[$key] = true;
-                $rooms[] = ['id' => $id, 'displayName' => $name, 'email' => $email, 'source' => 'crm'];
+                $rooms[] = ['id' => $id, 'displayName' => $name, 'email' => $email, 'source' => 'crm', 'kind' => 'room'];
             }
             $result->closeCursor();
 
@@ -230,7 +235,7 @@ class RoomDiscoveryService {
                     continue;
                 }
                 $seen[$key] = true;
-                $rooms[] = ['id' => $id, 'displayName' => $name, 'email' => $email, 'source' => 'crm'];
+                $rooms[] = ['id' => $id, 'displayName' => $name, 'email' => $email, 'source' => 'crm', 'kind' => 'resource'];
             }
             $result->closeCursor();
         } catch (\Throwable $e) {

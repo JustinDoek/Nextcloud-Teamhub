@@ -363,13 +363,19 @@
                         <Calendar :size="ICON_LARGE" />
                         <h2 class="teamhub-widget-title">{{ t('teamhub', 'Upcoming events') }}</h2>
                         <NcActions class="teamhub-widget-actions">
-                            <NcActionButton @click="$emit('add-event')">
+                            <NcActionButton close-after-click @click="$emit('add-event')">
                                 <template #icon><CalendarPlus :size="ICON_BODY" /></template>
                                 {{ t('teamhub', 'Add event') }}
                             </NcActionButton>
-                            <NcActionButton @click="$emit('add-meeting')">
+                            <!-- v4.20.12 — Add meeting is licensed; hidden, not disabled. -->
+                            <NcActionButton close-after-click v-if="licensed" @click="$emit('add-meeting')">
                                 <template #icon><AccountGroup :size="ICON_BODY" /></template>
                                 {{ t('teamhub', 'Add meeting') }}
+                            </NcActionButton>
+                            <!-- v4.20.8 — licensed; hidden, not disabled, when unlicensed. -->
+                            <NcActionButton close-after-click v-if="licensed" @click="$emit('free-room-now')">
+                                <template #icon><DoorOpen :size="ICON_BODY" /></template>
+                                {{ t('teamhub', 'Free room now') }}
                             </NcActionButton>
                         </NcActions>
                         <WidgetCollapseButton
@@ -407,17 +413,17 @@
                         <CardText :size="ICON_LARGE" />
                         <h2 class="teamhub-widget-title">{{ t('teamhub', 'Upcoming tasks') }}</h2>
                         <NcActions class="teamhub-widget-actions">
-                            <NcActionButton v-if="resources.deck && resources.deck.length > 0" @click="$emit('add-deck-task')">
+                            <NcActionButton close-after-click v-if="resources.deck && resources.deck.length > 0" @click="$emit('add-deck-task')">
                                 <template #icon><CheckboxMarkedOutline :size="ICON_BODY" /></template>
                                 {{ t('teamhub', 'Create Deck task') }}
                             </NcActionButton>
-                            <NcActionButton v-if="resources.tasks && resources.calendar && resources.calendar.length > 0" @click="$emit('add-personal-task')">
+                            <NcActionButton close-after-click v-if="resources.tasks && resources.calendar && resources.calendar.length > 0" @click="$emit('add-personal-task')">
                                 <template #icon><ClipboardPlusOutline :size="ICON_BODY" /></template>
                                 {{ t('teamhub', 'Create personal task') }}
                             </NcActionButton>
                             <!-- v4.9.15 — only when OpenProject grants "add work
                                  packages" to this viewer (hidden, not disabled). -->
-                            <NcActionButton v-if="openProjectWorkActions.canCreate" @click="$emit('add-openproject-work-package')">
+                            <NcActionButton close-after-click v-if="openProjectWorkActions.canCreate" @click="$emit('add-openproject-work-package')">
                                 <template #icon><BriefcaseOutline :size="ICON_BODY" /></template>
                                 {{ t('teamhub', 'Create work package') }}
                             </NcActionButton>
@@ -520,18 +526,18 @@
                              admin is a moderator (level 8 ≥ 4), so the
                              Collectives entry needs no second check. -->
                         <NcActions v-if="!editMode && ((isTeamAdmin && resources.intravox) || (isTeamModerator && collectivesConfig?.collectives_enabled))" class="teamhub-widget-actions">
-                            <NcActionButton v-if="isTeamAdmin && resources.intravox" @click="$emit('create-page')">
+                            <NcActionButton close-after-click v-if="isTeamAdmin && resources.intravox" @click="$emit('create-page')">
                                 <template #icon><FilePlus :size="ICON_BODY" /></template>
                                 {{ t('teamhub', 'Create Intranet page') }}
                             </NcActionButton>
-                            <NcActionButton
+                            <NcActionButton close-after-click
                                 v-if="isTeamAdmin && resources.intravox"
                                 :disabled="!pagesData.teamPage"
                                 @click="$emit('delete-page')">
                                 <template #icon><TrashCan :size="ICON_BODY" /></template>
                                 {{ t('teamhub', 'Delete Intranet page') }}
                             </NcActionButton>
-                            <NcActionButton v-if="collectivesConfig?.collectives_enabled" @click="$emit('create-wiki-page')">
+                            <NcActionButton close-after-click v-if="collectivesConfig?.collectives_enabled" @click="$emit('create-wiki-page')">
                                 <template #icon><FilePlus :size="ICON_BODY" /></template>
                                 {{ t('teamhub', 'Create Collectives page') }}
                             </NcActionButton>
@@ -747,7 +753,7 @@
                                 <template #icon><FolderOutline :size="ICON_BODY" /></template>
                                 {{ t('teamhub', 'Project files') }}
                             </NcActionLink>
-                            <NcActionButton @click="refreshOpenProject">
+                            <NcActionButton close-after-click @click="refreshOpenProject">
                                 <template #icon><Refresh :size="ICON_BODY" /></template>
                                 {{ t('teamhub', 'Refresh project data') }}
                             </NcActionButton>
@@ -870,6 +876,87 @@
                 </div>
             </grid-item>
 
+            <!-- v4.20.2 — the team conversation: threads, open polls, a running
+                 call (TeamChatWidget). v4.20.5: named Communication, and Meet now. -->
+            <grid-item
+                v-if="showChatWidget && getGridItem('widget-talk')"
+                v-bind="getGridItem('widget-talk')"
+                class="teamhub-grid-item"
+                :class="{ 'teamhub-grid-item--editing': editMode }">
+                <div class="teamhub-widget-card">
+                    <div
+                        v-if="editMode"
+                        class="teamhub-widget-drag-handle"
+                        tabindex="0"
+                        :aria-label="t('teamhub', 'Communication') + ' — ' + t('teamhub', 'use arrow keys to move')"
+                        @keydown.up.prevent="moveWidget('widget-talk', 'up')"
+                        @keydown.down.prevent="moveWidget('widget-talk', 'down')"
+                        @keydown.left.prevent="moveWidget('widget-talk', 'left')"
+                        @keydown.right.prevent="moveWidget('widget-talk', 'right')">
+                        <DragVariant :size="ICON_BODY" />
+                        <span aria-hidden="true">{{ t('teamhub', 'Communication') }}</span>
+                    </div>
+                    <div class="teamhub-widget-header">
+                        <Chat :size="ICON_LARGE" />
+                        <h2 class="teamhub-widget-title">{{ t('teamhub', 'Communication') }}</h2>
+                        <NcActions class="teamhub-widget-actions">
+                            <NcActionButton close-after-click v-if="chatCallAction" @click="$emit('start-call')">
+                                <template #icon><Video :size="ICON_BODY" /></template>
+                                <!-- TRANSLATORS: menu action that starts a video call with the team in its Talk conversation right now, or joins the one already running -->
+                                {{ chatCallAction === 'join' ? t('teamhub', 'Join call') : t('teamhub', 'Meet now') }}
+                            </NcActionButton>
+                            <NcActionButton close-after-click @click="$emit('set-view', 'talk')">
+                                <template #icon><Chat :size="ICON_BODY" /></template>
+                                {{ t('teamhub', 'Open chat') }}
+                            </NcActionButton>
+                        </NcActions>
+                        <WidgetCollapseButton
+                            v-if="teamPreset?.mode !== 'enforce' || editingTeamPreset"
+                            :collapsed="isCollapsed('widget-talk')"
+                            :widget-name="t('teamhub', 'Communication')"
+                            @toggle="toggleCollapse('widget-talk')" />
+                    </div>
+                    <div v-show="!isCollapsed('widget-talk')" class="teamhub-widget-content teamhub-widget-content--notoppad">
+                        <TeamChatWidget ref="chatWidget" @open-talk="$emit('set-view', 'talk')" @start-call="$emit('start-call')" />
+                    </div>
+                </div>
+            </grid-item>
+
+            <!-- v4.20.39 — Shared with team: other apps' resources for this
+                 team, from Nextcloud's Teams API (SharedWithTeamWidget). -->
+            <grid-item
+                v-if="showSharedWidget && getGridItem('widget-shared')"
+                v-bind="getGridItem('widget-shared')"
+                class="teamhub-grid-item"
+                :class="{ 'teamhub-grid-item--editing': editMode }">
+                <div class="teamhub-widget-card">
+                    <div
+                        v-if="editMode"
+                        class="teamhub-widget-drag-handle"
+                        tabindex="0"
+                        :aria-label="t('teamhub', 'Shared with team') + ' — ' + t('teamhub', 'use arrow keys to move')"
+                        @keydown.up.prevent="moveWidget('widget-shared', 'up')"
+                        @keydown.down.prevent="moveWidget('widget-shared', 'down')"
+                        @keydown.left.prevent="moveWidget('widget-shared', 'left')"
+                        @keydown.right.prevent="moveWidget('widget-shared', 'right')">
+                        <DragVariant :size="ICON_BODY" />
+                        <span aria-hidden="true">{{ t('teamhub', 'Shared with team') }}</span>
+                    </div>
+                    <div class="teamhub-widget-header">
+                        <ShareVariantOutline :size="ICON_LARGE" />
+                        <h2 class="teamhub-widget-title">{{ t('teamhub', 'Shared with team') }}</h2>
+                        <WidgetCollapseButton
+                            v-if="teamPreset?.mode !== 'enforce' || editingTeamPreset"
+                            :collapsed="isCollapsed('widget-shared')"
+                            :widget-name="t('teamhub', 'Shared with team')"
+                            @toggle="toggleCollapse('widget-shared')" />
+                    </div>
+                    <div v-show="!isCollapsed('widget-shared')" class="teamhub-widget-content teamhub-widget-content--notoppad">
+                        <SharedWithTeamWidget />
+                    </div>
+                </div>
+            </grid-item>
+
 
             <!-- Integration-package widgets (v4.13.23) — keyed by capability
                  id, so the grid position a team gives one survives the owning
@@ -941,7 +1028,7 @@
                                 </NcActionLink>
                             </template>
                             <template v-else>
-                                <NcActionButton
+                                <NcActionButton close-after-click
                                     v-for="action in headerActionsFor(widget)"
                                     :key="action.label"
                                     @click="triggerWidgetAction('cap-' + widget.cap_id, action)">
@@ -1021,7 +1108,7 @@
                         <NcActions
                             v-if="widgetDynamicActions[widget.registry_id] && widgetDynamicActions[widget.registry_id].length"
                             class="teamhub-widget-actions">
-                            <NcActionButton
+                            <NcActionButton close-after-click
                                 v-for="action in widgetDynamicActions[widget.registry_id]"
                                 :key="action.label"
                                 @click="triggerWidgetAction(widget.registry_id, action)">
@@ -1146,13 +1233,19 @@
                             <ChevronDown :size="ICON_BODY" class="teamhub-tablet-widget__chevron" :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-calendar') }" />
                         </button>
                         <NcActions class="teamhub-tablet-widget__actions">
-                            <NcActionButton @click="$emit('add-event')">
+                            <NcActionButton close-after-click @click="$emit('add-event')">
                                 <template #icon><CalendarPlus :size="ICON_BODY" /></template>
                                 {{ t('teamhub', 'Add event') }}
                             </NcActionButton>
-                            <NcActionButton @click="$emit('add-meeting')">
+                            <!-- v4.20.12 — Add meeting is licensed; hidden, not disabled. -->
+                            <NcActionButton close-after-click v-if="licensed" @click="$emit('add-meeting')">
                                 <template #icon><AccountGroup :size="ICON_BODY" /></template>
                                 {{ t('teamhub', 'Add meeting') }}
+                            </NcActionButton>
+                            <!-- v4.20.8 — licensed; hidden, not disabled, when unlicensed. -->
+                            <NcActionButton close-after-click v-if="licensed" @click="$emit('free-room-now')">
+                                <template #icon><DoorOpen :size="ICON_BODY" /></template>
+                                {{ t('teamhub', 'Free room now') }}
                             </NcActionButton>
                         </NcActions>
                     </div>
@@ -1170,17 +1263,17 @@
                             <ChevronDown :size="ICON_BODY" class="teamhub-tablet-widget__chevron" :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-deck') }" />
                         </button>
                         <NcActions class="teamhub-tablet-widget__actions">
-                            <NcActionButton v-if="resources.deck && resources.deck.length > 0" @click="$emit('add-deck-task')">
+                            <NcActionButton close-after-click v-if="resources.deck && resources.deck.length > 0" @click="$emit('add-deck-task')">
                                 <template #icon><CheckboxMarkedOutline :size="ICON_BODY" /></template>
                                 {{ t('teamhub', 'Create Deck task') }}
                             </NcActionButton>
-                            <NcActionButton v-if="resources.tasks && resources.calendar && resources.calendar.length > 0" @click="$emit('add-personal-task')">
+                            <NcActionButton close-after-click v-if="resources.tasks && resources.calendar && resources.calendar.length > 0" @click="$emit('add-personal-task')">
                                 <template #icon><ClipboardPlusOutline :size="ICON_BODY" /></template>
                                 {{ t('teamhub', 'Create personal task') }}
                             </NcActionButton>
                             <!-- v4.9.15 — only when OpenProject grants "add work
                                  packages" to this viewer (hidden, not disabled). -->
-                            <NcActionButton v-if="openProjectWorkActions.canCreate" @click="$emit('add-openproject-work-package')">
+                            <NcActionButton close-after-click v-if="openProjectWorkActions.canCreate" @click="$emit('add-openproject-work-package')">
                                 <template #icon><BriefcaseOutline :size="ICON_BODY" /></template>
                                 {{ t('teamhub', 'Create work package') }}
                             </NcActionButton>
@@ -1218,18 +1311,18 @@
                         <!-- v4.13.62 — the admin gate, as on the desktop grid
                              above; the reasoning is there. -->
                         <NcActions v-if="(isTeamAdmin && resources.intravox) || (isTeamModerator && collectivesConfig?.collectives_enabled)" class="teamhub-tablet-widget__actions">
-                            <NcActionButton v-if="isTeamAdmin && resources.intravox" @click="$emit('create-page')">
+                            <NcActionButton close-after-click v-if="isTeamAdmin && resources.intravox" @click="$emit('create-page')">
                                 <template #icon><FilePlus :size="ICON_BODY" /></template>
                                 {{ t('teamhub', 'Create Intranet page') }}
                             </NcActionButton>
-                            <NcActionButton
+                            <NcActionButton close-after-click
                                 v-if="isTeamAdmin && resources.intravox"
                                 :disabled="!pagesData.teamPage"
                                 @click="pagesData.teamPage && $emit('delete-page')">
                                 <template #icon><TrashCan :size="ICON_BODY" /></template>
                                 {{ t('teamhub', 'Delete Intranet page') }}
                             </NcActionButton>
-                            <NcActionButton v-if="collectivesConfig?.collectives_enabled" @click="$emit('create-wiki-page')">
+                            <NcActionButton close-after-click v-if="collectivesConfig?.collectives_enabled" @click="$emit('create-wiki-page')">
                                 <template #icon><FilePlus :size="ICON_BODY" /></template>
                                 {{ t('teamhub', 'Create Collectives page') }}
                             </NcActionButton>
@@ -1314,6 +1407,47 @@
                     </div>
                 </div>
 
+                <!-- v4.20.2 — the team conversation, tablet layout. -->
+                <div v-if="showChatWidget && getGridItem('widget-talk')" class="teamhub-tablet-widget">
+                    <div class="teamhub-tablet-widget__header">
+                        <!-- Raw button: tablet collapse row header (ui-standards carve-out). -->
+                        <button v-if="teamPreset?.mode !== 'enforce'" type="button" class="teamhub-tablet-widget__collapse" :aria-expanded="String(!isCollapsed('widget-talk'))" @click="toggleCollapse('widget-talk')">
+                            <Chat :size="ICON_BODY" />
+                            <span>{{ t('teamhub', 'Communication') }}</span>
+                            <ChevronDown :size="ICON_BODY" class="teamhub-tablet-widget__chevron" :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-talk') }" />
+                        </button>
+                        <NcActions class="teamhub-tablet-widget__actions">
+                            <NcActionButton close-after-click v-if="chatCallAction" @click="$emit('start-call')">
+                                <template #icon><Video :size="ICON_BODY" /></template>
+                                <!-- TRANSLATORS: menu action that starts a video call with the team in its Talk conversation right now, or joins the one already running -->
+                                {{ chatCallAction === 'join' ? t('teamhub', 'Join call') : t('teamhub', 'Meet now') }}
+                            </NcActionButton>
+                            <NcActionButton close-after-click @click="$emit('set-view', 'talk')">
+                                <template #icon><Chat :size="ICON_BODY" /></template>
+                                {{ t('teamhub', 'Open chat') }}
+                            </NcActionButton>
+                        </NcActions>
+                    </div>
+                    <div v-if="!isCollapsed('widget-talk')" class="teamhub-tablet-widget__body teamhub-tablet-widget__body--notoppad">
+                        <TeamChatWidget ref="chatWidgetTablet" @open-talk="$emit('set-view', 'talk')" @start-call="$emit('start-call')" />
+                    </div>
+                </div>
+
+                <!-- v4.20.39 — Shared with team, tablet layout. -->
+                <div v-if="showSharedWidget && getGridItem('widget-shared')" class="teamhub-tablet-widget">
+                    <div class="teamhub-tablet-widget__header">
+                        <!-- Raw button: tablet collapse row header (ui-standards carve-out). -->
+                        <button v-if="teamPreset?.mode !== 'enforce'" type="button" class="teamhub-tablet-widget__collapse" :aria-expanded="String(!isCollapsed('widget-shared'))" @click="toggleCollapse('widget-shared')">
+                            <ShareVariantOutline :size="ICON_BODY" />
+                            <span>{{ t('teamhub', 'Shared with team') }}</span>
+                            <ChevronDown :size="ICON_BODY" class="teamhub-tablet-widget__chevron" :class="{ 'teamhub-tablet-widget__chevron--collapsed': isCollapsed('widget-shared') }" />
+                        </button>
+                    </div>
+                    <div v-if="!isCollapsed('widget-shared')" class="teamhub-tablet-widget__body teamhub-tablet-widget__body--notoppad">
+                        <SharedWithTeamWidget />
+                    </div>
+                </div>
+
 
                 <!-- Project Health widget — tablet layout (v3.97.0) -->
                 <div v-if="showProjectHealthWidget && getGridItem('widget-project-health')" class="teamhub-tablet-widget">
@@ -1375,7 +1509,7 @@
                                 <template #icon><FolderOutline :size="ICON_BODY" /></template>
                                 {{ t('teamhub', 'Project files') }}
                             </NcActionLink>
-                            <NcActionButton @click="refreshOpenProject">
+                            <NcActionButton close-after-click @click="refreshOpenProject">
                                 <template #icon><Refresh :size="ICON_BODY" /></template>
                                 {{ t('teamhub', 'Refresh project data') }}
                             </NcActionButton>
@@ -1462,6 +1596,7 @@
             @schedule-meeting="$emit('schedule-meeting')"
             @add-event="$emit('add-event')"
             @add-meeting="$emit('add-meeting')"
+            @free-room-now="$emit('free-room-now')"
             @add-deck-task="$emit('add-deck-task')"
             @add-personal-task="$emit('add-personal-task')"
             @add-openproject-work-package="$emit('add-openproject-work-package')"
@@ -1472,6 +1607,7 @@
             @pages-loaded="$emit('pages-loaded', $event)"
             @collective-loaded="$emit('collective-loaded', $event)"
             @set-view="$emit('set-view', $event)"
+            @start-call="$emit('start-call')"
             @widget-actions-loaded="$emit('widget-actions-loaded', $event)" />
 
     </div>
@@ -1486,10 +1622,16 @@ import { mapState, mapGetters } from 'vuex'
 import { NcAvatar, NcActions, NcActionButton, NcActionLink, NcButton, NcNoteCard } from '@nextcloud/vue'
 import { GridLayout, GridItem } from 'grid-layout-plus'
 import { computeActiveWidgetIds, isProjectHealthActive, isCanvasCapability } from '../lib/activeWidgets.js'
+import { callAction } from '../lib/talkChat.js'
 import { packVisible, samePlacement, H_ROW, H_CANVAS } from '../lib/packLayout.js'
 import ServiceQueueWidget from './ServiceQueueWidget.vue'
 import ServiceStatsWidget from './ServiceStatsWidget.vue'
 import TeamAdoptionGrid from './admin/TeamAdoptionGrid.vue'
+import TeamChatWidget from './TeamChatWidget.vue'
+import Chat from 'vue-material-design-icons/Chat.vue'
+import ShareVariantOutline from 'vue-material-design-icons/ShareVariantOutline.vue'
+import SharedWithTeamWidget from './SharedWithTeamWidget.vue'
+import Video from 'vue-material-design-icons/Video.vue'
 import AccountMultipleCheckOutline from 'vue-material-design-icons/AccountMultipleCheckOutline.vue'
 import LifebuoyIcon from 'vue-material-design-icons/Lifebuoy.vue'
 import ChartBoxOutline from 'vue-material-design-icons/ChartBoxOutline.vue'
@@ -1510,6 +1652,7 @@ import CardText from 'vue-material-design-icons/CardText.vue'
 import CheckboxMarkedOutline from 'vue-material-design-icons/CheckboxMarkedOutline.vue'
 import InformationOutline from 'vue-material-design-icons/InformationOutline.vue'
 import AccountGroup from 'vue-material-design-icons/AccountGroup.vue'
+import DoorOpen from 'vue-material-design-icons/DoorOpen.vue'
 import CakeVariant from 'vue-material-design-icons/CakeVariant.vue'
 import BirthdaysWidget from './BirthdaysWidget.vue'
 import ClockOutline from 'vue-material-design-icons/ClockOutline.vue'
@@ -1589,8 +1732,11 @@ export default {
         // v4.10.27 — the service team's queue and statistics.
         ServiceQueueWidget, ServiceStatsWidget, LifebuoyIcon, ChartBoxOutline,
         TeamAdoptionGrid, AccountMultipleCheckOutline,
+        // v4.20.2 — the team conversation.
+        TeamChatWidget, Chat, Video,
+        SharedWithTeamWidget, ShareVariantOutline,
         GridLayout, GridItem,
-        MessageOutline, Folder, Calendar, CalendarPlus, CardText,
+        MessageOutline, Folder, Calendar, CalendarPlus, CardText, DoorOpen,
         CheckboxMarkedOutline, InformationOutline, AccountGroup,
         ClockOutline, FileDocumentOutline, ContentCopy, AccountPlus, PlusIcon,
         Cog, Puzzle, GavelIcon, ViewDashboardEdit, DragVariant,
@@ -1656,12 +1802,14 @@ export default {
         // member's own) further down this list. The instance and per-template
         // defaults left this component in v4.13.35 for Admin -> TeamHub.
         'set-as-team-default', 'apply-team-preset', 'publish-team-layout', 'cancel-team-layout', 'unlock-team-layout',
-        'schedule-meeting', 'add-event', 'add-meeting', 'add-deck-task', 'add-personal-task',
+        'schedule-meeting', 'add-event', 'add-meeting', 'free-room-now', 'add-deck-task', 'add-personal-task',
         // v4.9.15 — the Upcoming tasks header's "Create work package" (labelled without "OpenProject" since v4.9.18).
         'add-openproject-work-package',
         // v4.13.9 — `{ workPackageId }`, raised by a row's pencil.
         'edit-openproject-work-package',
         'create-page', 'delete-page', 'create-wiki-page', 'pages-loaded', 'collective-loaded', 'set-view',
+        // v4.20.5 — Meet now / Join call from the Communication widget.
+        'start-call',
         'widget-actions-loaded',
         'set-as-default',
         'reset-to-default',
@@ -1695,6 +1843,10 @@ export default {
     computed: {
         ...mapState([
             'currentTeamId', 'resources', 'members',
+            // v4.20.8 — gates the Free room now action.
+            'licensed',
+            // v4.20.5 — for the Communication widget's Meet now item.
+            'talkStatus',
             'effectiveMemberCount',
             'teamWidgets', 'packageWidgets', 'isCurrentUserDirectMember',
             'messageTarget',
@@ -1812,6 +1964,25 @@ export default {
         /** v4.10.50 — this team holds the adoption service; see activeWidgets.js. */
         showAdoptionWidget() {
             return !!this.serviceDeskConfig?.handlesAdoption
+        },
+
+        /** v4.20.2 — the team has a Talk room; see activeWidgets.js. */
+        showChatWidget() {
+            return this.activeWidgetIds.has('widget-talk')
+        },
+
+        /** v4.20.39 — Shared with team; see activeWidgets.js. */
+        showSharedWidget() {
+            return this.activeWidgetIds.has('widget-shared')
+        },
+
+        /**
+         * v4.20.5 — the Communication header's call item: 'start' (Meet now),
+         * 'join' (a call is running) or null, when Talk would refuse this
+         * viewer, which hides the item rather than disabling it.
+         */
+        chatCallAction() {
+            return callAction(this.talkStatus)
         },
 
         /** v4.10.34 — any Service-template team, desk or not yet; see activeWidgets.js. */

@@ -7,7 +7,7 @@
                     :style="{ left: `${piece * 4}%`, animationDelay: `${(piece % 6) * .15}s` }" />
             </div>
             <PartyPopper :size="ICON_HERO" aria-hidden="true" />
-            <p>{{ t('teamhub', 'Wishing you a wonderful day from everyone at TeamHub!') }}</p>
+            <p>{{ t('teamhub', 'Wishing you a wonderful day from all your colleagues.') }}</p>
         </div>
         <template #actions>
             <NcButton variant="primary" @click="$emit('dismiss')">{{ t('teamhub', 'Close') }}</NcButton>

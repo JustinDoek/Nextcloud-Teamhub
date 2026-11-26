@@ -26,9 +26,6 @@
                 class="th-decisions-list__row"
                 :class="[`th-decisions-list__row--${d.status}`]">
 
-                <!-- Status accent bar -->
-                <span class="th-decisions-list__accent" aria-hidden="true" />
-
                 <!-- Clickable row body — navigates to message stream -->
                 <button
                     class="th-decisions-list__body"
@@ -270,7 +267,7 @@ export default {
  * Loading/error/empty rows and the status/level pills now come from
  * src/styles/widget-tokens.css (.th-widget__state, .th-widget__pill).
  * What remains here is the row layout that's specific to a decision:
- * the status accent bar, the two-line body, the impact text colours,
+ * the two-line body, the impact text colours,
  * and the approver action buttons.
  * ────────────────────────────────────────────────────────────────────── */
 
@@ -281,7 +278,7 @@ export default {
     min-height: 0;
 }
 
-/* ── Row layout — accent bar + body button + (optional) actions ── */
+/* ── Row layout — body button + (optional) actions ── */
 .th-decisions-list__row {
     display: flex;
     align-items: stretch;
@@ -291,23 +288,6 @@ export default {
 .th-decisions-list__row:last-child {
     border-bottom: none;
 }
-
-/* ── Status accent bar (widget-specific — no other widget has this) ── */
-.th-decisions-list__accent {
-    width: 3px;
-    flex-shrink: 0;
-    background: var(--color-border);
-}
-
-/* v3.100.16: accent bars use NC theme tokens (were --th-color-* hex). */
-.th-decisions-list__row--open       .th-decisions-list__accent { background: var(--color-primary-element); }
-.th-decisions-list__row--finalized  .th-decisions-list__accent { background: var(--color-warning); }
-.th-decisions-list__row--approved   .th-decisions-list__accent { background: var(--color-success); }
-.th-decisions-list__row--denied     .th-decisions-list__accent { background: var(--color-error); }
-.th-decisions-list__row--withdrawn  .th-decisions-list__accent { background: var(--color-text-maxcontrast); }
-/* Legacy fallbacks for stale rows */
-.th-decisions-list__row--proposed   .th-decisions-list__accent { background: var(--color-primary-element); }
-.th-decisions-list__row--decided    .th-decisions-list__accent { background: var(--color-success); }
 
 /* ── Row body — clickable two-line layout ── */
 .th-decisions-list__body {

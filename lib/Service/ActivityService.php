@@ -541,8 +541,24 @@ class ActivityService {
      * Get upcoming calendar events for a team.
      * Reads VEVENT objects from calendarobjects via Sabre VObject.
      * Returns events starting between now and 30 days from now, sorted ascending.
+     *
+     * v4.20.8:
+     *   - **Recurring events show every date.** Objects are picked by the
+     *     occurrence range Nextcloud stores on each (`firstoccurence` /
+     *     `lastoccurence`) instead of the most recently modified few, and a
+     *     series is expanded into its occurrences in the 30 days. Before, a
+     *     weekly meeting showed only while its *first* date lay ahead, and a
+     *     series created months ago could fall outside the newest objects.
+     *   - **`room`**: the event's room (`ATTENDEE;CUTYPE=ROOM`), `{email,
+     *     name}`, so the widget can name it and look up its details.
+     *   - **`attendance`** (only when `$withAttendance`, i.e. a licensed
+     *     instance): `{accepted, total, attendees: [{name, status,
+     *     organizer}]}` over the people invited, rooms and resources left out.
+     *     Names only, no addresses: everyone who sees the row can already
+     *     open the event in the team calendar.
+     *   - **`recurring`**: true for an occurrence of a series.
      */
-    public function getTeamCalendarEvents(string $teamId, int $limit = 10): array {
+    public function getTeamCalendarEvents(string $teamId, int $limit = 10, bool $withAttendance = false): array {
 
         $user = $this->userSession->getUser();
         if (!$user) {
@@ -551,6 +567,17 @@ class ActivityService {
 
         if (!$this->appManager->isInstalled('calendar')) {
             return [];
+        }
+
+        // v4.20.10 — every address that means the viewer, so the attendee list
+        // can mark them and the widget can offer their reply.
+        $selfAddresses = [];
+        if ($withAttendance) {
+            try {
+                $selfAddresses = $this->container->get(CalendarIdentityService::class)->addressesFor($user->getUID());
+            } catch (\Throwable) {
+                $selfAddresses = [];
+            }
         }
 
         try {
@@ -599,14 +626,24 @@ class ActivityService {
                     $calName  = $calRow['displayname'] ?: $calRow['uri'];
                 }
 
+                // v4.20.8 — by occurrence range, so a series created long ago
+                // whose dates fall in the window is found (see docblock).
                 $evQb = $db->getQueryBuilder();
                 $evResult = $evQb->select('co.id', 'co.uri', 'co.calendardata', 'co.lastmodified')
                     ->from('calendarobjects', 'co')
                     ->where($evQb->expr()->eq('co.calendarid', $evQb->createNamedParameter($calendarId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
                     ->andWhere($evQb->expr()->eq('co.componenttype', $evQb->createNamedParameter('VEVENT')))
                     ->andWhere($evQb->expr()->notLike('co.uri', $evQb->createNamedParameter('%-deleted.ics')))
-                    ->orderBy('co.lastmodified', 'DESC')
-                    ->setMaxResults($limit * 3)
+                    ->andWhere($evQb->expr()->orX(
+                        $evQb->expr()->isNull('co.firstoccurence'),
+                        $evQb->expr()->lte('co.firstoccurence', $evQb->createNamedParameter($futureLimit, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)),
+                    ))
+                    ->andWhere($evQb->expr()->orX(
+                        $evQb->expr()->isNull('co.lastoccurence'),
+                        $evQb->expr()->gte('co.lastoccurence', $evQb->createNamedParameter($now, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)),
+                    ))
+                    ->orderBy('co.firstoccurence', 'ASC')
+                    ->setMaxResults(max(50, $limit * 10))
                     ->executeQuery();
 
                 while ($row = $evResult->fetch()) {
@@ -615,59 +652,77 @@ class ActivityService {
                         if (!isset($vcalendar->VEVENT)) {
                             continue;
                         }
-                        $vevent = $vcalendar->VEVENT;
-                        if (!isset($vevent->DTSTART)) {
-                            continue;
+                        // v4.20.8 — a series is expanded into its dates in the
+                        // window; a single event is its own one instance.
+                        $master = $vcalendar->VEVENT;
+                        $isSeries = isset($master->RRULE) || isset($master->RDATE);
+                        if ($isSeries) {
+                            $vcalendar = $vcalendar->expand(
+                                new \DateTimeImmutable('@' . $now),
+                                new \DateTimeImmutable('@' . $futureLimit),
+                            );
                         }
+                        foreach (($isSeries ? $vcalendar->select('VEVENT') : [$master]) as $vevent) {
+                            if (!isset($vevent->DTSTART)) {
+                                continue;
+                            }
 
-                        $dtstart        = $vevent->DTSTART;
-                        $startTime      = $dtstart->getDateTime();
-                        $startTimestamp = $startTime->getTimestamp();
+                            $dtstart        = $vevent->DTSTART;
+                            $startTime      = $dtstart->getDateTime();
+                            $startTimestamp = $startTime->getTimestamp();
 
-                        if ($startTimestamp < $now || $startTimestamp > $futureLimit) {
-                            continue;
+                            if ($startTimestamp < $now || $startTimestamp > $futureLimit) {
+                                continue;
+                            }
+
+                            $endTime = null;
+                            if (isset($vevent->DTEND)) {
+                                $endTime = $vevent->DTEND->getDateTime();
+                            } elseif (isset($vevent->DURATION)) {
+                                $endTime = clone $startTime;
+                                $endTime->add($vevent->DURATION->getDateInterval());
+                            }
+
+                            $editUrl = null;
+                            if ($calOwner !== '' && $calSlug !== '') {
+                                $davPath  = '/remote.php/dav/calendars/' . $calOwner . '/' . $calSlug . '/' . $row['uri'];
+                                // Standard base64 WITH padding — the Calendar app derives this id as
+                                // btoa(davUrl) and decodes it with atob(), which throws on the
+                                // base64url alphabet. Emitting '-'/'_' here made the event fail
+                                // to resolve ('event does not exist') whenever the encoding
+                                // happened to produce a '+' or '/'. Percent-encoded because standard
+                                // base64 can contain '/', which would otherwise split the URL
+                                // path segment the id sits in.
+                                $objectId = rawurlencode(base64_encode($davPath));
+                                $editUrl  = '/apps/calendar/timeGridWeek/now/edit/sidebar/' . $objectId . '/' . $startTimestamp;
+                            }
+
+                            $events[] = [
+                                // An occurrence of a series shares its UID with the
+                                // others; the start makes each one its own row.
+                                'id'           => (string)($vevent->UID ?? $row['uri']) . ($isSeries ? '/' . $startTimestamp : ''),
+                                'recurring'    => $isSeries,
+                                'room'         => self::eventRoom($vevent),
+                                'attendance'   => $withAttendance ? self::eventAttendance($vevent, $selfAddresses) : null,
+                                // v4.20.10 — the event's own UID, for a reply.
+                                'uid'          => (string)($vevent->UID ?? ''),
+                                'title'        => (string)($vevent->SUMMARY ?? 'Untitled'),
+                                'start'        => $startTime->format('c'),
+                                'end'          => $endTime?->format('c'),
+                                'location'     => isset($vevent->LOCATION)    ? (string)$vevent->LOCATION    : null,
+                                'description'  => isset($vevent->DESCRIPTION) ? (string)$vevent->DESCRIPTION : null,
+                                'allDay'       => !$dtstart->hasTime(),
+                                'editUrl'      => $editUrl,
+                                'calendarId'   => $calendarId,
+                                'calendarName' => $calName,
+                                // v4.9.10 — set on a copy the OpenProject meeting
+                                // sync wrote (X-TEAMHUB-OPENPROJECT-MEETING), so the
+                                // widget shows the copy once, with its source.
+                                'openProjectMeetingId' => isset($vevent->{'X-TEAMHUB-OPENPROJECT-MEETING'})
+                                    ? (int)(string)$vevent->{'X-TEAMHUB-OPENPROJECT-MEETING'}
+                                    : null,
+                            ];
                         }
-
-                        $endTime = null;
-                        if (isset($vevent->DTEND)) {
-                            $endTime = $vevent->DTEND->getDateTime();
-                        } elseif (isset($vevent->DURATION)) {
-                            $endTime = clone $startTime;
-                            $endTime->add($vevent->DURATION->getDateInterval());
-                        }
-
-                        $editUrl = null;
-                        if ($calOwner !== '' && $calSlug !== '') {
-                            $davPath  = '/remote.php/dav/calendars/' . $calOwner . '/' . $calSlug . '/' . $row['uri'];
-                            // Standard base64 WITH padding — the Calendar app derives this id as
-                            // btoa(davUrl) and decodes it with atob(), which throws on the
-                            // base64url alphabet. Emitting '-'/'_' here made the event fail
-                            // to resolve ('event does not exist') whenever the encoding
-                            // happened to produce a '+' or '/'. Percent-encoded because standard
-                            // base64 can contain '/', which would otherwise split the URL
-                            // path segment the id sits in.
-                            $objectId = rawurlencode(base64_encode($davPath));
-                            $editUrl  = '/apps/calendar/timeGridWeek/now/edit/sidebar/' . $objectId . '/' . $startTimestamp;
-                        }
-
-                        $events[] = [
-                            'id'           => (string)($vevent->UID ?? $row['uri']),
-                            'title'        => (string)($vevent->SUMMARY ?? 'Untitled'),
-                            'start'        => $startTime->format('c'),
-                            'end'          => $endTime?->format('c'),
-                            'location'     => isset($vevent->LOCATION)    ? (string)$vevent->LOCATION    : null,
-                            'description'  => isset($vevent->DESCRIPTION) ? (string)$vevent->DESCRIPTION : null,
-                            'allDay'       => !$dtstart->hasTime(),
-                            'editUrl'      => $editUrl,
-                            'calendarId'   => $calendarId,
-                            'calendarName' => $calName,
-                            // v4.9.10 — set on a copy the OpenProject meeting
-                            // sync wrote (X-TEAMHUB-OPENPROJECT-MEETING), so the
-                            // widget shows the copy once, with its source.
-                            'openProjectMeetingId' => isset($vevent->{'X-TEAMHUB-OPENPROJECT-MEETING'})
-                                ? (int)(string)$vevent->{'X-TEAMHUB-OPENPROJECT-MEETING'}
-                                : null,
-                        ];
                     } catch (\Exception $e) {
                         $this->logger->warning('[TeamHub][ActivityService] Error parsing calendar event', [
                             'exception' => $e,
@@ -692,6 +747,99 @@ class ActivityService {
     }
 
     /**
+     * The room an event books: its first `ATTENDEE;CUTYPE=ROOM` (v4.20.8).
+     *
+     * @return array{email: string, name: string}|null
+     */
+    public static function eventRoom(\Sabre\VObject\Component $vevent): ?array {
+        foreach ($vevent->select('ATTENDEE') as $attendee) {
+            $cutype = strtoupper((string)($attendee['CUTYPE'] ?? ''));
+            if ($cutype !== 'ROOM') {
+                continue;
+            }
+            $email = preg_replace('/^mailto:/i', '', trim((string)$attendee->getValue()));
+            $name  = trim((string)($attendee['CN'] ?? ''));
+            return ['email' => (string)$email, 'name' => $name !== '' ? $name : (string)$email];
+        }
+        return null;
+    }
+
+    /**
+     * Who is invited and how they replied (v4.20.8, licensed).
+     *
+     * People only: rooms, resources and groups are left out, as Calendar
+     * lists them apart. The organiser counts when they are on the attendee
+     * list, which is how TeamHub and Calendar write an event. Sorted
+     * organiser first, then accepted, maybe, no reply, declined, then by name.
+     * Null when nobody is invited, so the widget shows no pill.
+     *
+     * v4.20.10: `self` marks the viewer (any of `$selfAddresses`, lower-cased,
+     * `mailto:` stripped) and `myStatus` is their answer, or null when they are
+     * not invited or organised it; the widget offers Accept, Maybe and
+     * Decline from it.
+     *
+     * @param list<string> $selfAddresses
+     * @return array{accepted: int, total: int, myStatus: ?string, attendees: list<array{name: string, status: string, organizer: bool, self: bool}>}|null
+     */
+    public static function eventAttendance(\Sabre\VObject\Component $vevent, array $selfAddresses = []): ?array {
+        $organizer = isset($vevent->ORGANIZER)
+            ? strtolower((string)preg_replace('/^mailto:/i', '', trim((string)$vevent->ORGANIZER->getValue())))
+            : '';
+        $order = ['accepted' => 0, 'tentative' => 1, 'needs-action' => 2, 'delegated' => 3, 'declined' => 4];
+        $people = [];
+        $canReply = false;
+        foreach ($vevent->select('ATTENDEE') as $attendee) {
+            $cutype = strtoupper((string)($attendee['CUTYPE'] ?? 'INDIVIDUAL'));
+            if ($cutype !== '' && $cutype !== 'INDIVIDUAL' && $cutype !== 'UNKNOWN') {
+                continue;
+            }
+            $email = strtolower((string)preg_replace('/^mailto:/i', '', trim((string)$attendee->getValue())));
+            $name  = trim((string)($attendee['CN'] ?? ''));
+            if ($name === '') {
+                $name = $email !== '' ? explode('@', $email)[0] : '';
+            }
+            $status = strtolower((string)($attendee['PARTSTAT'] ?? 'NEEDS-ACTION'));
+            if (!isset($order[$status])) {
+                $status = 'needs-action';
+            }
+            $isSelf = $email !== '' && in_array($email, $selfAddresses, true);
+            if ($isSelf && !$canReply && MeetingReplyService::canReplyAs($attendee)) {
+                $canReply = true;
+            }
+            $people[] = [
+                'name'      => $name,
+                'status'    => $status,
+                'organizer' => $organizer !== '' && $email === $organizer,
+                'self'      => $isSelf,
+            ];
+        }
+        if ($people === []) {
+            return null;
+        }
+        usort($people, static function (array $a, array $b) use ($order): int {
+            return [$b['organizer'] ? 1 : 0, $order[$a['status']], mb_strtolower($a['name'])]
+                <=> [$a['organizer'] ? 1 : 0, $order[$b['status']], mb_strtolower($b['name'])];
+        });
+        $accepted = count(array_filter($people, static fn (array $p): bool => $p['status'] === 'accepted'));
+        $myStatus = null;
+        foreach ($people as $p) {
+            if ($p['self'] && !$p['organizer']) {
+                $myStatus = $p['status'];
+                break;
+            }
+        }
+        // v4.20.10 — `canReply`: the viewer's own attendee line would take a
+        // reply from TeamHub (MeetingReplyService::canReplyAs()).
+        return [
+            'accepted'  => $accepted,
+            'total'     => count($people),
+            'myStatus'  => $myStatus,
+            'canReply'  => $myStatus !== null && $canReply,
+            'attendees' => $people,
+        ];
+    }
+
+    /**
      * Create a calendar event on the team calendar via CalDAV.
      *
      * @throws \Exception if user not authenticated, calendar app not installed,
@@ -710,7 +858,8 @@ class ActivityService {
         string $roomEmail = '',
         string $roomName = '',
         string $roomId = '',
-        array  $attendeeUids = []
+        array  $attendeeUids = [],
+        string $rrule = ''
     ): string {
 
         $user = $this->userSession->getUser();
@@ -720,6 +869,14 @@ class ActivityService {
 
         if (!$this->appManager->isInstalled('calendar')) {
             throw new AppNotAvailableException('Calendar app is not installed');
+        }
+
+        // v4.20.8 — a recurring event is written with its RRULE (built and
+        // licence-checked by MeetingSeriesService). RoomVox books through its
+        // own API one date at a time, so a series cannot book a RoomVox room;
+        // refused before RoomVox or the calendar is touched.
+        if ($rrule !== '' && $roomEmail !== '' && $roomId !== '') {
+            throw new \InvalidArgumentException('A recurring meeting cannot book a RoomVox room. Pick another room or make it a single meeting.');
         }
 
         $db = $this->container->get(\OCP\IDBConnection::class);
@@ -891,6 +1048,21 @@ class ActivityService {
                 $dtEndFmt   = "DTEND:{$endDt->setTimezone(new \DateTimeZone('UTC'))->format('Ymd\\THis\\Z')}";
             }
         }
+        // v4.20.8 — a recurring event outside the CET/CEST zones above. In UTC
+        // a weekly 10:00 would drift by an hour at every daylight saving change
+        // and could land on another weekday than BYDAY says. So the series is
+        // written in the organiser's own zone by its IANA name; Sabre and
+        // Nextcloud Calendar both resolve an IANA TZID without a VTIMEZONE
+        // block. Single events keep the UTC form they have always had.
+        if ($rrule !== '' && !$useTzid && $userTz !== '') {
+            try {
+                $tz         = new \DateTimeZone($userTz);
+                $dtStartFmt = "DTSTART;TZID={$userTz}:" . (clone $startDt)->setTimezone($tz)->format('Ymd\\THis');
+                $dtEndFmt   = "DTEND;TZID={$userTz}:" . (clone $endDt)->setTimezone($tz)->format('Ymd\\THis');
+            } catch (\Throwable) {
+                // Not a zone PHP knows: keep UTC.
+            }
+        }
 
         $ical  = "BEGIN:VCALENDAR\r\n";
         $ical .= "VERSION:2.0\r\n";
@@ -999,7 +1171,13 @@ class ActivityService {
                 }
                 $emailSeen[$emailLc] = true;
                 $invitees[] = [
-                    'email' => $email,
+                    // v4.20.10 — lower-cased. Nextcloud's reply path
+                    // (IHandleImipMessage) lower-cases the replying address and
+                    // Sabre's broker then matches attendees case-sensitively, so
+                    // "Cath Stevens@host" was not found and a second attendee was
+                    // added instead of the answer being recorded. Addresses are
+                    // case-insensitive, and the synthetic one is TeamHub's own.
+                    'email' => $emailLc,
                     'cn'    => $u->getDisplayName() ?: $attendeeUid,
                 ];
             }
@@ -1091,6 +1269,11 @@ class ActivityService {
         $ical .= "UID:{$uid}\r\n";
         $ical .= "{$dtStartFmt}\r\n";
         $ical .= "{$dtEndFmt}\r\n";
+        if ($rrule !== '') {
+            // Only RRULE-safe characters reach here (MeetingRecurrence builds
+            // it from validated parts), so no escaping is needed.
+            $ical .= "RRULE:{$rrule}\r\n";
+        }
         // TRANSP:OPAQUE marks the event as time-blocking — the default per
         // RFC 5545 §3.8.2.7, but emitting it explicitly matches what NC
         // Calendar writes. Investigating #41: NC Calendar's editor may gate
@@ -1144,8 +1327,21 @@ class ActivityService {
                 // because no further reply is expected — RoomVox has us in its
                 // overview already.
                 $roomCn = $this->escapeIcalParamText($roomName !== '' ? $roomName : $roomEmail);
-                $partstat = $roomvoxBookingUid !== null ? 'ACCEPTED' : 'NEEDS-ACTION';
-                $rsvp     = $roomvoxBookingUid !== null ? 'FALSE'    : 'TRUE';
+                // v4.20.10 — a recurring booking of a Nextcloud resource room is
+                // written as ACCEPTED. Nextcloud auto-accepts a room for a
+                // single event, but its scheduling plugin skips recurring
+                // events ("autoresponses for recurring events" are not
+                // supported, apps/dav Schedule\Plugin::scheduleLocalDelivery),
+                // so the room stayed NEEDS-ACTION and Calendar showed it as
+                // already booked by the series itself. Both callers that pass
+                // an RRULE (TeamController::createCalendarEvent and
+                // MeetingService::createTeamMeeting) have checked the room on
+                // every date of the series first (MeetingSeriesService), so
+                // TeamHub gives the answer the room would have given. The room
+                // still receives the series, so its calendar stays the truth.
+                $autoAccepted = $roomvoxBookingUid !== null || $rrule !== '';
+                $partstat = $autoAccepted ? 'ACCEPTED' : 'NEEDS-ACTION';
+                $rsvp     = $autoAccepted ? 'FALSE'    : 'TRUE';
                 $ical .= "ATTENDEE;CUTYPE=ROOM;PARTSTAT={$partstat};ROLE=REQ-PARTICIPANT;RSVP={$rsvp};CN={$roomCn}:mailto:{$roomEmail}\r\n";
                 // Tracking X- properties — the CalendarObjectDeletedListener
                 // reads these to know which RoomVox booking (and on which room)

@@ -13,6 +13,7 @@ use OCA\TeamHub\Db\BuildingMapper;
 use OCA\TeamHub\Service\MemberService;
 use OCA\TeamHub\Service\TimezoneService;
 use OCA\TeamHub\Service\NextcloudAvailabilityService;
+use OCA\TeamHub\Service\PresenceDefaultService;
 use OCA\TeamHub\Db\HolidayMapper;
 use OCP\IConfig;
 use Psr\Log\LoggerInterface;
@@ -73,6 +74,8 @@ class MeetingSuggestionService {
         private TimezoneService $timezoneService,
         private NextcloudAvailabilityService $nativeAvailability,
         private HolidayMapper $holidays,
+        private PresenceDefaultService $presenceDefaults,
+        private AttendeeAvailability $availability,
         private LoggerInterface $logger,
         private array $busyProviders = [],
     ) {
@@ -147,11 +150,17 @@ class MeetingSuggestionService {
         foreach ($attendees as $uid) {
             $tz    = $this->userTimezone($uid);
             $slots = $this->slotMapper->findByUserAndRange($uid, $loadFrom, $loadTo);
+            // v4.20.12 (DESIGN §2.265) — somebody who never saved a template
+            // counts as at the office Monday to Friday, so an office meeting
+            // can be suggested for them. Their own calendar still decides
+            // whether they are free; a holiday still makes them unknown.
+            $slots = $this->presenceDefaults->withDefaultSlots($uid, $slots, $loadFrom, $loadTo);
             $index = [];
             foreach ($slots as $slot) {
                 $index[$slot->getSlotDate() . '|' . $slot->getHalfDay()] = $slot;
             }
-            $attendeeCtx[$uid] = ['tz' => $tz, 'slots' => $index];
+            // v4.20.14 — whether a missing row means "not working" (DESIGN §2.266).
+            $attendeeCtx[$uid] = ['tz' => $tz, 'slots' => $index, 'configured' => $this->availability->isConfigured($uid)];
         }
 
         // 8. Score at a representative one-hour window inside each half,
@@ -445,7 +454,8 @@ class MeetingSuggestionService {
     ): array {
         $availableOnline   = [];   // userIds available (reachable), any location
         $conflictCount     = 0;
-        $unknownCount      = 0;    // no materialised slot — excluded, not penalised
+        $unknownCount      = 0;    // Nextcloud gave no calendar answer — excluded, never read as free
+        $off               = [];   // uid => true when presence says not working (v4.20.14)
         $inOfficeCount     = 0;    // attendees with requiresLocation=true presence (room or not)
         $buildingGroups    = [];   // buildingId => [userIds] (only those with a known room)
         $buildingNames     = [];   // buildingId => name (captured the first time we see one)
@@ -462,22 +472,25 @@ class MeetingSuggestionService {
             $localDate = $local->format('Y-m-d');
             $localHalf = (int)$local->format('G') < self::HALF_DAY_SPLIT_HOUR ? 0 : 1;
 
+            $slot = $ctx['slots'][$localDate . '|' . $localHalf] ?? null;
+            $typeId = $slot?->getPresenceTypeId();
+            $flags = $typeId !== null ? ($typeFlags[$typeId] ?? null) : null;
+            // v4.20.14 (DESIGN §2.266) — presence first. Someone not working
+            // then cannot come, whatever their calendar says: a half-day their
+            // template leaves empty ("Not working" on Team presence) or a
+            // one-off busy entry (vacation, sick, non-working day). Before
+            // this a missing row read as "available, workplace unknown".
+            if (AttendeeAvailability::isOff($slot, $flags, $ctx['configured'] ?? false)) {
+                $off[$uid] = true;
+                $conflictCount++;
+                continue;
+            }
             $verdict = $native[$uid] ?? null;
             if ($verdict === null) {
                 $unknownCount++;
                 continue;
             }
             if ($verdict === false) {
-                $conflictCount++;
-                continue;
-            }
-            $slot = $ctx['slots'][$localDate . '|' . $localHalf] ?? null;
-            $typeId = $slot?->getPresenceTypeId();
-            $flags = $typeId !== null ? ($typeFlags[$typeId] ?? null) : null;
-            // A deliberately scheduled TeamHub absence blocks a meeting even
-            // if the person's Nextcloud calendar is otherwise free. Old busy
-            // weekly templates are ignored for backwards compatibility.
-            if ($slot?->getSource() === 'override' && ($flags['isBusy'] ?? false)) {
                 $conflictCount++;
                 continue;
             }
@@ -555,6 +568,9 @@ class MeetingSuggestionService {
             'attendeeCount'     => count($attendees),
             'conflictCount'     => $conflictCount,
             'unknownCount'      => $unknownCount,
+            // v4.20.14 — who cannot come and why (off / unchecked / calendar),
+            // so the wizard can name them instead of only counting them.
+            'unavailable'       => $this->availability->unavailable($attendees, (array)$native, $off),
             // Office-meeting reporting: inOfficeCount is the score for
             // office candidates; bestBuilding* describes which site is
             // most populated when at least one attendee picked a room.

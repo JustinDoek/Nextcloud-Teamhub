@@ -880,6 +880,96 @@ You owe:
 
 ---
 
+## Team resources: Nextcloud's `ITeamResourceProvider`, and what your provider owes
+
+Since **4.20.39** a team's home has a *Shared with team* card listing what
+apps register for the team through Nextcloud's own Teams API
+(`OCP\Teams\ITeamResourceProvider`, the interface behind Nextcloud's Teams
+page). No TeamHub package is involved: implement the interface and register it
+with `$context->registerTeamResourceProvider()`, and your resources appear.
+
+**Your provider filters its own output for the current user.**
+`getSharedWith(string $teamId)` receives no user id: Nextcloud fans out with the
+team alone, and so does TeamHub. Read the user from `IUserSession` and return
+only what that user may see; if your records carry their own ACLs, apply them
+there. TeamHub renders what you return. It cannot evaluate your permissions and
+has no filter that will catch a record you should not have returned.
+
+What TeamHub guarantees in return (`SharedTeamResourceService`):
+
+- It acts for the session user only. Membership is confirmed by Nextcloud
+  (`ITeamManager::getTeamsForUser()`) before any provider is called; no uid is
+  taken from a route, body or stored row; no endpoint returns another user's
+  view; without a session, no provider is called.
+- Nothing is cached. Every load asks every provider afresh; the response is
+  `Cache-Control: no-store`.
+- A Nextcloud administrator can switch an individual provider off in TeamHub
+  (`SharedResourceProviderSettings`); a switched-off provider is not called.
+- Each provider is isolated: one that throws is named as not answering, and the
+  others still show.
+- Left out: TeamHub's own provider, anything TeamHub already shows in its own
+  cards (registry status `active`), anything a team admin ignored in the
+  resource review (status `ignored`; pending stays), and rows whose URL is not relative, `https://`, or `http://` on the
+  server's own host. SVG icons over 16 KB are dropped; SVGs are drawn as
+  `<img>`, never inlined. At most 50 resources per provider.
+
+The public version of this section is the docs site's
+`developer/integrations.md`.
+
+---
+
+## Team folders your app manages
+
+Since **4.20.48**. If your app gives teams access to Team folders of its own,
+TeamHub discovers each one and asks a team admin to accept or ignore it. Claim
+them and TeamHub shows them as *Managed by {your app}* in Manage team instead,
+read-only, and asks nobody.
+
+```php
+// Application::boot()
+try {
+    $context->getServerContainer()
+        ->get(\OCA\TeamHub\Integration\ITeamHubManagedFolderRegistry::class)
+        ->registerProvider('myapp', \OCA\MyApp\TeamHub\ManagedFolders::class);
+} catch (\Throwable $e) {
+    // TeamHub is not installed, or is older than 4.20.48.
+}
+```
+
+```php
+namespace OCA\MyApp\TeamHub;
+
+use OCA\TeamHub\Integration\ITeamHubManagedFolderProvider;
+
+class ManagedFolders implements ITeamHubManagedFolderProvider {
+    public function __construct(private CaseFolderMapper $mapper) {}
+
+    /** @param list<int> $folderIds  @return list<int> */
+    public function filterManagedFolders(array $folderIds): array {
+        return $this->mapper->existingFolderIds($folderIds);
+    }
+}
+```
+
+- No package, no enabling: it works as soon as your app registers. Nothing is
+  stored about the class, so register on every boot.
+- You get folder ids as Team folders knows them, and return the ones that are
+  yours. One call per team, on page loads and in an hourly job. One query, well
+  under 100 ms.
+- Answer about the folder, not about the user. In the hourly job there is none.
+- Throwing keeps what you had claimed. Returning a shorter list lets folders go;
+  they return to the team admin's review.
+- Not claimable: a folder TeamHub made, the team's own team space, and a folder
+  a team admin has accepted. That last one becomes yours once it is
+  disconnected from the team and your app gives the team access again.
+- TeamHub refuses to accept, ignore, connect, disconnect or delete a claimed
+  folder. Deleting the team leaves your folder's shares alone; clean up after
+  the Circles event if you need to. Archiving the team does not suspend them.
+- A Nextcloud administrator can switch your claims off under Administration,
+  TeamHub, Integrations. Your folders are then reviewed like any other.
+
+---
+
 ## Legacy API: `registerIntegration()`
 
 The single-registration API from 2.41 onwards. It still works and is still supported.

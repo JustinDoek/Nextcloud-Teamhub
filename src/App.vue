@@ -625,6 +625,16 @@
              asks which team is asking (a new team is asked for by a person);
              it asks for the name, the template, the profile and the reason,
              and the request is recorded against the desk that answers it. -->
+        <!-- v4.20.19 — a meeting's wrap-up, opened from the organiser's My
+             Work row (DESIGN §2.271). Over the team the row switched to. -->
+        <MeetingWrapUpDialog
+            v-if="wrapUp"
+            :team-id="wrapUp.teamId"
+            :object-id="wrapUp.objectId"
+            :start="wrapUp.start"
+            @close="wrapUp = null"
+            @done="onWrapUpDone" />
+
         <WorkflowStartDialog
             v-if="workflowStartOpen"
             :busy="$store.state.workflows.busyId === 0"
@@ -639,7 +649,9 @@
 import { mapState, mapActions, mapGetters, mapMutations } from 'vuex'
 import { translate as t, translatePlural as n } from '@nextcloud/l10n'
 import { emit } from '@nextcloud/event-bus'
-import { generateUrl } from '@nextcloud/router'
+import { generateUrl, getRootUrl } from '@nextcloud/router'
+import { readTabLink } from './lib/pageLink.js'
+import { normaliseTab } from './lib/myWorkTabs.js'
 import axios from '@nextcloud/axios'
 import logger from './logger.js'
 import { NcContent, NcAppNavigation, NcAppNavigationNew, NcAppNavigationItem, NcAppNavigationCaption, NcAppSettingsDialog, NcAppSettingsSection, NcAppContent, NcEmptyContent, NcCounterBubble, NcButton, NcNoteCard } from '@nextcloud/vue'
@@ -713,6 +725,7 @@ import ViewGridOutline from 'vue-material-design-icons/ViewGridOutline.vue'
 import TeamJoinView from './components/TeamJoinView.vue'
 import TeamGroupPickerModal from './components/TeamGroupPickerModal.vue'
 import WorkflowStartDialog from './components/mywork/WorkflowStartDialog.vue'
+import MeetingWrapUpDialog from './components/MeetingWrapUpDialog.vue'
 import TeamNavGroup from './components/TeamNavGroup.vue'
 import TeamNavItem from './components/TeamNavItem.vue'
 import PersonalSettingsPanel from './components/PersonalSettingsPanel.vue'
@@ -732,7 +745,7 @@ export default {
         ComplimentComposeDialog, ComplimentPartyDialog, BirthdayPartyDialog, AnniversaryPartyDialog,
         MyWorkView, ServiceCatalogueView, ViewGridOutline,
         TeamGroupPickerModal, TeamJoinView, TeamNavGroup, TeamNavItem,
-        AccountMultiplePlusOutline, WorkflowStartDialog,
+        AccountMultiplePlusOutline, WorkflowStartDialog, MeetingWrapUpDialog,
     },
     data() {
         return {
@@ -743,6 +756,9 @@ export default {
             // v4.7.15 — the team whose sidebar group is being picked, as
             // { teamId, teamName, groupId }. Null whenever the dialog is shut.
             groupPicker: null,
+            // v4.20.19 — the meeting being wrapped up, as
+            // { teamId, objectId, start }. Null whenever the dialog is shut.
+            wrapUp: null,
             // v4.13.2 — the person being complimented, as
             // { uid, displayName }, set by the contacts-menu entry. Null
             // whenever the composer is shut.
@@ -1110,6 +1126,13 @@ export default {
             this.licenseEntitlements = data || null
         } catch (e) {
             this.licenseEntitlements = null
+        }
+        // v4.20.8 — licensed meeting features (recurring meetings, attendee
+        // replies, room details, Free room now) read this from the store.
+        // Unlike isLicensed above, an unknown answer counts as unlicensed.
+        {
+            const level = this.licenseEntitlements?.enforcementLevel
+            this.$store.commit('SET_LICENSED', level === 'none' || level === 'grace')
         }
 
         // v4.4.12 — per-user preferences for the sidebar "Getting started"
@@ -1726,6 +1749,9 @@ export default {
                 // before the team branch because My Work is cross-team: a link
                 // to it deliberately carries no team id.
                 if (params.has('mywork')) {
+                    // v4.20.31 — `?mywork=waiting` / `?mywork=completed` open
+                    // that tab; anything else is To do.
+                    this.$store.commit('SET_MYWORK_TAB', normaliseTab(params.get('mywork')))
                     this.activeView = 'mywork'
                     return
                 }
@@ -1737,6 +1763,13 @@ export default {
                 // is checked before the team branch for the same reason.
                 if (params.has('services')) {
                     this.activeView = 'services'
+                    return
+                }
+
+                // v4.20.29 — the other two pages across teams, so every page a
+                // quick task can be made on has an address (src/lib/pageLink.js).
+                if (params.has('feed') || params.has('browse')) {
+                    this.activeView = params.has('feed') ? 'feed' : 'browse'
                     return
                 }
 
@@ -1775,6 +1808,29 @@ export default {
                 // member's calendar (DESIGN §2.250).
                 if (params.has('shiftRequest') || params.has('roster')) {
                     this.SET_VIEW('roster')
+                    return
+                }
+
+                // v4.20.29 — `tab` opens one of the team's tabs, and `open` the
+                // page an embedded app (Files, Deck, Wiki) was showing: the
+                // link a quick task stores for the page it was made on.
+                // `readTabLink` drops an `open` that is not a path inside the
+                // app that tab hosts, so a link cannot make a tab load
+                // somebody else's page. Not checked against the team's tabs:
+                // the link was made on a tab the person had, and a tab the team
+                // has since switched off shows an empty pane with the tab bar
+                // above it, which is one click from Home.
+                const tabLink = readTabLink(params, getRootUrl())
+                if (tabLink.tab && !decisionId && !messageId && !params.has('propose')) {
+                    this.SET_VIEW(tabLink.tab)
+                    if (tabLink.open) {
+                        const commitFor = {
+                            files:       'SET_FILES_EMBED_FILE_URL',
+                            deck:        'SET_DECK_EMBED_CARD_URL',
+                            collectives: 'SET_COLLECTIVES_EMBED_PAGE_URL',
+                        }[tabLink.tab]
+                        this.$store.commit(commitFor, tabLink.open)
+                    }
                     return
                 }
 
@@ -2026,6 +2082,11 @@ export default {
                 // Awaited: openDeckCardInEmbed pre-selects a board, and the
                 // team's resources must be loaded before that means anything.
                 await this.selectTeam(item.teamId)
+                // v4.20.52 (issue 102) - they went to another team while this
+                // one loaded: the card must not open there.
+                if (this.currentTeamId !== item.teamId) {
+                    return
+                }
             }
 
             const target = item.openTarget || {}
@@ -2053,6 +2114,15 @@ export default {
                 this.openTeamHubView(item, target)
                 break
 
+            // v4.20.19 — a meeting's wrap-up: a dialog over the team.
+            case OPEN_KIND.MEETING_WRAP_UP:
+                this.wrapUp = {
+                    teamId: item.teamId,
+                    objectId: Number(target.objectId) || 0,
+                    start: Number(target.start) || 0,
+                }
+                break
+
             // v4.5.45 — Manage team at a tab/section, via the deep-link
             // mechanism the Project Compass has used since v3.98.0. The team
             // was already switched to above, so this only has to change screen.
@@ -2072,6 +2142,15 @@ export default {
             }
 
             this.closeSidebarIfOverlay()
+        },
+
+        /**
+         * v4.20.19 — the wrap-up is done. My Work re-reads next time it shows,
+         * so the row has moved to Completed by then.
+         */
+        onWrapUpDone() {
+            this.wrapUp = null
+            this.$store.commit('SET_MYWORK_PAYLOAD', null)
         },
 
         /**

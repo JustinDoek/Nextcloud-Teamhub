@@ -11,10 +11,16 @@
  * server's own, word for word, so both sides share one translation.
  */
 import { translate as t, translatePlural as n } from '@nextcloud/l10n'
+import { approvalDocument, approvalForm, approvalProblems } from './approvals.js'
+import { newNotice, noticeDocument, noticeProblems } from './notices.js'
+import { conditionDocument, conditionForm, conditionProblems } from './conditions.js'
+import { FIELD_TYPE, confirmDocument, confirmFormFrom, editableField, fieldLabel, hasOptions, optionsFromText, requestDocument, requestFormFrom, requestProblems } from './requestForm.js'
 
 export const STEP_KIND = {
 	DESK: 'desk',
 	REQUESTER: 'requester',
+	// v4.20.58 — somebody approves or rejects (`approvals.js`).
+	APPROVAL: 'approval',
 }
 
 /** v4.10.36 — what a link on a step opens: its button's words and icon. */
@@ -58,6 +64,8 @@ export function newTask(task = {}) {
 		role: task.role || '',
 		nonBlocking: !!task.nonBlocking,
 		links: (Array.isArray(task.links) ? task.links : []).map(newLink),
+		// v4.20.71 — what the task asks to fill in.
+		fields: (Array.isArray(task.fields) ? task.fields : []).map(editableField),
 	}
 }
 
@@ -67,7 +75,16 @@ export function newTask(task = {}) {
  * new step opens, a saved one starts folded. Never sent.
  */
 export function newStep(kind = STEP_KIND.DESK) {
-	return { key: nextKey++, kind, label: '', tasks: [newTask()], open: true }
+	return {
+		key: nextKey++, kind, label: '', tasks: [newTask()], open: true,
+		// v4.20.62 — whom the service tells about the step.
+		notify: [],
+		// v4.20.66 — whether it runs on every request.
+		condition: conditionForm(),
+		// v4.20.68 — within so many working days; '' is no deadline.
+		dueDays: '',
+		...(kind === STEP_KIND.APPROVAL ? { approval: approvalForm() } : {}),
+	}
 }
 
 /**
@@ -94,8 +111,8 @@ export function newLink(link = {}) {
 /**
  * The form for a new service, or for a service's draft. The lead time is
  * held as text, because the field is: `''` is "none said", as `0` is on the
- * server. `askTeam` is carried through untouched — the form does not offer
- * it until personal requests land.
+ * server. v4.20.54 — the request form and the confirmation are part of it
+ * (`requestForm.js`).
  */
 export function formFromService(service = null) {
 	const doc = service?.draft || {}
@@ -107,7 +124,8 @@ export function formFromService(service = null) {
 		// v4.10.45 — the card's icon; '' is the default.
 		icon: doc.icon || '',
 		leadDays: doc.leadDays > 0 ? String(doc.leadDays) : '',
-		askTeam: !!doc.askTeam,
+		request: requestFormFrom(doc),
+		confirm: confirmFormFrom(doc),
 		// v4.10.38 — the paperclip: on unless switched off, view only, 14 days.
 		files: {
 			allowed: doc.files?.allowed !== false,
@@ -116,13 +134,22 @@ export function formFromService(service = null) {
 		},
 		steps: service
 			? steps.map(s => ({
-				...newStep(s.kind === STEP_KIND.REQUESTER ? STEP_KIND.REQUESTER : STEP_KIND.DESK),
+				...newStep(Object.values(STEP_KIND).includes(s.kind) ? s.kind : STEP_KIND.DESK),
 				label: s.label || '',
 				tasks: tasksOfStep(s).map(newTask),
+				notify: (Array.isArray(s.notify) ? s.notify : []).map(newNotice),
+				condition: conditionForm(s.when),
+				dueDays: s.dueDays > 0 ? String(s.dueDays) : '',
 				open: false,
+				...(s.kind === STEP_KIND.APPROVAL ? { approval: approvalForm(s.approval) } : {}),
 			}))
 			: [newStep(STEP_KIND.DESK)],
 	}
+}
+
+/** v4.20.71 — every field of the service: the request form's and the tasks'. */
+function allFields(form) {
+	return (form?.request?.fields || []).concat((form?.steps || []).flatMap(step => (step.tasks || []).flatMap(task => task.fields || [])))
 }
 
 /** The document `POST` / `PUT /built-services` take. */
@@ -134,7 +161,8 @@ export function documentFromForm(form) {
 		category: form?.category || DEFAULT_CATEGORY,
 		icon: form?.icon || '',
 		leadDays: days === '' ? 0 : Number(days),
-		askTeam: !!form?.askTeam,
+		request: requestDocument(form?.request),
+		confirm: confirmDocument(form?.confirm),
 		files: {
 			allowed: form?.files?.allowed !== false,
 			edit: form?.files?.edit === true,
@@ -143,6 +171,10 @@ export function documentFromForm(form) {
 		steps: (form?.steps || []).map(s => ({
 			kind: s.kind,
 			label: String(s.label || '').trim(),
+			...(s.kind === STEP_KIND.APPROVAL ? { approval: approvalDocument(s.approval) } : {}),
+			...((s.notify || []).length ? { notify: s.notify.map(noticeDocument) } : {}),
+			...(conditionDocument(s.condition, allFields(form)) ? { when: conditionDocument(s.condition, allFields(form)) } : {}),
+			...(Number(String(s.dueDays ?? '').trim()) > 0 ? { dueDays: Number(String(s.dueDays).trim()) } : {}),
 			tasks: tasksOfStep(s).map(task => ({
 				label: String(task.label || '').trim(),
 				// A role and "may be left open" only mean something on the
@@ -154,6 +186,7 @@ export function documentFromForm(form) {
 					url: String(l.url || '').trim(),
 					kind: l.kind === LINK_KIND.FORM ? LINK_KIND.FORM : LINK_KIND.LINK,
 				})),
+				...((task.fields || []).length ? { fields: requestDocument({ fields: task.fields }).fields } : {}),
 			})),
 		})),
 	}
@@ -164,9 +197,11 @@ export function documentFromForm(form) {
  * `TeamServiceBuilder::publishProblems()` plus the name, which the server
  * refuses on any save.
  *
+ * @param {object} form
+ * @param {boolean} mayEmail whether services may send email on this server
  * @return {string[]}
  */
-export function publishProblems(form) {
+export function publishProblems(form, mayEmail = false) {
 	const problems = []
 	const steps = form?.steps || []
 	if (!String(form?.title || '').trim()) {
@@ -193,13 +228,66 @@ export function publishProblems(form) {
 	if (steps.length && steps[steps.length - 1].kind === STEP_KIND.REQUESTER) {
 		problems.push(t('teamhub', 'The last step is for the team, not the requester.'))
 	}
+	if (steps.length && steps[steps.length - 1].kind === STEP_KIND.APPROVAL) {
+		problems.push(t('teamhub', 'The last step is for the team, not an approver.'))
+	}
 	return problems
+		.concat(approvalProblems(
+			steps.filter(s => s.kind === STEP_KIND.APPROVAL).map(s => s.approval),
+			personFields(form).map(field => field.key),
+		))
+		.concat(noticeProblems(steps.flatMap(s => s.notify || []), mayEmail))
+		.concat(conditionProblems(steps, form?.request?.fields || []))
+		.concat(taskFieldProblems(steps))
+		.concat(requestProblems(form?.request))
+}
+
+/**
+ * v4.20.71 — what stands between the tasks' fields and publishing, as the
+ * server says it.
+ */
+export function taskFieldProblems(steps) {
+	const fields = (steps || []).flatMap(step => (step.tasks || []).flatMap(task => task.fields || []))
+	const problems = []
+	if (fields.some(field => !String(field.label || '').trim())) {
+		problems.push(t('teamhub', 'Give every field of a task a name.'))
+	}
+	if (fields.some(field => hasOptions(field.type) && optionsFromText(field.optionsText).length < 2)) {
+		problems.push(t('teamhub', 'Give every field with choices at least two options.'))
+	}
+	return problems
+}
+
+/**
+ * v4.20.71 — the fields a step's condition may use: the request form's, and
+ * those of the tasks of the steps before it. `[{ id, key, label, type, options }]`.
+ */
+export function fieldsBefore(form, index) {
+	const out = (form?.request?.fields || []).slice()
+	;(form?.steps || []).slice(0, Math.max(0, index)).forEach(step => (step.tasks || []).forEach(task => out.push(...(task.fields || []))))
+	return out.map(field => ({
+		id: field.key,
+		key: field.key,
+		label: fieldLabel(field) || t('teamhub', 'A field without a name'),
+		type: field.type,
+		options: optionsFromText(field.optionsText),
+	}))
+}
+
+/** v4.20.58 — the fields of the request form that pick a person. */
+export function personFields(form) {
+	return (form?.request?.fields || []).filter(field => field.type === FIELD_TYPE.PERSON)
 }
 
 /** Whether the days a file is shared for is a whole number the server accepts (v4.10.38). */
 export function fileDaysValid(value, max = 365) {
 	const days = String(value ?? '').trim()
 	return /^\d+$/.test(days) && Number(days) >= 1 && Number(days) <= max
+}
+
+/** v4.20.68 — whether a step's deadline is none, or a whole number of working days the server accepts. */
+export function dueDaysValid(value, max = 60) {
+	return leadDaysValid(value, max)
 }
 
 /** Whether the lead time field holds something the server accepts. */
@@ -290,8 +378,8 @@ export function serviceTitle(service, preferDraft = true) {
 	return doc?.title || ''
 }
 
-/** "3 steps" — the draft's steps between the two fixed ones. */
+/** "3 steps" — between the two fixed ones; a member who does not build gets no draft. */
 export function stepCountLabel(service) {
-	const count = (service?.draft?.steps || []).length
+	const count = ((service?.draft || service?.published)?.steps || []).length
 	return n('teamhub', '{n} step', '{n} steps', count, { n: count })
 }

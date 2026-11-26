@@ -60,6 +60,12 @@ class WorkflowNotificationService {
     public const SUBJECT_STEP_ASSIGNED         = 'workflow_step_assigned';
     /** v4.11.0 - the other side of a service request wrote a message. */
     public const SUBJECT_MESSAGE               = 'workflow_message';
+    /** v4.20.58 - somebody was asked to approve, or the approval was handed to them. */
+    public const SUBJECT_APPROVAL_REQUESTED    = 'workflow_approval_requested';
+    /** v4.20.58 - an approval somebody asked for was given or refused. */
+    public const SUBJECT_APPROVAL_ANSWERED     = 'workflow_approval_answered';
+    /** v4.20.68 - a step is past its deadline. */
+    public const SUBJECT_STEP_OVERDUE          = 'workflow_step_overdue';
 
     public function __construct(
         private INotificationManager      $notifications,
@@ -170,6 +176,44 @@ class WorkflowNotificationService {
         $this->sendTo($recipients, self::SUBJECT_MESSAGE, $instance, $step, $postedBy, ['note' => $note]);
     }
 
+    /** Whoever is asked to approve (v4.20.58): by whom, and what. */
+    public function approvalRequested(WorkflowInstance $instance, WorkflowStep $step, string $askedBy, string $question): void {
+        $this->sendTo($this->holders($step, $instance), self::SUBJECT_APPROVAL_REQUESTED, $instance, $step, $askedBy, ['note' => $question]);
+    }
+
+    /** Whoever asked for an approval: the answer came (v4.20.58). */
+    public function approvalAnswered(WorkflowInstance $instance, WorkflowStep $step, string $to, string $answeredBy, bool $approved, ?string $note): void {
+        $this->sendTo([$to], self::SUBJECT_APPROVAL_ANSWERED, $instance, $step, $answeredBy,
+            ['note' => $note ?? '', 'approved' => $approved ? '1' : '0']);
+    }
+
+    /**
+     * Whoever has a step that is past its deadline (v4.20.68). Withdrawn with
+     * the rest when the request moves on.
+     *
+     * @param string[] $recipients
+     */
+    public function stepOverdue(WorkflowInstance $instance, WorkflowStep $step, array $recipients): void {
+        $this->sendTo($recipients, self::SUBJECT_STEP_OVERDUE, $instance, $step, null, []);
+    }
+
+    /** An approval is not theirs any more: take the question out of their bell (v4.20.58). */
+    public function approvalWithdrawn(WorkflowInstance $instance, WorkflowStep $step): void {
+        foreach ($this->holders($step, $instance) as $uid) {
+            try {
+                $n = $this->notifications->createNotification();
+                $n->setApp(Application::APP_ID)->setUser($uid)
+                    ->setObject(self::OBJECT_TYPE, (string)$instance->getId())
+                    ->setSubject(self::SUBJECT_APPROVAL_REQUESTED);
+                $this->notifications->markProcessed($n);
+            } catch (\Throwable $e) {
+                $this->logger->warning('[TeamHub][Workflow] approval notification withdrawal failed', [
+                    'instance' => $instance->getId(), 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+                ]);
+            }
+        }
+    }
+
     /**
      * Everybody who took part, by name: the workflow ended.
      *
@@ -225,7 +269,11 @@ class WorkflowNotificationService {
     /** @return string[] */
     private function holders(WorkflowStep $step, WorkflowInstance $instance): array {
         try {
-            return $this->resolver->holdersOf(WorkflowActor::of($step->getActorType(), $step->getActorId()), $instance->getTeamId());
+            $holders = $this->resolver->holdersOf(WorkflowActor::of($step->getActorType(), $step->getActorId()), $instance->getTeamId());
+            // v4.20.58 — a group that approves may hold the requester.
+            return $step->isApproval()
+                ? array_values(array_filter($holders, static fn (string $uid): bool => $uid !== $instance->getStartedBy()))
+                : $holders;
         } catch (\Throwable $e) {
             $this->logger->warning('[TeamHub][Workflow] could not resolve step holders', [
                 'instance' => $instance->getId(), 'step' => $step->getStepKey(), 'error' => $e->getMessage(), 'app' => Application::APP_ID,

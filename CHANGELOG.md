@@ -1,3 +1,34 @@
+## [4.21.0] — 2026-11-26
+
+### Services that fit how your organisation works
+
+- A service team designs its own request form: text, choices, dates, numbers, yes or no, a person. The request is named after the answer you pick, and a confirmation can be the requester's, automatic after some days, or not needed.
+- Add an approval step: a named person, a group, the requester's manager or somebody picked on the form approves or rejects, in the words you choose. Whoever handles a request can also ask somebody to approve before going on.
+- Tell people about a step in your own words, as a notification or by email, with the answers you choose. Email stays off until your administrator allows it.
+- A step can run only on some requests, have a deadline in working days with one reminder, and ask for something to be filled in when it is done, such as an inventory number.
+- New services can start from an example: an issue, a request with approval, or an intake form.
+
+### Meetings and calendars
+
+- The room finder searches by building, head count and equipment, shows a room's own calendar, and books recurring meetings.
+- Answer an invitation from TeamHub, see who accepted, and get the notes and a reminder before each date.
+- Show busy times on the team calendar as a timeline, from Nextcloud's own free/busy. Each person can switch theirs off.
+- After a meeting, its organiser turns the action items in the notes into team tasks.
+
+### Working together
+
+- My Work has three tabs, To do, Waiting for others and Completed, with overdue items and the team backlog in their own bands.
+- Create a task from any page, or as a follow-up on a message, comment or decision, with a link back to it.
+- React to messages and comments with an emoji. Message search finds every team you can read.
+- The Communication widget shows pinned messages, open polls and threads you can reply to in one view.
+- Shared with team lists what other apps have registered for your team. Team folders that another app manages are shown, not put to review.
+
+### Smaller things
+
+- TeamHub only ever deletes a calendar, board, room or folder it created itself, and never one another team still uses.
+- Counts with a plural now read right in every language, and many strings that were still English are translated.
+- Boxes have one border all round; the coloured edges on one side are gone.
+
 ## [4.20.0] — 2026-11-11
 
 This is a long-term support release.

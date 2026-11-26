@@ -881,44 +881,37 @@ class TalkService {
      * The room itself is preserved; the team loses visibility in TeamHub.
      */
     public function removeRoomAccess(string $teamId, string $token, \OCP\IDBConnection $db): bool {
-        try {
-            // Find the room_id for this token.
-            $qb  = $db->getQueryBuilder();
-            $res = $qb->select('id')
-                ->from('talk_rooms')
-                ->where($qb->expr()->eq('token', $qb->createNamedParameter($token)))
-                ->setMaxResults(1)
-                ->executeQuery();
-            $row = $res->fetch();
-            $res->closeCursor();
+        // v4.20.38: a failure throws. It used to return false, the same answer as "nothing to remove", so a caller could not tell a refused strip from a done one.
+        // Find the room_id for this token.
+        $qb  = $db->getQueryBuilder();
+        $res = $qb->select('id')
+            ->from('talk_rooms')
+            ->where($qb->expr()->eq('token', $qb->createNamedParameter($token)))
+            ->setMaxResults(1)
+            ->executeQuery();
+        $row = $res->fetch();
+        $res->closeCursor();
 
-            if (!$row) {
-                $this->logger->warning('[TeamHub][TalkService] removeRoomAccess: room not found', [
-                    'token' => $token, 'app' => Application::APP_ID,
-                ]);
-                return false;
-            }
-            $roomId = (int)$row['id'];
-
-            $dqb = $db->getQueryBuilder();
-            $affected = $dqb->delete('talk_attendees')
-                ->where($dqb->expr()->eq('room_id',    $dqb->createNamedParameter($roomId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
-                ->andWhere($dqb->expr()->eq('actor_type', $dqb->createNamedParameter('circles')))
-                ->andWhere($dqb->expr()->eq('actor_id',   $dqb->createNamedParameter($teamId)))
-                ->executeStatement();
-
-            $this->logger->debug('[TeamHub][TalkService] removeRoomAccess: circle attendee removed', [
-                'teamId' => $teamId, 'token' => $token, 'roomId' => $roomId,
-                'affected' => $affected, 'app' => Application::APP_ID,
-            ]);
-            return $affected > 0;
-        } catch (\Throwable $e) {
-            $this->logger->error('[TeamHub][TalkService] removeRoomAccess failed', [
-                'teamId' => $teamId, 'token' => $token,
-                'error' => $e->getMessage(), 'app' => Application::APP_ID,
+        if (!$row) {
+            $this->logger->warning('[TeamHub][TalkService] removeRoomAccess: room not found', [
+                'token' => $token, 'app' => Application::APP_ID,
             ]);
             return false;
         }
+        $roomId = (int)$row['id'];
+
+        $dqb = $db->getQueryBuilder();
+        $affected = $dqb->delete('talk_attendees')
+            ->where($dqb->expr()->eq('room_id',    $dqb->createNamedParameter($roomId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+            ->andWhere($dqb->expr()->eq('actor_type', $dqb->createNamedParameter('circles')))
+            ->andWhere($dqb->expr()->eq('actor_id',   $dqb->createNamedParameter($teamId)))
+            ->executeStatement();
+
+        $this->logger->debug('[TeamHub][TalkService] removeRoomAccess: circle attendee removed', [
+            'teamId' => $teamId, 'token' => $token, 'roomId' => $roomId,
+            'affected' => $affected, 'app' => Application::APP_ID,
+        ]);
+        return $affected > 0;
     }
 
     /**
@@ -1088,44 +1081,6 @@ class TalkService {
                 'token' => $token, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
             return ['deleted' => false, 'detail' => $e->getMessage()];
-        }
-    }
-
-    /**
-     * Delete the team's Talk rooms — every linked one (teamRoomIds()), which is
-     * what the caller then unlinks (ResourceService::deleteTeamResource()
-     * removes every `talk` row). v4.10.48: was "the first room with the team's
-     * circle in it", which could delete a conversation that was not the
-     * team's and leave the team's own room behind.
-     */
-    public function deleteTalkRoom(string $teamId, \OCP\IDBConnection $db): array {
-        try {
-            $roomIds = $this->teamRoomIds($db, $teamId);
-            if ($roomIds === []) {
-                return ['deleted' => false, 'detail' => 'No Talk room found for this team'];
-            }
-
-            foreach ($roomIds as $roomId) {
-                // Delete all attendees for this room
-                $daqb = $db->getQueryBuilder();
-                $daqb->delete('talk_attendees')
-                    ->where($daqb->expr()->eq('room_id', $daqb->createNamedParameter($roomId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
-                    ->executeStatement();
-
-                // Delete the room itself
-                $drqb = $db->getQueryBuilder();
-                $drqb->delete('talk_rooms')
-                    ->where($drqb->expr()->eq('id', $drqb->createNamedParameter($roomId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
-                    ->executeStatement();
-            }
-
-            return ['deleted' => true, 'detail' => 'Talk room(s) ' . implode(', ', $roomIds) . ' deleted'];
-
-        } catch (\Throwable $e) {
-            $this->logger->error('[TeamHub][TalkService] deleteTalkRoom failed', [
-                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
-            ]);
-            return ['deleted' => false, 'detail' => 'Operation failed — see server log for details'];
         }
     }
 

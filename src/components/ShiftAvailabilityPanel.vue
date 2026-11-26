@@ -8,8 +8,8 @@
         <div v-if="loading" class="th-avail__loading">
             <NcLoadingIcon :size="ICON_LARGE" />
         </div>
-        <NcNoteCard v-else-if="error" type="error">
-            {{ error }}
+        <NcNoteCard v-else-if="loadError" type="error">
+            {{ loadError }}
             <template #action>
                 <NcButton variant="secondary" @click="load">{{ t('teamhub', 'Try again') }}</NcButton>
             </template>
@@ -37,19 +37,18 @@
             </table>
 
             <div class="th-avail__actions">
-                <NcButton variant="tertiary" :disabled="saving" @click="setAll(true)">
+                <NcButton variant="tertiary" @click="setAll(true)">
                     {{ t('teamhub', 'Select all') }}
                 </NcButton>
-                <NcButton variant="tertiary" :disabled="saving" @click="setWorkweek">
+                <NcButton variant="tertiary" @click="setWorkweek">
                     {{ t('teamhub', 'Weekdays only') }}
                 </NcButton>
-                <NcButton variant="primary" :disabled="saving || !dirty" @click="save">
-                    {{ t('teamhub', 'Save') }}
-                </NcButton>
-                <span v-if="savedAt" class="th-avail__saved" aria-live="polite">
-                    {{ t('teamhub', 'Saved') }}
-                </span>
             </div>
+            <AutosaveStatus
+                :saving="saving"
+                :saved="saved"
+                :error="saveError"
+                @retry="saver.now()" />
         </template>
     </div>
 </template>
@@ -60,6 +59,8 @@ import { generateUrl } from '@nextcloud/router'
 import { translate as t, translatePlural as n } from '@nextcloud/l10n'
 import { NcButton, NcLoadingIcon, NcCheckboxRadioSwitch, NcNoteCard } from '@nextcloud/vue'
 import { ICON_LARGE } from '../constants/uiTokens.js'
+import { createAutosaver } from '../lib/autosave.js'
+import AutosaveStatus from './AutosaveStatus.vue'
 
 /**
  * When I can work a shift (v4.13.71, DESIGN §2.237).
@@ -77,27 +78,33 @@ import { ICON_LARGE } from '../constants/uiTokens.js'
  * is the reverse, so the two are separate and the wording here never mentions
  * a location.
  *
- * ## Explicit save
+ * ## It saves itself (v4.20.12, DESIGN §2.265)
  *
- * Fourteen switches that each wrote immediately would be fourteen requests
- * while somebody sets up their week, and a half-saved week is a week an admin
- * might staff against. One Save, enabled only once something changed.
+ * Until 4.20.11 this had one Save button, on the grounds that fourteen
+ * switches each writing at once would be fourteen requests and a half-saved
+ * week. Both are answered by the debounce instead: a change waits 800 ms for
+ * the next one, so setting up a week is one write of the whole grid, and the
+ * PUT always carries all fourteen cells. A write never overlaps another
+ * (src/lib/autosave.js).
  */
 export default {
     name: 'ShiftAvailabilityPanel',
 
-    components: { NcButton, NcLoadingIcon, NcCheckboxRadioSwitch, NcNoteCard },
+    components: { NcButton, NcLoadingIcon, NcCheckboxRadioSwitch, NcNoteCard, AutosaveStatus },
 
     data() {
         return {
             ICON_LARGE,
             loading: false,
+            loadError: null,
             saving: false,
-            error: null,
-            savedAt: 0,
+            saved: false,
+            saveError: '',
             /** `${day}:${half}` -> boolean */
             cells: {},
             original: '',
+            saver: null,
+            savedTimer: null,
         }
     },
 
@@ -123,8 +130,19 @@ export default {
         },
     },
 
+    created() {
+        this.saver = createAutosaver({ save: () => this.save(), delay: 800 })
+    },
+
     mounted() {
         this.load()
+    },
+
+    beforeUnmount() {
+        // A change still waiting for its debounce is written, not dropped:
+        // leaving the page is not a reason to lose the last switch.
+        this.saver.flush()
+        clearTimeout(this.savedTimer)
     },
 
     methods: {
@@ -140,7 +158,13 @@ export default {
 
         setCell(day, half, value) {
             this.cells = { ...this.cells, [`${day}:${half}`]: !!value }
-            this.savedAt = 0
+            this.changed()
+        },
+
+        /** Every edit lands here: hide a stale "Saved" and queue the write. */
+        changed() {
+            this.saved = false
+            this.saver.schedule()
         },
 
         setAll(value) {
@@ -151,7 +175,7 @@ export default {
                 }
             }
             this.cells = next
-            this.savedAt = 0
+            this.changed()
         },
 
         /** Monday to Friday on, the weekend off. The common answer. */
@@ -163,12 +187,12 @@ export default {
                 }
             }
             this.cells = next
-            this.savedAt = 0
+            this.changed()
         },
 
         async load() {
             this.loading = true
-            this.error = null
+            this.loadError = null
             try {
                 const { data } = await axios.get(
                     generateUrl('/apps/teamhub/api/v1/people/shift-availability'),
@@ -180,29 +204,46 @@ export default {
                 this.cells = cells
                 this.original = JSON.stringify(cells)
             } catch (err) {
-                this.error = err?.response?.data?.error
+                this.loadError = err?.response?.data?.error
                     || t('teamhub', 'Could not load your availability.')
             } finally {
                 this.loading = false
             }
         },
 
+        /**
+         * Write the whole grid. Called by the autosaver only, which runs it
+         * after the debounce and reads the grid then, so a switch flipped
+         * during a write is carried by the follow-up write.
+         */
         async save() {
+            if (!this.dirty) {
+                return
+            }
+            const snapshot = JSON.stringify(this.cells)
+            const cells = []
+            for (const day of this.days) {
+                for (const half of this.halves) {
+                    cells.push({
+                        dayOfWeek: day.index,
+                        halfDay: half.index,
+                        available: this.isAvailable(day.index, half.index),
+                    })
+                }
+            }
             this.saving = true
-            this.error = null
-            const cells = Object.entries(this.cells).map(([key, available]) => {
-                const [dayOfWeek, halfDay] = key.split(':').map(Number)
-                return { dayOfWeek, halfDay, available }
-            })
+            this.saveError = ''
             try {
                 await axios.put(
                     generateUrl('/apps/teamhub/api/v1/people/shift-availability'),
                     { cells },
                 )
-                this.original = JSON.stringify(this.cells)
-                this.savedAt = Date.now()
+                this.original = snapshot
+                this.saved = true
+                clearTimeout(this.savedTimer)
+                this.savedTimer = setTimeout(() => { this.saved = false }, 2000)
             } catch (err) {
-                this.error = err?.response?.data?.error
+                this.saveError = err?.response?.data?.error
                     || t('teamhub', 'Could not save your availability.')
             } finally {
                 this.saving = false
@@ -249,10 +290,5 @@ export default {
     gap: var(--th-space-sm);
     flex-wrap: wrap;
     margin-block-start: var(--th-space-md);
-}
-
-.th-avail__saved {
-    font-size: var(--th-font-meta);
-    color: var(--color-text-success);
 }
 </style>

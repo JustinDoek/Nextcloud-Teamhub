@@ -37,19 +37,4 @@ class DecisionTeamConfigMapper extends QBMapper {
             return null;
         }
     }
-
-    /**
-     * Count teams that have decisions_enabled = 1.
-     * Used for telemetry.
-     */
-    public function countEnabledTeams(): int {
-        $qb = $this->db->getQueryBuilder();
-        $result = $qb->select($qb->func()->count('*', 'cnt'))
-            ->from($this->getTableName())
-            ->where($qb->expr()->eq('decisions_enabled', $qb->createNamedParameter(1, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
-            ->executeQuery();
-        $val = $result->fetchOne();
-        $result->closeCursor();
-        return (int)$val;
-    }
 }

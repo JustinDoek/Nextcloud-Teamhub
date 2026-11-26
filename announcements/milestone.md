@@ -1,17 +1,15 @@
-### TeamHub 4.20 is a long-term support release
-**Enterprise stability** With a licence or a Support only contract, you get access to our support portal. In that portal we will provide maintenance and security fixes for release 4.20 for at least 24 months. Without a contract you stay on community which will remain the same.
+### TeamHub 4.21
+**Service teams** We introduced some major changes to the setup of service requests workflows which has a major impact on this template type. Request a trial if you want to try Service teams.  
 
-**Support only** When you don't need the licensed features, but have a need for a support contract or the LTS fixes we now offer a support only contract. See the pricing page or request a quote through [Request Support only](https://teamhub.doekworks.eu/quote.php?package=support)
+**Cyber monday: 20% off Enterprise.** The first year of a new Enterprise licence is 20% off, on a quotation issued by Monday 30 November 2026.  [Claim 20% off](https://teamhub.doekworks.eu/quote.php?package=enterprise)
 
-**Black Friday: 20% off Enterprise.** The first year of a new Enterprise licence is 20% off, on a quotation issued by Friday 27 November 2026.  [Claim 20% off](https://teamhub.doekworks.eu/quote.php?package=enterprise&promo=BF2026)
+**What changed** Added an option to every page header to create a task. No more clicking around to create one. We took a look at creating (recurring) meetings and how they present and interact in the widget. We added emoji's to team messages. Added a communication widget with threads, pinned messages and polls from talk. We introduce a shared with team widget where other apps can easily register and share data with the team. We added some more guardrails to protecting team folders against unwanted removal.  
 
-**What changed:** We reviewed the app design and content, worked on many small items, renamed presence module to people and added/changed some functionality, added an option for a team banner, dropped openproject integration dependancy (build it ourself for extra functionality) and added roster functionality the past few weeks.  
+**AppHub** Often running into the limitations of the app store we wanted to setup an alternative to find new releases, new apps and more metadata (github) etc. So we created AppHub not only for ourselves but also for the community. It's url is: https://apphub.doekworks.eu
 
-**New in the licence: Roster.** Plan shifts from a weekly template, draft the week and publish it when it is right. Members set their availability and see their planned hours. [Compare the licence packs](https://teamhub.doekworks.eu/pricing.php)
+Want to try the licensed modules first? Activate a 30-day trial key: Admin settings → TeamHub → License tab → **Request a trial key**, or email sales@doekworks.eu if that doesn't work. 
 
-Want to try the licensed modules first? Activate a 30-day trial key: Admin settings → TeamHub → License tab → **Request a trial key**, or email sales@doekworks.eu with Trial as subject and your uuid (_found on the license tab in the admin settings_).
-
-As always thank you for your support and feedback!
+As always thank you for your support and feedback that helped shape this release!
 
 Justin
 Doek Works

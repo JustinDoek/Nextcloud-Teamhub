@@ -319,6 +319,9 @@ export function buildAvailableTabs(ordered, resources) {
  * @param {object} ctx see computeActiveWidgetIds; plus ctx.teamWidgets
  * @return {Array<{key: string, label: string}>}
  */
+/** v4.21.1 — home widgets that need a licence; Manage team greys them without one. */
+export const LICENSED_WIDGETS = ['widget-shared']
+
 export function buildDashboardWidgetCatalog(ctx) {
     // v4.13.35 — the names come from `layoutWidgetCatalog.js`, which the
     // administrator's layout editor also reads. They were written out here,
@@ -326,9 +329,11 @@ export function buildDashboardWidgetCatalog(ctx) {
     // of the same cards under its own names.
     const labels = layoutWidgetLabels()
     const catalog = []
-    computeActiveWidgetIds(ctx, { applyHidden: false }).forEach(id => {
+    computeActiveWidgetIds({ ...ctx, licensed: true }, { applyHidden: false }).forEach(id => {
         if (id === 'msgstream' || id.startsWith('widget-int-')) return
-        if (labels[id]) catalog.push({ key: id, label: labels[id] })
+        // v4.21.1 — a licensed widget is listed without a licence too, and
+        // Manage team greys it: "you could have this" is the honest state.
+        if (labels[id]) catalog.push({ key: id, label: labels[id], ...(LICENSED_WIDGETS.includes(id) ? { licensed: true } : {}) })
     })
     ;(ctx.teamWidgets || []).forEach(w => {
         catalog.push({ key: 'widget-int-' + w.registry_id, label: w.title || t('teamhub', 'Widget') })

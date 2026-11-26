@@ -536,6 +536,13 @@ class TaskWorkProvider implements IWorkProvider {
                 // overdue team task reads as overdue without claiming to be
                 // one person's problem.
                 'informational' => !$hasAssignee,
+                // v4.20.29 — where the task was made, for the row's "Open the
+                // page" link. Only a link into this instance survives
+                // (`TaskService::sourceLinkFrom()`); any other URL stays in
+                // the task for the Tasks app to show.
+                'sourceUrl'     => $parsed['url'] !== ''
+                    ? $this->taskService->sourceLinkFrom($parsed['url'])
+                    : null,
             ], $this->workflow($parsed, $isMine, $isOrganiser, $hasAssignee)),
             'permissions'    => [
                 'canOpen'     => true,
@@ -733,6 +740,9 @@ class TaskWorkProvider implements IWorkProvider {
             'createdAt'    => $this->timestampOf($vtodo, ['CREATED']),
             'modifiedAt'   => $this->timestampOf($vtodo, ['LAST-MODIFIED']),
             'completedAt'  => $this->timestampOf($vtodo, ['COMPLETED']),
+            // v4.20.29 — the page the task was made on, when it was made in
+            // TeamHub's quick-task dialog (or any client wrote a URL).
+            'url'          => trim((string)($vtodo->URL ?? '')),
         ];
     }
 

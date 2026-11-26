@@ -929,7 +929,32 @@ class Notifier implements INotifier {
             case 'workflow_step_assigned':
             // v4.11.0 - a message on a service request.
             case 'workflow_message':
+            // v4.20.58 - approvals on a service request.
+            case 'workflow_approval_requested':
+            case 'workflow_approval_answered':
+            // v4.20.68 - a step past its deadline.
+            case 'workflow_step_overdue':
                 return $this->prepareWorkflow($notification, $languageCode);
+
+            // v4.20.62 — a notice a service sends (WorkflowNoticeService). The
+            // words are the team's own; it links to the request only for
+            // somebody who could open it when it was sent.
+            case 'service_notice': {
+                $params = $notification->getSubjectParameters();
+                $l      = $this->l10nFactory->get('teamhub', $languageCode);
+                // TRANSLATORS: %1$s is the name of a service, %2$s the requester's own one-line summary
+                $notification->setParsedSubject($l->t('%1$s: %2$s', [(string)($params['service'] ?? ''), (string)($params['subject'] ?? '')]));
+                if (trim((string)($params['text'] ?? '')) !== '') {
+                    $notification->setParsedMessage((string)$params['text']);
+                }
+                $notification->setIcon($this->urlGenerator->getAbsoluteURL(
+                    $this->urlGenerator->imagePath('teamhub', 'app.svg')
+                ));
+                if (($params['open'] ?? '') === '1') {
+                    $notification->setLink($this->urlGenerator->linkToRouteAbsolute('teamhub.page.index', ['mywork' => '1']));
+                }
+                return $notification;
+            }
 
             // v4.14.8 — the roster tells the person it is about
             // (RosterNotificationService, DESIGN §2.250).
@@ -1077,6 +1102,15 @@ class Notifier implements INotifier {
                     $notification->setParsedMessage($l->t('Handed over by %s.', [$actorName]));
                 }
                 break;
+            case 'workflow_step_overdue':
+                // TRANSLATORS: {workflow} is a service request, {step} the name of the step in it that is past its deadline
+                $notification->setRichSubject($l->t('{workflow}: the step "{step}" is past its deadline'), [
+                    'workflow' => $workflow,
+                    'step'     => ['type' => 'highlight', 'id' => $stepKey, 'name' => $stepLabel],
+                ]);
+                // TRANSLATORS: %1$s is a service request, %2$s the name of the step in it that is past its deadline
+                $notification->setParsedSubject($l->t('%1$s: the step "%2$s" is past its deadline', [$title, $stepLabel]));
+                break;
             case 'workflow_step_assigned':
                 // TRANSLATORS: {actor} is the agent who handed the request over, {workflow} the request's title
                 $notification->setRichSubject($l->t('{actor} assigned {workflow} to you'), ['actor' => $actor, 'workflow' => $workflow]);
@@ -1104,6 +1138,24 @@ class Notifier implements INotifier {
                 $notification->setParsedSubject($l->t('%1$s sent a message on %2$s', [$actorName, $title]));
                 $notification->setParsedMessage($note);
                 break;
+            case 'workflow_approval_requested':
+                // TRANSLATORS: {actor} asks the recipient to approve the service request {workflow}
+                $notification->setRichSubject($l->t('{actor} asks for your approval of {workflow}'), ['actor' => $actor, 'workflow' => $workflow]);
+                $notification->setParsedSubject($l->t('%1$s asks for your approval of %2$s', [$actorName, $title]));
+                $notification->setParsedMessage($note);
+                break;
+            case 'workflow_approval_answered':
+                if (($params['approved'] ?? '') === '1') {
+                    // TRANSLATORS: {actor} gave the approval the recipient asked for on the service request {workflow}
+                    $notification->setRichSubject($l->t('{actor} approved {workflow}'), ['actor' => $actor, 'workflow' => $workflow]);
+                    $notification->setParsedSubject($l->t('%1$s approved %2$s', [$actorName, $title]));
+                } else {
+                    // TRANSLATORS: {actor} refused the approval the recipient asked for on the service request {workflow}; the request itself goes on
+                    $notification->setRichSubject($l->t('{actor} did not approve {workflow}'), ['actor' => $actor, 'workflow' => $workflow]);
+                    $notification->setParsedSubject($l->t('%1$s did not approve %2$s', [$actorName, $title]));
+                }
+                $notification->setParsedMessage($note);
+                break;
             default: {
                 $outcome = (string)($params['outcome'] ?? '');
                 switch ($outcome) {
@@ -1120,7 +1172,8 @@ class Notifier implements INotifier {
                         $flat = $l->t('%1$s was cancelled by %2$s', [$title, $actorName]);
                         break;
                 }
-                $notification->setRichSubject($rich, ['workflow' => $workflow, 'actor' => $actor]);
+                // v4.20.54 — a request TeamHub confirmed by itself has no actor.
+                $notification->setRichSubject($rich, ['workflow' => $workflow] + ($actorName !== '' ? ['actor' => $actor] : []));
                 $notification->setParsedSubject($flat);
                 if ($note !== '') {
                     $notification->setParsedMessage($note);

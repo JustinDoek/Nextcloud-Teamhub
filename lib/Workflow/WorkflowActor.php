@@ -48,9 +48,16 @@ final class WorkflowActor {
      */
     public const TYPE_INITIATOR      = 'initiator';
 
+    /**
+     * v4.20.58 — whoever approves a step. A *definition-only* placeholder:
+     * `WorkflowEngine::create()` asks the definition who that is for this
+     * requester (`IWorkflowApprovals`) and stores a user or a group.
+     */
+    public const TYPE_APPROVER       = 'approver';
+
     public const TYPES = [
         self::TYPE_USER, self::TYPE_GROUP, self::TYPE_TEAM_OWNER, self::TYPE_TEAM_MODERATOR, self::TYPE_TEAM,
-        self::TYPE_SERVICE_AGENT, self::TYPE_INITIATOR,
+        self::TYPE_SERVICE_AGENT, self::TYPE_INITIATOR, self::TYPE_APPROVER,
     ];
 
     /** Types a stored step or participant row may carry. */
@@ -107,9 +114,15 @@ final class WorkflowActor {
         return new self(self::TYPE_INITIATOR, '');
     }
 
+    /** Definition-only; see TYPE_APPROVER. */
+    public static function approverPlaceholder(): self {
+        return new self(self::TYPE_APPROVER, '');
+    }
+
     /** A placeholder a definition must resolve before the step row is written. */
     public function isUnresolved(): bool {
         return $this->type === self::TYPE_INITIATOR
+            || $this->type === self::TYPE_APPROVER
             || ($this->type === self::TYPE_SERVICE_AGENT && $this->id === '');
     }
 
@@ -122,13 +135,17 @@ final class WorkflowActor {
         if (!in_array($type, self::TYPES, true)) {
             throw new \InvalidArgumentException('Unknown workflow actor type: ' . $type);
         }
-        if (in_array($type, self::TEAM_RELATIVE, true) || $type === self::TYPE_INITIATOR) {
+        if (in_array($type, self::TEAM_RELATIVE, true) || $type === self::TYPE_INITIATOR || $type === self::TYPE_APPROVER) {
             return new self($type, '');
         }
         if ($id === '') {
             throw new \InvalidArgumentException('A ' . $type . ' actor needs an id.');
         }
         return new self($type, $id);
+    }
+
+    public function isApprover(): bool {
+        return $this->type === self::TYPE_APPROVER;
     }
 
     public function isInitiator(): bool {

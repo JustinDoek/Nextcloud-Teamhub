@@ -53,7 +53,8 @@ export default {
             default: false,
         },
         // When true, this cell has a pending draft change not yet saved.
-        // Shown as an amber outline so the user knows what will be affected by Save.
+        // Shown as an amber outline while the autosave is in flight, and
+        // after a failed one until Retry or Discard changes (v4.20.12).
         dirty: {
             type: Boolean,
             default: false,

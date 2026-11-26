@@ -130,6 +130,8 @@ class ServiceTeamService {
      * '1' = on; absent = off. Written by `TeamService::saveAdminSettings()`.
      */
     public const CONFIG_ENABLED = 'service_teams_module_enabled';
+    /** v4.20.62 — *Services may send email*; see `mayEmail()`. */
+    public const CONFIG_EMAIL   = 'service_teams_email_enabled';
 
     /** @var array<string, bool> "uid|teamId" → eligible, memoised per request */
     private array $eligibleMemo = [];
@@ -238,6 +240,16 @@ class ServiceTeamService {
      */
     public function isEnabledByAdmin(): bool {
         return $this->config->getAppValue(Application::APP_ID, self::CONFIG_ENABLED, '0') === '1';
+    }
+
+    /**
+     * Whether a service may send email (v4.20.62): the administrator's other
+     * switch, **default off** (Justin, 2026-11-25). Once sent, what an email
+     * says has left TeamHub's permissions, so a server decides that on
+     * purpose. The bell needs no switch.
+     */
+    public function mayEmail(): bool {
+        return $this->config->getAppValue(Application::APP_ID, self::CONFIG_EMAIL, '0') === '1';
     }
 
     /** Whether this instance has Service Teams at all, without throwing. */
@@ -473,6 +485,13 @@ class ServiceTeamService {
                 'icon'          => ServiceIcons::isAllowed($icon) ? $icon : ServiceIcons::DEFAULT,
                 'leadTime'      => $this->leadTimeInDays((int)($doc['leadDays'] ?? 0)),
                 'builtService'  => true,
+                // v4.20.54 — the form behind the card, and the version it
+                // was drawn from (`TeamServiceDefinition::validateStart()`).
+                'version'       => $row->getPubVersion(),
+                'form'          => RequestForm::of($doc),
+                // v4.20.58 — whoever approves can view the requester's files,
+                // so the form says so.
+                'approvals'     => in_array(TeamServiceDefinition::KIND_APPROVAL, array_column((array)($doc['steps'] ?? []), 'kind'), true),
                 'teamOptional'  => true,
                 // v4.10.38 — what the request form's paperclip may do.
                 'fileSharing'   => WorkflowShareService::settingsOf(['fileSharing' => $doc['files'] ?? []]),

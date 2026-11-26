@@ -203,7 +203,7 @@ import {
 	agentActionLabel, assignableAgents, assigneeLabel, deskOutcomeLabel, deskOutcomeVariant,
 	queueTabEmptyState, queueTabLabel, queueTabRows,
 } from '../constants/serviceTeams.js'
-import { activeStep, fileSharingOf, formatAbsolute, formatRecent, rowKey, shareNote } from '../constants/workflows.js'
+import { activeStep, dueState, fileSharingOf, formatAbsolute, formatRecent, rowKey, shareNote } from '../constants/workflows.js'
 import { ICON_BODY, ICON_INLINE, ICON_LARGE } from '../constants/uiTokens.js'
 
 /**
@@ -303,9 +303,19 @@ export default {
 		currentStep(request) { return activeStep(request) },
 		/**
 		 * v4.10.44 — what else goes on the task line: who has it (Claimed),
-		 * or what the requester still has to do (With requester).
+		 * or what it waits for (Waiting for others).
 		 */
 		rowExtra(request) {
+			// v4.20.68 — the deadline of the task this row is about.
+			const step = activeStep(request)
+			const due = dueState(step?.dueAt, Date.now() / 1000, step?.dueDate)
+			const deadline = due
+				// TRANSLATORS: before the day a task of a service request is due, or was due, e.g. "Due: Wed, Dec 3"
+				? [{ key: 'due', label: due.overdue ? t('teamhub', 'Overdue since:') : t('teamhub', 'Due:'), value: due.date }]
+				: []
+			return this.rowExtraWithout(request).concat(deadline)
+		},
+		rowExtraWithout(request) {
 			if (this.activeTab === QUEUE_TAB.CLAIMED && request.internal?.assignee) {
 				// TRANSLATORS: before the name of the team member who has a task, e.g. "With: Jaap"
 				return [{ key: 'with', label: t('teamhub', 'With:'), value: this.isMine(request) ? t('teamhub', 'You') : (request.internal.assigneeName || request.internal.assignee) }]

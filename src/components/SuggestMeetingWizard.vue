@@ -1,6 +1,23 @@
 <template>
-    <NcModal size="normal" @close="$emit('close')">
-        <div class="suggest-wizard">
+    <NcModal :size="roomBrowser ? 'large' : 'normal'" @close="$emit('close')">
+        <!-- v4.20.7 — the full room list replaces the wizard's content rather
+             than opening a dialog on top of it (DESIGN §2.223, §2.262). The
+             wizard stays mounted under v-show, so nothing typed is lost. -->
+        <RoomBrowser
+            v-if="roomBrowser"
+            :team-id="teamId"
+            :rooms="finderRooms"
+            :recurrence="recurrenceParam"
+            :model-value="selectedRoom"
+            :date="eventDate"
+            :start-time="eventStart"
+            :end-time="eventEnd"
+            :initial-building="roomBrowser.building"
+            :initial-people="roomBrowser.people"
+            :initial-features="roomBrowser.features || []"
+            @pick="onRoomPicked"
+            @back="closeRoomBrowser({})" />
+        <div v-show="!roomBrowser" class="suggest-wizard">
             <h2 class="suggest-wizard__heading">
                 <AccountGroupIcon v-if="!lockAttendees" :size="ICON_BODY" aria-hidden="true" />
                 <CalendarClock v-else :size="ICON_BODY" aria-hidden="true" />
@@ -168,7 +185,7 @@
                                     {{ t('teamhub', 'No suitable half-days near that date. Try another date or meeting type.') }}
                                 </p>
                                 <ul v-else class="suggest-wizard__suggestions">
-                                    <li v-for="(s, i) in suggestions" :key="`half-${i}`">
+                                    <li v-for="(s, i) in suggestions" :key="`half-${i}`" class="suggest-wizard__suggestion-row">
                                         <button
                                             type="button"
                                             class="suggest-wizard__suggestion"
@@ -177,6 +194,8 @@
                                             <span class="suggest-wizard__suggestion-when">{{ formatSuggestion(s) }}</span>
                                             <span class="suggest-wizard__suggestion-why">{{ describeSuggestion(s) }}</span>
                                         </button>
+                                        <!-- v4.20.14 — who cannot come, and why, on click. -->
+                                        <UnavailableAttendees :people="s.unavailable || []" />
                                     </li>
                                 </ul>
 
@@ -184,18 +203,29 @@
                                 <div v-if="chosenIndex !== null" class="suggest-wizard__timeslots-inline" aria-live="polite">
                                     <div class="suggest-wizard__timeslots-header">
                                         <span class="suggest-wizard__label">{{ t('teamhub', 'Pick a time') }}</span>
-                                        <label class="suggest-wizard__duration">
-                                            {{ t('teamhub', 'Duration') }}
-                                            <NcSelect
-                                                v-model.number="durationMinutes"
-                                                class="suggest-wizard__input suggest-wizard__input--inline"
-                                                :aria-label-combobox="t('teamhub', 'Duration')"
-                                                @update:model-value="fetchTimeslots"
-                                                label-outside
-                                                :options="[{ id: 30, label: t('teamhub', '30 min') }, { id: 45, label: t('teamhub', '45 min') }, { id: 60, label: t('teamhub', '1 hour') }, { id: 90, label: t('teamhub', '1.5 hours') }, { id: 120, label: t('teamhub', '2 hours') }]"
-                                                :reduce="o => o.id"
-                                                :clearable="false" />
-                                        </label>
+                                        <!-- v4.20.17 — the Roster template picker's
+                                             fix (DESIGN §2.252, §2.231): the select
+                                             sits in a box of its own width and fills
+                                             it, so closed, open and the menu are one
+                                             piece; `input-id` + `<label for>` instead
+                                             of a wrapping label, whose small text
+                                             size used to leak into the control. -->
+                                        <div class="suggest-wizard__duration">
+                                            <label for="suggest-wizard-duration" class="suggest-wizard__duration-label">
+                                                {{ t('teamhub', 'Duration') }}
+                                            </label>
+                                            <div class="suggest-wizard__duration-field">
+                                                <NcSelect
+                                                    v-model.number="durationMinutes"
+                                                    input-id="suggest-wizard-duration"
+                                                    :aria-label-combobox="t('teamhub', 'Duration')"
+                                                    @update:model-value="fetchTimeslots"
+                                                    label-outside
+                                                    :options="[{ id: 30, label: t('teamhub', '30 min') }, { id: 45, label: t('teamhub', '45 min') }, { id: 60, label: t('teamhub', '1 hour') }, { id: 90, label: t('teamhub', '1.5 hours') }, { id: 120, label: t('teamhub', '2 hours') }]"
+                                                    :reduce="o => o.id"
+                                                    :clearable="false" />
+                                            </div>
+                                        </div>
                                     </div>
                                     <NcLoadingIcon v-if="loadingTimeslots" :size="ICON_BODY" />
                                     <template v-else>
@@ -203,7 +233,7 @@
                                             {{ t('teamhub', 'No conflict-free windows in that half-day.') }}
                                         </p>
                                         <ul v-else class="suggest-wizard__suggestions">
-                                            <li v-for="(ts, i) in timeslots" :key="`ts-${i}`">
+                                            <li v-for="(ts, i) in timeslots" :key="`ts-${i}`" class="suggest-wizard__suggestion-row">
                                                 <button
                                                     type="button"
                                                     class="suggest-wizard__suggestion suggest-wizard__suggestion--compact"
@@ -212,6 +242,7 @@
                                                     <span class="suggest-wizard__suggestion-when">{{ ts.start }}–{{ ts.end }}</span>
                                                     <span class="suggest-wizard__suggestion-why">{{ describeTimeslot(ts) }}</span>
                                                 </button>
+                                                <UnavailableAttendees :people="ts.unavailable || []" />
                                             </li>
                                         </ul>
                                     </template>
@@ -246,6 +277,35 @@
                     </div>
                 </div>
 
+                <!-- v4.20.8 — Repeat, as Nextcloud Calendar offers it. Licensed:
+                     hidden on an unlicensed instance, and the server refuses a
+                     series from one anyway. Above the room so the finder
+                     checks every date of the series. -->
+                <div v-if="licensed" class="suggest-wizard__field">
+                    <RecurrenceEditor v-model="recurrence" :date="eventDate" />
+                </div>
+
+                <!-- v4.20.10 — a series in the Add meeting flow: each later date
+                     gets its own notes file and a reminder in the team chat
+                     this many days before it (MeetingSeriesPrepJob). -->
+                <div v-if="recurrenceParam && !lockAttendees" class="suggest-wizard__field">
+                    <label class="suggest-wizard__label" for="meeting-reminder-days">
+                        {{ t('teamhub', 'Notes and chat reminder') }}
+                    </label>
+                    <NcSelect
+                        v-model="reminderDays"
+                        input-id="meeting-reminder-days"
+                        class="suggest-wizard__input"
+                        label-outside
+                        :options="reminderOptions"
+                        :reduce="o => o.id"
+                        :clearable="false"
+                        :aria-label-combobox="t('teamhub', 'Notes and chat reminder')" />
+                    <p class="suggest-wizard__hint">
+                        {{ t('teamhub', 'Each meeting gets its own notes file, and the attendees are mentioned in the team chat with a link to it.') }}
+                    </p>
+                </div>
+
                 <!-- Description -->
                 <div class="suggest-wizard__field">
                     <label class="suggest-wizard__label" for="meeting-description">
@@ -259,37 +319,30 @@
                         label-outside />
                 </div>
 
-                <!-- Room picker — only when RoomVox / CRM rooms are available -->
+                <!-- Room finder (v4.20.0) — building, people, and which rooms
+                     are free in the slot chosen in step 1. Only when RoomVox /
+                     CRM rooms exist; otherwise the free-text location below.
+                     The RoomVox / invitation hint moved into RoomFinder, still
+                     following the picked room's `source` (v4.13.74). -->
                 <div v-if="loadingRooms" class="suggest-wizard__field">
                     <NcLoadingIcon :size="ICON_BODY" /> {{ t('teamhub', 'Looking up rooms…') }}
                 </div>
-                <div v-else-if="rooms.length > 0" class="suggest-wizard__field">
-                    <label class="suggest-wizard__label" for="meeting-room">
-                        {{ t('teamhub', 'Meeting room') }}
-                    </label>
-                    <NcSelect
-                        input-id="meeting-room"
-                        label-outside
-                        v-model="selectedRoomId"
-                        class="suggest-wizard__input"
-                        :options="[{ id: '', label: t('teamhub', 'No room') }, ...rooms.map(r => ({ id: r.id, label: r.displayName }))]"
-                        :reduce="o => o.id"
-                        :clearable="false" />
-                    <!-- v4.13.74 — the hint follows the room, not the app.
-                         `/rooms` returns RoomVox rooms and rooms the Calendar
-                         Resource Management app provides, each carrying its own
-                         `source`, and only a RoomVox one is booked by an API
-                         call. A CRM room is invited as an attendee and its own
-                         calendar answers, so promising every picker a RoomVox
-                         booking was wrong on any instance with CRM rooms and
-                         no RoomVox at all. Same two sentences AddEventModal
-                         has used since the picker was built. -->
-                    <p v-if="pickedRoomIsRoomVox" class="suggest-wizard__hint">
-                        {{ t('teamhub', 'This room will be booked automatically via RoomVox.') }}
-                    </p>
-                    <p v-else-if="selectedRoomId" class="suggest-wizard__hint">
-                        {{ t('teamhub', 'This room will be invited to the event. Booking must be confirmed by the resource manager.') }}
-                    </p>
+                <!-- v4.20.8 — an online meeting books no room: the finder is
+                     hidden and the free-text location stays for a link. -->
+                <div v-else-if="rooms.length > 0 && meetingType !== 'online'" class="suggest-wizard__field">
+                    <RoomFinder
+                        ref="roomFinder"
+                        v-model="selectedRoom"
+                        :team-id="teamId"
+                        :rooms="finderRooms"
+                        :recurrence="recurrenceParam"
+                        :date="eventDate"
+                        :start-time="eventStart"
+                        :end-time="eventEnd"
+                        :people-count="selectedCount + 1"
+                        :preferred-building="preferredBuilding"
+                        equipment
+                        @browse="v => roomBrowser = v" />
                 </div>
                 <div v-else class="suggest-wizard__field">
                     <label class="suggest-wizard__label" for="meeting-location">
@@ -453,7 +506,7 @@
 import { mapState } from 'vuex'
 import { NcModal, NcButton, NcLoadingIcon, NcCheckboxRadioSwitch, NcTextField, NcTextArea, NcSelect } from '@nextcloud/vue'
 import { translate as t, translatePlural as n } from '@nextcloud/l10n'
-import { formatIsoDate } from '../lib/localDate.js'
+import { formatIsoDate, zonedIsoDate } from '../lib/localDate.js'
 import { todayIso } from '../lib/localDate.js'
 import { generateUrl } from '@nextcloud/router'
 import { showError, showSuccess } from '@nextcloud/dialogs'
@@ -462,12 +515,17 @@ import axios from '@nextcloud/axios'
 import AccountGroupIcon from 'vue-material-design-icons/AccountGroup.vue'
 import CalendarClock from 'vue-material-design-icons/CalendarClock.vue'
 import FileDocumentIcon from 'vue-material-design-icons/FileDocument.vue'
+import RecurrenceEditor from './RecurrenceEditor.vue'
+import RoomBrowser from './RoomBrowser.vue'
+import RoomFinder from './RoomFinder.vue'
+import UnavailableAttendees from './UnavailableAttendees.vue'
 import { ICON_BODY, ICON_INLINE, ICON_LARGE } from '../constants/uiTokens.js'
+import { defaultRecurrence, isRecurring, recurrenceProblem, serializeRecurrence, weekdayCode } from '../lib/meetingRecurrence.js'
 
 export default {
     name: 'SuggestMeetingWizard',
     components: {    NcSelect, NcTextArea, NcTextField, NcModal, NcButton, NcLoadingIcon, NcCheckboxRadioSwitch,
-        AccountGroupIcon, CalendarClock, FileDocumentIcon },
+        AccountGroupIcon, CalendarClock, FileDocumentIcon, RecurrenceEditor, RoomBrowser, RoomFinder, UnavailableAttendees },
     props: {
         teamId: { type: String, required: true },
         calendars: { type: Array, default: () => [] },
@@ -520,7 +578,15 @@ export default {
             chosenTimeslotIndex: null,
             loadingRooms: false,
             rooms: [],
-            selectedRoomId: '',
+            // v4.20.0 — the picked `/rooms` entry from RoomFinder, or null.
+            selectedRoom: null,
+            // v4.20.7: while the full room list is open, the filters it opened
+            // with ({ building, people }); null while the wizard shows.
+            roomBrowser: null,
+            // v4.20.8 — the Repeat field (src/lib/meetingRecurrence.js).
+            recurrence: defaultRecurrence(iso),
+            // v4.20.10 — days before each date of a series (1 to 7).
+            reminderDays: 2,
             // New Add-Meeting features (not surfaced in approver-meeting flow):
             askAgenda: false,
             includeOverdueTasks: false,
@@ -536,16 +602,46 @@ export default {
     },
 
     computed: {
-        ...mapState(['presenceModuleEnabled', 'presenceConfig']),
+        ...mapState(['presenceModuleEnabled', 'presenceConfig', 'licensed']),
+
         /**
-         * True when the picked room is booked by RoomVox rather than invited.
-         * `/rooms` mixes RoomVox rooms with rooms the Calendar Resource
-         * Management app provides; `source` is how a room says which it is.
+         * v4.20.8 — the repeat setting as sent to the server, or '' for a
+         * single meeting. Always '' on an unlicensed instance.
          */
-        pickedRoomIsRoomVox() {
-            if (!this.selectedRoomId) return false
-            const r = this.rooms.find(room => room.id === this.selectedRoomId)
-            return r ? (r.source === 'roomvox' || r.source === 'mixed') : false
+        recurrenceParam() {
+            return this.licensed ? (serializeRecurrence(this.recurrence) || '') : ''
+        },
+        /** v4.20.10 — "2 days before", 1 to 7. */
+        reminderOptions() {
+            return [1, 2, 3, 4, 5, 6, 7].map(d => ({
+                id: d,
+                // TRANSLATORS: when a repeating meeting's notes are created and the team chat is reminded, e.g. "2 days before"
+                label: n('teamhub', '%n day before', '%n days before', d, { n: d }),
+            }))
+        },
+        /** v4.20.8 — a Repeat setting that cannot be sent yet. */
+        recurrenceBlocked() {
+            return this.licensed && recurrenceProblem(this.recurrence, this.eventDate) !== ''
+        },
+        /**
+         * v4.20.8 — the rooms the finder offers. A series cannot book a
+         * RoomVox room (RoomVox books one date per call), so only rooms from
+         * Nextcloud's own resource management are offered for one.
+         */
+        finderRooms() {
+            return this.recurrenceParam ? this.rooms.filter(r => r.source === 'crm') : this.rooms
+        },
+        /**
+         * The building RoomFinder opens on (v4.20.0): where most attendees are
+         * on site, as the presence suggestion worked out for an office meeting.
+         * The timeslot's answer is the more precise one when there is one.
+         */
+        preferredBuilding() {
+            if (this.meetingType !== 'office') return ''
+            const ts = this.chosenTimeslotIndex !== null ? this.timeslots[this.chosenTimeslotIndex] : null
+            if (ts?.bestBuildingName) return ts.bestBuildingName
+            const s = this.chosenIndex !== null ? this.suggestions[this.chosenIndex] : null
+            return s?.bestBuildingName || ''
         },
         /**
          * Presence-driven suggestions only make sense when the module is
@@ -642,7 +738,25 @@ export default {
         // Auto-derive filename from title + meeting date until the user
         // touches it directly (any manual edit detaches it from the title).
         title() { this.updateFilename() },
-        eventDate() { this.updateFilename() },
+        eventDate(value) {
+            this.updateFilename()
+            // An unrepeated meeting that moves keeps repeating on its own day
+            // once Repeat is switched on.
+            if (!isRecurring(this.recurrence)) {
+                const code = weekdayCode(value)
+                this.recurrence = { ...this.recurrence, byDay: code ? [code] : [] }
+            }
+        },
+        // v4.20.8 — an online meeting books no room.
+        meetingType(value) {
+            if (value === 'online') this.selectedRoom = null
+        },
+        // v4.20.8 — a RoomVox room cannot be booked for a series.
+        recurrenceParam(value) {
+            if (value && this.selectedRoom && this.selectedRoom.source !== 'crm') {
+                this.selectedRoom = null
+            }
+        },
     },
     mounted() {
         this.loadMembers()
@@ -923,9 +1037,7 @@ export default {
                 available: ts.availableCount,
                 total: ts.attendeeCount,
             })
-            if (ts.conflictCount > 0) {
-                line += ' · ' + n('teamhub', '%n has a calendar conflict', '%n have a calendar conflict', ts.conflictCount, { n: ts.conflictCount })
-            }
+            line += this.unavailableSummary(ts)
             if (ts.bestBuildingName) {
                 // TRANSLATORS: appended to a timeslot suggestion when the meeting is in-office; {building} is the building name with the most attendees on site
                 line += ' · ' + t('teamhub', 'most suitable location: {building}', { building: ts.bestBuildingName })
@@ -957,16 +1069,44 @@ export default {
                 if (s.remoteCount > 0) {
                     line += ' · ' + n('teamhub', '%n could join online', '%n could join online', s.remoteCount, { n: s.remoteCount })
                 }
-                return line
+                return line + this.unavailableSummary(s)
             }
-            let line = t('teamhub', '{available} of {total} available', {
+            const line = t('teamhub', '{available} of {total} available', {
                 available: s.availableCount,
                 total: s.attendeeCount,
             })
-            if (s.conflictCount > 0) {
-                line += ' · ' + n('teamhub', '%n has a conflict', '%n have a conflict', s.conflictCount, { n: s.conflictCount })
+            return line + this.unavailableSummary(s)
+        },
+
+        /**
+         * v4.20.14 (DESIGN §2.266) — the people a suggestion leaves out, by
+         * reason, so "cannot be checked" no longer reads as a conflict. Falls
+         * back to the plain conflict count for a response without the list.
+         */
+        unavailableSummary(s) {
+            const people = Array.isArray(s.unavailable) ? s.unavailable : null
+            if (people === null) {
+                return s.conflictCount > 0
+                    ? ' · ' + n('teamhub', '%n has a conflict', '%n have a conflict', s.conflictCount, { n: s.conflictCount })
+                    : ''
             }
-            return line
+            const count = reason => people.filter(p => p.reason === reason).length
+            const off = count('off')
+            const calendar = count('calendar')
+            const unchecked = count('unchecked')
+            let out = ''
+            if (off > 0) {
+                // TRANSLATORS: part of a meeting suggestion, e.g. "2 of 3 available · 1 is not working"
+                out += ' · ' + n('teamhub', '%n is not working', '%n are not working', off, { n: off })
+            }
+            if (calendar > 0) {
+                out += ' · ' + n('teamhub', '%n has a calendar conflict', '%n have a calendar conflict', calendar, { n: calendar })
+            }
+            if (unchecked > 0) {
+                // TRANSLATORS: part of a meeting suggestion; Nextcloud could not check this many attendees' calendars
+                out += ' · ' + n('teamhub', '%n cannot be checked', '%n cannot be checked', unchecked, { n: unchecked })
+            }
+            return out
         },
 
         formatChosenWhen() {
@@ -1004,7 +1144,11 @@ export default {
             }
             this.busy = true
             try {
-                const picked = this.rooms.find(r => r.id === this.selectedRoomId)
+                const picked = this.meetingType === 'online' ? null : this.selectedRoom
+                if (this.recurrenceBlocked) {
+                    showError(t('teamhub', 'Check the repeat settings first.'))
+                    return
+                }
                 if (this.lockAttendees) {
                     // Legacy approver-meeting path — write a calendar event,
                     // no notes file. Matches pre-3.81 behaviour exactly.
@@ -1038,6 +1182,7 @@ export default {
                     attendees: this.selectedIds.join(','),
                     calendarId: this.calendars[0]?.id ?? null,
                 }
+                if (this.recurrenceParam) payload.recurrence = this.recurrenceParam
                 const { data: created } = await axios.post(
                     generateUrl(`/apps/teamhub/api/v1/teams/${this.teamId}/calendar/events`),
                     payload
@@ -1050,11 +1195,61 @@ export default {
                 })
                 this.$emit('close')
             } catch (e) {
+                if (this.reportRoomBusy(e) || this.reportLicenseGate(e)) return
                 const msg = e?.response?.data?.error || ''
                 showError(msg
                     ? t('teamhub', 'Failed to add event: {error}', { error: msg })
                     : t('teamhub', 'Failed to add event'))
             }
+        },
+
+        /**
+         * v4.20.7: a room picked on the full list. Picking it on another day
+         * moves the meeting to that day, as the list said it would.
+         *
+         * @param {{ room: object, date: string, people: number, features: string[] }} result the pick
+         */
+        onRoomPicked({ room, date, people, features }) {
+            this.selectedRoom = room
+            if (date && date !== this.eventDate) this.eventDate = date
+            this.closeRoomBrowser({ people, features })
+        },
+
+        closeRoomBrowser(result) {
+            this.roomBrowser = null
+            this.$nextTick(() => this.$refs.roomFinder?.returnFromBrowser(result))
+        },
+
+        /**
+         * v4.20.0 — the server refused because the picked room was taken
+         * between the finder loading and Create. Says so in the user's
+         * language and leaves the wizard open on step 2 so another room can be
+         * picked. True when it handled the error.
+         */
+        reportRoomBusy(e) {
+            const data = e?.response?.data
+            if (e?.response?.status !== 409 || data?.code !== 'room_busy') return false
+            const room = data.room || this.selectedRoom?.displayName || ''
+            const dates = Array.isArray(data.dates) ? data.dates : []
+            if (dates.length > 0) {
+                // v4.20.8 — a series: name the first few clashing dates.
+                const shown = dates.slice(0, 3).map(d => formatIsoDate(zonedIsoDate(d))).join(', ')
+                showError(n('teamhub', '{room} is booked on %n date of this series ({dates}). Pick another room.', '{room} is booked on %n dates of this series ({dates}). Pick another room.', dates.length, { n: dates.length, room, dates: shown }))
+                return true
+            }
+            showError(t('teamhub', '{room} is booked at this time. Pick another room or time.', { room }))
+            return true
+        },
+
+        /**
+         * v4.20.8 — a licensed feature (a recurring meeting) refused by an
+         * instance whose licence lapsed after the page loaded. True when it
+         * handled the error.
+         */
+        reportLicenseGate(e) {
+            if (e?.response?.status !== 403 || !e?.response?.data?.licenseGate) return false
+            showError(t('teamhub', 'Recurring meetings need an active TeamHub licence.'))
+            return true
         },
 
         async submitFullMeeting(picked) {
@@ -1087,6 +1282,10 @@ export default {
                         ? this.selectedProposalCategories.join(',')
                         : '',
                 }
+                if (this.recurrenceParam) {
+                    payload.recurrence = this.recurrenceParam
+                    payload.reminderDays = this.reminderDays
+                }
                 const { data: created } = await axios.post(
                     generateUrl(`/apps/teamhub/api/v1/teams/${this.teamId}/meetings`),
                     payload
@@ -1099,6 +1298,7 @@ export default {
                 })
                 this.$emit('close')
             } catch (e) {
+                if (this.reportRoomBusy(e) || this.reportLicenseGate(e)) return
                 const status = e?.response?.status
                 const msg = e?.response?.data?.error || ''
                 if (status === 403) {
@@ -1196,7 +1396,6 @@ export default {
     width: 100%;
     box-sizing: border-box;
 }
-.suggest-wizard__input--inline { width: auto; padding: 4px 8px; }
 .suggest-wizard__input:focus,
 .suggest-wizard__input--error { border-color: var(--color-error); }
 .suggest-wizard__pills {
@@ -1256,6 +1455,17 @@ export default {
     gap: 4px;
 }
 .suggest-wizard__suggestion--compact { padding: 6px 10px; }
+/* v4.20.14 — the card and the "who cannot come" icon side by side. The icon is
+   a sibling, not inside the card: a button inside a button is invalid. */
+.suggest-wizard__suggestion-row {
+    display: flex;
+    align-items: center;
+    gap: var(--th-space-xs);
+}
+.suggest-wizard__suggestion-row > .suggest-wizard__suggestion {
+    flex: 1 1 auto;
+    min-inline-size: 0;
+}
 .suggest-wizard__suggestion:hover { background: var(--color-background-hover); }
 .suggest-wizard__suggestion:focus-visible {
     outline: 2px solid var(--color-primary-element);
@@ -1291,9 +1501,33 @@ export default {
 .suggest-wizard__duration {
     display: flex;
     align-items: center;
-    gap: 8px;
-    font-size: 0.85rem;
+    gap: var(--th-space-sm);
+}
+/* Only the label is small. v4.20.12 set the small size on a <label> that
+   wrapped the select, so the control's own text inherited it and read
+   smaller than every other field in the wizard. */
+.suggest-wizard__duration-label {
+    font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
+}
+/* v4.20.17 — the Roster template picker's fix, as it is there (DESIGN
+   §2.252). v4.20.12 put the width, a 0 padding and the wizard's input class
+   on the NcSelect root itself, which still let the open control and its menu
+   come apart. The width belongs to a box around the select, and the select
+   fills it; closed, open and the menu are then one width. */
+.suggest-wizard__duration-field {
+    flex: 0 0 auto;
+    inline-size: calc(40 * var(--default-grid-baseline));
+    max-inline-size: 100%;
+    font-size: var(--th-font-body);
+}
+/* (0,4,0) through :deep(), so it beats @nextcloud/vue's own (0,2,0) rule
+   wherever the stylesheets land (TeamRosterView carries the same note). The
+   4px bottom margin NcSelect keeps for stacked forms would lift it off the
+   line *Pick a time* sits on. */
+.suggest-wizard__duration-field :deep(.v-select.select) {
+    inline-size: 100%;
+    margin-block-end: 0;
 }
 .suggest-wizard__prefill-banner {
     background: var(--color-success);

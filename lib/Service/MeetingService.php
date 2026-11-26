@@ -60,6 +60,15 @@ class MeetingService {
         private ContainerInterface      $container,
         private TimezoneService         $timezoneService,
         private LoggerInterface         $logger,
+        // v4.20.0 — refuses a room already taken in the slot, before the
+        // notes file or the event is written.
+        private RoomAvailabilityService $roomAvailability,
+        // v4.20.8 — recurring meetings: licence gate, RRULE, and the room
+        // checked on every date of the series.
+        private MeetingSeriesService $meetingSeries,
+        // v4.20.10 — a recurring meeting gets notes and a chat reminder before
+        // each date (MeetingSeriesPrepJob); the series is remembered here.
+        private \OCA\TeamHub\Db\MeetingSeriesMapper $seriesMapper,
     ) {}
 
     // -------------------------------------------------------------------------
@@ -93,6 +102,9 @@ class MeetingService {
      * @param string[] $proposalCategories When `$includeProposals` is true and
      *                 this array is non-empty, only proposals whose category
      *                 is in the list are included. Empty = no filter.
+     * @param mixed $recurrence v4.20.8: the repeat setting as the client sent
+     *                 it (JSON or array), or null for a single meeting.
+     *                 Licensed; see MeetingSeriesService.
      * @return array{notesUrl:string,talkUrl:string|null,calendarEventCreated:bool,eventUid:string}
      * @throws \Exception on permission failure or unrecoverable error
      */
@@ -116,7 +128,9 @@ class MeetingService {
         bool   $includeOverdueTasks     = false,
         bool   $includeUnscheduledTasks = false,
         bool   $includeProposals        = false,
-        array  $proposalCategories      = []
+        array  $proposalCategories      = [],
+        mixed  $recurrence              = null,
+        int    $reminderDays            = 2
     ): array {
         $this->logger->debug('[TeamHub][MeetingService] createTeamMeeting — start', [
             'teamId' => $teamId, 'title' => $title, 'date' => $date,
@@ -135,6 +149,40 @@ class MeetingService {
             throw new \Exception('User not authenticated');
         }
         $uid = $user->getUID();
+
+        // v4.20.0 — a room already taken in this slot stops the meeting here,
+        // before the notes file exists. Checked first because everything below
+        // writes something, and a refusal after the notes file would leave an
+        // orphaned file in the team folder.
+        //
+        // v4.20.8 — the same holds for a recurring meeting, on every date of
+        // the series; and the series itself (licence, a valid rule, no RoomVox
+        // room) is settled here too. The calendar write further down is
+        // non-fatal by design, so a refusal there would come too late: the
+        // notes file would exist and the meeting would be reported created.
+        $recurrenceRule = $this->meetingSeries->fromRequest($recurrence);
+        try {
+            $slotStart = $this->timezoneService->wallClockToTimestamp($date, $startTime, $uid);
+            $slotEnd   = $this->timezoneService->wallClockToTimestamp($date, $endTime, $uid);
+        } catch (\Throwable) {
+            $slotStart = $slotEnd = 0;
+        }
+        $rrule = '';
+        if ($recurrenceRule !== null) {
+            if ($roomEmail !== '' && $roomId !== '') {
+                throw new \InvalidArgumentException('A recurring meeting cannot book a RoomVox room. Pick another room or make it a single meeting.');
+            }
+            if ($slotEnd <= $slotStart) {
+                throw new \InvalidArgumentException('The end must be later than the start');
+            }
+            $series = $this->meetingSeries->plan($recurrenceRule, $slotStart, $slotEnd, $uid);
+            $rrule = $series['rrule'];
+            if ($roomEmail !== '') {
+                $this->meetingSeries->assertRoomFree($uid, $roomEmail, $series['occurrences']);
+            }
+        } elseif ($roomEmail !== '' && $slotEnd > $slotStart) {
+            $this->roomAvailability->assertRoomFree($uid, $roomEmail, $slotStart, $slotEnd);
+        }
 
         // Resolve agenda content first — it's woven into the notes file.
         // Meeting start datetime is the cut-off for "overdue" so a card
@@ -200,7 +248,7 @@ class MeetingService {
             $eventUid = $this->activityService->createCalendarEvent(
                 $teamId, $title, $startIso, $endIso, $location, $eventDescription,
                 null, $includeTalk, $categories,
-                $roomEmail, $roomName, $roomId, $attendeeUids
+                $roomEmail, $roomName, $roomId, $attendeeUids, $rrule
             );
             $calendarCreated = true;
         } catch (\Throwable $e) {
@@ -208,6 +256,24 @@ class MeetingService {
             $this->logger->warning('[TeamHub][MeetingService] createCalendarEvent failed — continuing without calendar', [
                 'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
+        }
+
+        // 7b. v4.20.10 — a series is remembered, so each later date gets its own
+        // notes file and a reminder in the team chat `$reminderDays` before
+        // it (MeetingSeriesPrepJob). The first date already has its notes, so
+        // the series starts as prepared up to it.
+        if ($rrule !== '' && $calendarCreated && $eventUid !== '') {
+            try {
+                $this->seriesMapper->register(
+                    $teamId, $eventUid, $uid, $reminderDays,
+                    array_values(array_filter($attendeeUids, static fn ($a) => is_string($a) && $a !== '')),
+                    $slotStart,
+                );
+            } catch (\Throwable $e) {
+                $this->logger->warning('[TeamHub][MeetingService] series could not be registered for notes and reminders', [
+                    'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+                ]);
+            }
         }
 
         // 8. Optional: post agenda request to Talk chat
@@ -329,6 +395,126 @@ class MeetingService {
     }
 
     /**
+     * One date of a recurring meeting, a few days ahead (v4.20.10): its own
+     * notes file in the team's Meetings folder, and a reminder in the team's
+     * Talk chat that mentions the invited people and links the notes.
+     *
+     * Run by `MeetingSeriesPrepJob`, so there is no session: everything is
+     * done as the organiser, in the organiser's time zone and language. A
+     * failed chat post does not undo the notes file; the reminder is the
+     * smaller loss. Returns false when the notes file could not be made, and
+     * the job then tries again next hour.
+     *
+     * @param list<string> $attendeeUids
+     */
+    public function prepareSeriesOccurrence(
+        string $teamId,
+        string $organiser,
+        int $start,
+        int $end,
+        string $title,
+        string $location,
+        array $attendeeUids,
+    ): bool {
+        $tz        = $this->timezoneService->forUser($organiser);
+        $startDt   = (new \DateTimeImmutable('@' . $start))->setTimezone($tz);
+        $endDt     = (new \DateTimeImmutable('@' . max($end, $start)))->setTimezone($tz);
+        $date      = $startDt->format('Y-m-d');
+        $startTime = $startDt->format('H:i');
+        $endTime   = $endDt->format('H:i');
+        // LOCATION is "Room | Talk link" for a TeamHub meeting; the notes want the room.
+        $place     = trim(explode(' | ', $location)[0]);
+        if (preg_match('#^https?://#i', $place)) {
+            $place = '';
+        }
+
+        try {
+            $notesUrl = $this->provisionNotesFile(
+                $teamId, $organiser, $title, $date, $startTime, $endTime, $place,
+                '', '', '', '', true,
+            );
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][MeetingService] series notes file could not be created', [
+                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+            return false;
+        }
+
+        $token = $this->findTeamTalkToken($teamId);
+        if ($token !== null) {
+            $this->postSeriesReminder($token, $title, $date, $startTime, $notesUrl, $organiser, $attendeeUids);
+        }
+        return true;
+    }
+
+    /**
+     * The reminder in the team chat (v4.20.10). One message in the organiser's
+     * language (the same choice postAgendaRequest makes), with every invited
+     * person @mentioned so Talk notifies them. Talk's own mention syntax: a
+     * uid with a space is quoted.
+     *
+     * @param list<string> $attendeeUids
+     */
+    private function postSeriesReminder(
+        string $talkToken,
+        string $title,
+        string $date,
+        string $startTime,
+        string $notesUrl,
+        string $organiser,
+        array $attendeeUids,
+    ): void {
+        $config      = $this->container->get(\OCP\IConfig::class);
+        $l10nFactory = $this->container->get(\OCP\L10N\IFactory::class);
+        $language    = $config->getUserValue($organiser, 'core', 'lang', '');
+        if ($language === '') {
+            $language = $config->getSystemValue('default_language', 'en');
+        }
+        $l = $l10nFactory->get(Application::APP_ID, $language);
+
+        $mentions = implode(' ', array_map(
+            static fn (string $uid): string => str_contains($uid, ' ') ? '@"' . $uid . '"' : '@' . $uid,
+            array_values(array_unique(array_filter($attendeeUids, static fn ($u) => $u !== '' && $u !== $organiser))),
+        ));
+
+        $message = $l->t(
+            "📅 Coming up: **%1\$s** on %2\$s at %3\$s.\nAdd your agenda items to the meeting notes: %4\$s",
+            [$title, $date, $startTime, $notesUrl]
+        );
+        if ($mentions !== '') {
+            $message .= "\n" . $mentions;
+        }
+
+        if (!$this->talkService->postChatMessage($talkToken, $organiser, $message)) {
+            $this->logger->warning('[TeamHub][MeetingService] series reminder not posted (see TalkService log)', [
+                'app' => Application::APP_ID,
+            ]);
+        }
+    }
+
+    /**
+     * The team's Talk room token, or null when it has none. Never creates a
+     * room: a background job should not.
+     */
+    private function findTeamTalkToken(string $teamId): ?string {
+        try {
+            $qb  = $this->db->getQueryBuilder();
+            $res = $qb->select('r.token')
+                ->from('talk_attendees', 'a')
+                ->innerJoin('a', 'talk_rooms', 'r', $qb->expr()->eq('r.id', 'a.room_id'))
+                ->where($qb->expr()->eq('a.actor_type', $qb->createNamedParameter('circles')))
+                ->andWhere($qb->expr()->eq('a.actor_id', $qb->createNamedParameter($teamId)))
+                ->setMaxResults(1)
+                ->executeQuery();
+            $token = $res->fetchOne();
+            $res->closeCursor();
+            return is_string($token) && $token !== '' ? $token : null;
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    /**
      * Ensures Meetings/ folder and template.md exist, then writes the meeting notes file.
      * Returns a public share URL for the notes file.
      */
@@ -343,7 +529,8 @@ class MeetingService {
         string $filename,
         string $description      = '',
         string $tasksSection     = '',
-        string $proposalsSection = ''
+        string $proposalsSection = '',
+        bool   $resolveAsUser    = false
     ): string {
         $this->logger->debug('[TeamHub][MeetingService] provisionNotesFile — resolving team folder', [
             'teamId' => $teamId, 'uid' => $uid, 'app' => Application::APP_ID,
@@ -354,7 +541,7 @@ class MeetingService {
         // way (DESIGN.md §2.19). The resolution returns the filecache ID for
         // GF resources too; IRootFolder::getById() then resolves it through
         // the caller's mountpoints exactly like a normal share.
-        $teamFolderNode = $this->resolveTeamFolder($teamId);
+        $teamFolderNode = $this->resolveTeamFolder($teamId, $resolveAsUser ? $uid : null);
 
         if ($teamFolderNode === null) {
             throw new NotFoundException('Team files folder not found — please set up Files for this team first.');
@@ -407,7 +594,7 @@ class MeetingService {
      *
      * Returns null when this team has no Files resource registered.
      */
-    private function resolveTeamFolder(string $teamId): ?\OCP\Files\Folder {
+    private function resolveTeamFolder(string $teamId, ?string $asUser = null): ?\OCP\Files\Folder {
         try {
             $resources = $this->resourceService->getTeamResources($teamId);
         } catch (\Throwable $e) {
@@ -428,7 +615,12 @@ class MeetingService {
         $folderType = (string)($resources['files']['folder_type'] ?? '');
 
         $rootFolder = $this->container->get(IRootFolder::class);
-        $nodes      = $rootFolder->getById($folderId);
+        // v4.20.10 — a background job has no session, so nobody's mounts are
+        // set up and the root folder finds nothing; reading through the
+        // organiser's own folder sets theirs up.
+        $nodes      = $asUser !== null
+            ? $rootFolder->getUserFolder($asUser)->getById($folderId)
+            : $rootFolder->getById($folderId);
 
         if (empty($nodes)) {
             $this->logger->warning('[TeamHub][MeetingService] resolveTeamFolder — folder id not visible to user', [
@@ -885,9 +1077,9 @@ class MeetingService {
 
     /** Generate a default filename from title and date. */
     private function defaultFilename(string $title, string $date): string {
-        $slug = strtolower(preg_replace('/[^a-zA-Z0-9]+/', '-', $title) ?? 'meeting');
-        $slug = trim($slug, '-');
-        return $date . '-' . substr($slug, 0, 60);
+        // v4.20.19 — one rule, shared with the wrap-up, which looks a later
+        // date's notes of a repeating meeting up by this name.
+        return MeetingNotes::defaultFilename($title, $date);
     }
 
     /**

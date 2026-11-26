@@ -1149,25 +1149,31 @@ class DeckService {
      * The board itself and its cards are preserved.
      */
     public function removeBoardAccess(string $teamId, int $boardId, \OCP\IDBConnection $db): bool {
+        // v4.20.38: a table that is not there is skipped by asking, not by
+        // catching; a failure on a table that is there throws to the caller.
+        $readable = false;
         foreach (['deck_board_acl', 'deck_acl'] as $table) {
-            try {
-                $qb       = $db->getQueryBuilder();
-                $affected = $qb->delete($table)
-                    ->where($qb->expr()->eq('board_id',    $qb->createNamedParameter($boardId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
-                    ->andWhere($qb->expr()->eq('participant', $qb->createNamedParameter($teamId)))
-                    ->andWhere($qb->expr()->eq('type',        $qb->createNamedParameter(7, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
-                    ->executeStatement();
-
-                if ($affected > 0) {
-                    $this->logger->debug('[TeamHub][DeckService] removeBoardAccess: circle ACL row removed', [
-                        'teamId' => $teamId, 'boardId' => $boardId,
-                        'table' => $table, 'app' => Application::APP_ID,
-                    ]);
-                    return true;
-                }
-            } catch (\Throwable) {
-                // Table may not exist on this Deck version — try the next one.
+            if (!$db->tableExists($table)) {
+                continue;
             }
+            $readable = true;
+            $qb       = $db->getQueryBuilder();
+            $affected = $qb->delete($table)
+                ->where($qb->expr()->eq('board_id',    $qb->createNamedParameter($boardId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                ->andWhere($qb->expr()->eq('participant', $qb->createNamedParameter($teamId)))
+                ->andWhere($qb->expr()->eq('type',        $qb->createNamedParameter(7, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+                ->executeStatement();
+
+            if ($affected > 0) {
+                $this->logger->debug('[TeamHub][DeckService] removeBoardAccess: circle ACL row removed', [
+                    'teamId' => $teamId, 'boardId' => $boardId,
+                    'table' => $table, 'app' => Application::APP_ID,
+                ]);
+                return true;
+            }
+        }
+        if (!$readable) {
+            throw new \RuntimeException('no Deck ACL table exists (deck_board_acl, deck_acl)');
         }
         $this->logger->warning('[TeamHub][DeckService] removeBoardAccess: no ACL row found', [
             'teamId' => $teamId, 'boardId' => $boardId, 'app' => Application::APP_ID,
@@ -1177,7 +1183,9 @@ class DeckService {
 
     /**
      * Delete a specific board by ID (multi-resource-aware).
-     * Delegates to the existing deleteDeckBoard logic after confirming the board exists.
+     * Confirms the board exists, then deletes cards, stacks, ACL and board.
+     * Reached only through ResourceService::deleteSpecificResource(), which
+     * calls it for boards TeamHub created (v4.20.34).
      */
     public function deleteBoardById(int $boardId, \OCP\IDBConnection $db): array {
         // Verify the board exists first.
@@ -1246,101 +1254,6 @@ class DeckService {
                 'boardId' => $boardId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
             return ['deleted' => false, 'detail' => $e->getMessage()];
-        }
-    }
-
-    public function deleteDeckBoard(string $teamId, \OCP\IDBConnection $db): array {
-        try {
-            // Find board_id via the circle ACL row (type=7 = circle)
-            $boardId = null;
-            foreach (['deck_board_acl', 'deck_acl'] as $aclTable) {
-                try {
-                    $qb = $db->getQueryBuilder();
-                    $res = $qb->select('board_id')
-                        ->from($aclTable)
-                        ->where($qb->expr()->eq('participant', $qb->createNamedParameter($teamId)))
-                        ->andWhere($qb->expr()->eq('type', $qb->createNamedParameter(7, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
-                        ->setMaxResults(1)
-                        ->executeQuery();
-                    $row = $res->fetch();
-                    $res->closeCursor();
-                    if ($row) {
-                        $boardId = (int)$row['board_id'];
-                        break;
-                    }
-                } catch (\Throwable $e) {
-                    // Table doesn't exist — try next
-                }
-            }
-
-            if ($boardId === null) {
-                return ['deleted' => false, 'detail' => 'No Deck board found for this team'];
-            }
-
-            // Delete in dependency order: cards → stacks → ACL → board
-            foreach ([
-                ['deck_cards',     'stack_id',  'deck_stacks', 'board_id', $boardId],
-            ] as [$cardTbl, $cardCol, $stackTbl, $stackBoardCol, $bid]) {
-                // Get stack IDs for this board, then delete their cards
-                try {
-                    $sqb = $db->getQueryBuilder();
-                    $sres = $sqb->select('id')->from($stackTbl)
-                        ->where($sqb->expr()->eq($stackBoardCol, $sqb->createNamedParameter($bid)))
-                        ->executeQuery();
-                    while ($srow = $sres->fetch()) {
-                        $stackId = (int)$srow['id'];
-                        $cqb = $db->getQueryBuilder();
-                        $cqb->delete($cardTbl)
-                            ->where($cqb->expr()->eq($cardCol, $cqb->createNamedParameter($stackId)))
-                            ->executeStatement();
-                    }
-                    $sres->closeCursor();
-                } catch (\Throwable $e) {
-                    $this->logger->warning('[TeamHub][DeckService] deleteDeckBoard: card delete failed', [
-                        'error' => $e->getMessage(), 'app' => Application::APP_ID,
-                    ]);
-                }
-            }
-
-            // Delete stacks
-            foreach (['deck_stacks'] as $tbl) {
-                try {
-                    $dqb = $db->getQueryBuilder();
-                    $dqb->delete($tbl)
-                        ->where($dqb->expr()->eq('board_id', $dqb->createNamedParameter($boardId)))
-                        ->executeStatement();
-                } catch (\Throwable $e) {
-                    $this->logger->warning('[TeamHub][DeckService] deleteDeckBoard: stack delete failed', [
-                        'table' => $tbl, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
-                    ]);
-                }
-            }
-
-            // Delete ACL rows
-            foreach (['deck_board_acl', 'deck_acl'] as $aclTable) {
-                try {
-                    $aqb = $db->getQueryBuilder();
-                    $aqb->delete($aclTable)
-                        ->where($aqb->expr()->eq('board_id', $aqb->createNamedParameter($boardId)))
-                        ->executeStatement();
-                } catch (\Throwable $e) {
-                    // Table may not exist — not an error
-                }
-            }
-
-            // Delete the board itself
-            $bqb = $db->getQueryBuilder();
-            $bqb->delete('deck_boards')
-                ->where($bqb->expr()->eq('id', $bqb->createNamedParameter($boardId)))
-                ->executeStatement();
-
-            return ['deleted' => true, 'detail' => "Deck board {$boardId} deleted"];
-
-        } catch (\Throwable $e) {
-            $this->logger->error('[TeamHub][DeckService] deleteDeckBoard failed', [
-                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
-            ]);
-            return ['deleted' => false, 'detail' => 'Operation failed — see server log for details'];
         }
     }
 

@@ -2215,9 +2215,8 @@ export default {
    the flow. Removed rather than left behind — a dead rule with a plausible name
    is what the next reader reaches for first. */
 
-.th-policy__conflicts {
-	border-inline-start: 3px solid var(--color-warning-text);
-	padding-inline-start: 12px;
+.th-policy__conflicts .th-policy__h3 {
+	color: var(--color-warning-text);
 }
 
 .th-policy__conflict-list {

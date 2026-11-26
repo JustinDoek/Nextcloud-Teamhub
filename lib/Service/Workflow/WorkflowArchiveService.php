@@ -12,6 +12,7 @@ use OCA\TeamHub\Db\WorkflowAttachment;
 use OCA\TeamHub\Db\WorkflowAttachmentMapper;
 use OCA\TeamHub\Db\WorkflowInstance;
 use OCA\TeamHub\Db\WorkflowInstanceMapper;
+use OCA\TeamHub\Db\WorkflowParticipant;
 use OCA\TeamHub\Db\WorkflowParticipantMapper;
 use OCA\TeamHub\Db\WorkflowStep;
 use OCA\TeamHub\Db\WorkflowStepMapper;
@@ -26,6 +27,7 @@ use OCA\TeamHub\Workflow\WorkflowAttachmentVisibility;
 use OCA\TeamHub\Workflow\WorkflowCapability;
 use OCA\TeamHub\Workflow\WorkflowDefinitionRegistry;
 use OCA\TeamHub\Workflow\WorkflowEventType;
+use OCA\TeamHub\Workflow\WorkflowParticipantRole;
 use OCA\TeamHub\Workflow\WorkflowStatus;
 use OCA\TeamHub\Workflow\WorkflowStepStatus;
 use OCP\AppFramework\Utility\ITimeFactory;
@@ -575,7 +577,12 @@ class WorkflowArchiveService {
         if ($archive->getStartedBy() === $uid) {
             return self::ROLE_REQUESTER;
         }
-        $participants = $this->participants->findByInstance($archive->getInstanceId());
+        // v4.20.58 — somebody who was only asked to approve a step saw the
+        // request without its conversation; its record holds that too.
+        $participants = array_values(array_filter(
+            $this->participants->findByInstance($archive->getInstanceId()),
+            static fn (WorkflowParticipant $p): bool => $p->getWfRole() !== WorkflowParticipantRole::APPROVER,
+        ));
         return $this->resolver->isAmongParticipants($uid, $participants, $teamId)
             ? self::ROLE_PARTICIPANT
             : null;

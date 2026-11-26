@@ -98,6 +98,12 @@ class DecisionAuditService {
         // answer the question it invites, and `category` on the row now
         // holds only the second of the two.
         'category_moved',
+        // v4.20.19 — the proposal was discussed in a team meeting, written by
+        // the meeting's wrap-up with a link to its notes. It decides nothing:
+        // the approvers still approve or deny it themselves (Justin,
+        // 2026-11-17, DESIGN §2.271). Payload: `meeting_title`,
+        // `meeting_start`, `notes_url`.
+        'meeting_discussed',
     ];
 
     private const MAX_COMMENT_EXCERPT_LEN = 200;

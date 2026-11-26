@@ -98,6 +98,18 @@
                         :aria-label="tabCountLabel(tab)">
                         {{ tabCount(tab) }}
                     </span>
+                    <!-- v4.20.2 — unread chat, in Talk's own style:
+                         highlighted when the viewer is mentioned. The bubble
+                         shows a number only, so its meaning rides along as
+                         visually hidden text. -->
+                    <template v-if="tabUnread(tab) > 0">
+                        <NcCounterBubble
+                            class="teamhub-tab-unread"
+                            :count="tabUnread(tab)"
+                            :type="talkStatus.mention ? 'highlighted' : 'outlined'"
+                            aria-hidden="true" />
+                        <span class="hidden-visually">{{ tabUnreadLabel(tab) }}</span>
+                    </template>
                 </component>
             </template>
         </draggable>
@@ -151,6 +163,14 @@
                         @error="onTabIconError($event, tab)" />
                     <component v-else :is="tabIcon(tab)" :size="ICON_BODY" />
                     {{ tab.label }}
+                    <template v-if="tabUnread(tab) > 0">
+                        <NcCounterBubble
+                            class="teamhub-tab-unread"
+                            :count="tabUnread(tab)"
+                            :type="talkStatus.mention ? 'highlighted' : 'outlined'"
+                            aria-hidden="true" />
+                        <span class="hidden-visually">{{ tabUnreadLabel(tab) }}</span>
+                    </template>
                 </component>
             </div>
         </div>
@@ -216,15 +236,29 @@
                 {{ t('teamhub', 'Reset to template') }}
             </NcActionButton>
         </NcActions>
+
+        <!-- v4.20.29 — the quick task, last on the bar so it is in the same
+             place on every tab, embedded apps included. Shown where a task
+             can be stored: the Tasks app is installed and the team has a
+             calendar, the same test the Upcoming tasks widget's own
+             "Create personal task" uses. -->
+        <QuickTaskButton
+            v-if="canQuickTask"
+            class="teamhub-tab-quicktask"
+            :team-id="currentTeamId || ''"
+            :link="pageLink"
+            :link-label="pageLabel"
+            @created="$store.dispatch('fetchTeamTasks', currentTeamId)" />
     </div>
 </template>
 
 <script>
-import { translate as t } from '@nextcloud/l10n'
+import { translate as t, translatePlural as n } from '@nextcloud/l10n'
 import { generateUrl } from '@nextcloud/router'
 import { mapState } from 'vuex'
-import { NcButton, NcActions, NcActionButton } from '@nextcloud/vue'
+import { NcButton, NcActions, NcActionButton, NcCounterBubble } from '@nextcloud/vue'
 import draggable from 'vuedraggable'
+import QuickTaskButton from './QuickTaskButton.vue'
 import { ICON_BODY, ICON_INLINE } from '../constants/uiTokens.js'
 // v4.13.24 — the renderability gate and the tab kinds come from the same
 // module that builds the descriptors. This component used to keep its own
@@ -297,8 +331,9 @@ export default {
     // fourteen icons that used to be registered here only to be reached by
     // name from a template arm are no longer part of this list.
     components: {
-        NcButton, NcActions, NcActionButton,
+        NcButton, NcActions, NcActionButton, NcCounterBubble,
         draggable,
+        QuickTaskButton,
         MessageOutline, Plus, ViewDashboardEdit, ChevronDown, DragVariant,
         DotsVertical, Restore,
     },
@@ -319,6 +354,9 @@ export default {
         canEditEnforced: { type: Boolean, default: false },
         hasTeamLayout: { type: Boolean, default: false },
         layoutActionBusy: { type: Boolean, default: false },
+        // v4.20.29 — the address of the tab on screen, for the quick task
+        // (TeamView builds it with src/lib/pageLink.js).
+        pageLink: { type: String, default: '' },
     },
 
     emits: ['update:modelValue', 'tab-reorder', 'manage-links', 'toggle-edit-mode', 'show-picker', 'preload', 'reset-team-layout'],
@@ -382,6 +420,8 @@ export default {
         layoutEnforced() { this.$nextTick(() => this.calcOverflow()) },
         canEditEnforced() { this.$nextTick(() => this.calcOverflow()) },
         editMode() { this.$nextTick(() => this.calcOverflow()) },
+        // The quick task appears once the team's resources say it can work.
+        canQuickTask() { this.$nextTick(() => this.calcOverflow()) },
         moreMenuOpen(open) {
             if (open) {
                 window.addEventListener('resize', this._onMoreReposition)
@@ -394,7 +434,28 @@ export default {
     },
 
     computed: {
-        ...mapState(['currentView', 'resources']),
+        ...mapState(['currentView', 'resources', 'talkStatus', 'currentTeamId']),
+
+        /** Somewhere to store a task: the Tasks app, and a team calendar. */
+        canQuickTask() {
+            return this.$store.getters.canCreateTeamTask
+        },
+
+        /**
+         * The page in words, for the dialog's "Links to" line: the tab and the
+         * team, from the same descriptors that label the tabs above.
+         */
+        pageLabel() {
+            const tab = this.currentView === 'msgstream'
+                ? t('teamhub', 'Home')
+                : (this.modelValue.find(d => d.key === this.currentView)?.label || '')
+            const team = this.$store.getters.currentTeam?.name || ''
+            if (!tab) {
+                return team
+            }
+            // TRANSLATORS: where a task was made, e.g. "Files in Marketing": a tab, then a team
+            return team ? t('teamhub', '{tab} in {team}', { tab, team }) : tab
+        },
 
         orderedTabs: {
             get() { return this.modelValue },
@@ -477,6 +538,7 @@ export default {
 
     methods: {
         t,
+        n,
 
         /**
          * Whether a tab can render. v4.13.24 — one call into the shared gate
@@ -509,6 +571,10 @@ export default {
                 this.$store.commit('SET_CALENDAR_EMBED_EVENT', null)
             } else if (view === 'deck') {
                 this.$store.commit('SET_DECK_EMBED_CARD_URL', null)
+                // v4.20.52 (issue 102) - a team with several boards goes
+                // through the picker, so here there is only one to show. A
+                // link to somebody else's board used to stay on this tab.
+                this.$store.commit('SET_SELECTED_DECK_BOARD', null)
             }
             this.$store.commit('SET_VIEW', view)
         },
@@ -618,6 +684,8 @@ export default {
             if (editBtn) rightWidth += editBtn.offsetWidth + gap
             const layoutActions = bar.querySelector('.teamhub-layout-control-actions')
             if (layoutActions) rightWidth += layoutActions.offsetWidth + gap
+            const quickTask = bar.querySelector('.teamhub-tab-quicktask')
+            if (quickTask) rightWidth += quickTask.offsetWidth + gap
 
             const available = barWidth - paddingLeft - paddingRight - homeWidth - gap - rightWidth
 
@@ -791,6 +859,27 @@ export default {
         },
 
         /**
+         * v4.20.2 — unread messages in the team conversation, for the Chat
+         * tab only, and not while the viewer is on it (they are reading it).
+         * Fed by the store's `fetchTalkStatus`, which TeamView refreshes.
+         *
+         * @param {object} tab a tab descriptor
+         * @return {number}
+         */
+        tabUnread(tab) {
+            if (tab?.key !== 'talk' || this.currentView === 'talk') return 0
+            return this.talkStatus?.available ? (this.talkStatus.unread || 0) : 0
+        },
+
+        tabUnreadLabel(tab) {
+            const u = this.tabUnread(tab)
+            if (this.talkStatus?.mention) {
+                return n('teamhub', '{n} unread message, you were mentioned', '{n} unread messages, you were mentioned', u, { n: u })
+            }
+            return n('teamhub', '{n} unread message', '{n} unread messages', u, { n: u })
+        },
+
+        /**
          * Clicking a tab. Calendar and Deck open a picker when the team has
          * more than one of them; an absolute web link is an anchor and is left
          * to navigate on its own.
@@ -929,6 +1018,11 @@ export default {
     flex-shrink: 0;
 }
 
+/* v4.20.2 — layout only; NcCounterBubble owns its own look. */
+.teamhub-tab-unread {
+    flex-shrink: 0;
+}
+
 .teamhub-tab-app-icon {
     width: 16px;
     height: 16px;
@@ -943,6 +1037,17 @@ export default {
 }
 .teamhub-layout-control-actions {
     flex-shrink: 0;
+}
+
+/* v4.20.29 — the quick task ends the bar. It takes the free space when it is
+   alone on the right; next to Edit layout, that button already took it. */
+.teamhub-tab-quicktask {
+    flex-shrink: 0;
+    margin-inline-start: auto;
+}
+
+.teamhub-edit-layout-btn ~ .teamhub-tab-quicktask {
+    margin-inline-start: 0;
 }
 
 /* Overflow "More…" dropdown */

@@ -5,6 +5,15 @@
             <p class="manage-team-subtitle">{{ team.name }}</p>
         </div>
 
+        <!-- v4.21.1 — the team may still be loading when this page opens
+             (found on IT Services: too few modules and no Services tab until a
+             reload). What arrives late fills the page in as it lands; this line
+             says the page is not complete yet. -->
+        <p v-if="teamStillLoading" class="manage-team-loading" role="status">
+            <NcLoadingIcon :size="ICON_INLINE" />
+            {{ t('teamhub', 'Loading this team. More settings may appear in a moment.') }}
+        </p>
+
         <!-- Tab bar -->
         <div class="manage-tabs">
             <!-- v4.12.5 — a greyed tab is `aria-disabled`, never `disabled`,
@@ -429,12 +438,17 @@
                         :key="w.key"
                         class="manage-section__row manage-section__row--compact">
                         <div class="manage-section__row-info">
-                            <span class="manage-section__row-title">{{ w.label }}</span>
+                            <span class="manage-section__row-title">
+                                {{ w.label }}
+                                <!-- v4.21.1 — licensed: greyed with the reason, like Shifts. -->
+                                <span v-if="w.licensed && !licensed" class="widget-badge widget-badge--licensed">{{ t('teamhub', 'Licensed') }}</span>
+                            </span>
+                            <span v-if="w.licensed && !licensed" class="manage-section__row-desc">{{ t('teamhub', 'This needs a TeamHub licence.') }}</span>
                         </div>
                         <NcCheckboxRadioSwitch
                             type="switch"
-                            :model-value="isWidgetShown(w.key)"
-                            :disabled="dashboardSaving"
+                            :model-value="isWidgetShown(w.key) && (!w.licensed || licensed)"
+                            :disabled="dashboardSaving || (w.licensed && !licensed)"
                             :aria-label="t('teamhub', 'Show {widget} on the dashboard', { widget: w.label })"
                             @update:model-value="val => toggleWidgetShown(w.key, val)" />
                     </div>
@@ -1312,6 +1326,47 @@
                         <div v-if="activeResourcesByApp('files').length === 0" class="resource-row resource-row--empty">
                             <span class="resource-row__empty-label">{{ t('teamhub', 'No shared folder connected') }}</span>
                         </div>
+
+                        <!-- v4.20.48: folders another app manages (DESIGN
+                             §2.283), listed with the team's own folder since
+                             4.20.49 so everything of Files is in one place.
+                             Read-only: the managing app grants and withdraws
+                             this access. A few are always visible; more than
+                             that (a folder per case) collapse behind a line. -->
+                        <div v-if="managedCollapsible" class="resource-row">
+                            <NcButton
+                                :aria-expanded="String(showManaged)"
+                                aria-controls="th-managed-folders"
+                                variant="tertiary"
+                                @click="showManaged = !showManaged">
+                                <template #icon>
+                                    <ChevronRight v-if="!showManaged" :size="ICON_BODY" aria-hidden="true" />
+                                    <ChevronDown v-else :size="ICON_BODY" aria-hidden="true" />
+                                </template>
+                                <!-- TRANSLATORS: label of a collapsible list of folders whose access is controlled by another Nextcloud app -->
+                                {{ n('teamhub', 'Show %n folder managed by another app', 'Show %n folders managed by other apps', managedResources.length, { n: managedResources.length }) }}
+                            </NcButton>
+                        </div>
+                        <div
+                            v-if="managedResources.length > 0"
+                            v-show="!managedCollapsible || showManaged"
+                            id="th-managed-folders">
+                            <ul class="managed-folders">
+                                <li
+                                    v-for="resource in managedResources"
+                                    :key="resource.id"
+                                    class="resource-row resource-row--managed">
+                                    <span class="resource-row__name">{{ resource.displayName || resource.resourceId }}</span>
+                                    <span class="resource-type-badge resource-type-badge--shared resource-type-badge--managed">
+                                        <!-- TRANSLATORS: {app} is the name of a Nextcloud app -->
+                                        {{ t('teamhub', 'Managed by {app}', { app: resource.managedBy?.name || '' }) }}
+                                    </span>
+                                </li>
+                            </ul>
+                            <div class="resource-row resource-row--empty">
+                                <span class="resource-row__empty-label">{{ t('teamhub', 'Another app decides who can open these folders, so there is nothing to review here. Change the access in that app.') }}</span>
+                            </div>
+                        </div>
                     </div>
 
                     <!-- Calendar — multi-resource -->
@@ -1339,6 +1394,7 @@
                                     {{ t('teamhub', 'Disconnect') }}
                                 </NcButton>
                                 <NcButton
+                                    v-if="canDestroyResource(row)"
                                     variant="error"
                                     :disabled="row._loading"
                                     :aria-label="t('teamhub', 'Delete calendar permanently')"
@@ -1377,6 +1433,7 @@
                                     {{ t('teamhub', 'Disconnect') }}
                                 </NcButton>
                                 <NcButton
+                                    v-if="canDestroyResource(row)"
                                     variant="error"
                                     :disabled="row._loading"
                                     :aria-label="t('teamhub', 'Delete board permanently')"
@@ -2571,32 +2628,10 @@
                 <p v-if="servicesError" class="manage-services-error" role="alert">{{ servicesError }}</p>
             </div>
 
-            <!-- Who works the queue. Team roles decide it, so this section
-                 describes rather than edits — the Members tab is the one
-                 place membership is changed, and a second roster here could
-                 disagree with it. -->
-            <div class="manage-section" data-section="service-agents">
-                <h2>{{ t('teamhub', 'Who works the queue') }}</h2>
-                <p class="manage-section-desc">
-                    {{ t('teamhub', 'Every member of this team can pick up a request and answer it. Team admins can also take a request back from whoever has it.') }}
-                </p>
-                <p class="manage-section-desc">
-                    {{ t('teamhub', 'To put a whole department on the queue, add its Nextcloud group as a member of this team on the Members tab. Everyone in the group can then work the queue.') }}
-                </p>
-                <p v-if="teamServices.holdsServices" class="manage-section-desc">
-                    {{ n('teamhub', '%n person can work the queue right now.', '%n people can work the queue right now.', teamServices.agentCount, { n: teamServices.agentCount }) }}
-                </p>
-            </div>
-
-            <!-- The next thing this tab will hold. Said once, plainly, so
-                 nobody looks for it: a team's own services are the phase
-                 after this one. -->
-            <div class="manage-section" data-section="service-own-workflows">
-                <h2>{{ t('teamhub', 'This team\'s own services') }}</h2>
-                <p class="manage-section-desc">
-                    {{ t('teamhub', 'A later version lets a service team offer requests of its own, alongside the built-in ones. They will be set up here.') }}
-                </p>
-            </div>
+            <!-- v4.21.1 — *Who works the queue* and *This team's own services*
+                 were text without a setting (Justin, 2026-11-26): who works
+                 the queue is the Members tab, the team's own services are the
+                 team's Services tab. -->
 
             <!-- Switching the services off stops an organisation's requests
                  arriving anywhere. Confirmed first, with the size of what is
@@ -3353,6 +3388,7 @@ export default {
             pendingResourceRows: [],   // raw rows from /resources/panel grouped by app, flattened
             loadingPendingResources: false,
             showIgnored: false,
+            showManaged: false,
             // Connect existing picker
             connectPickerApp: null,
             connectPickerItems: [],
@@ -3505,7 +3541,7 @@ export default {
     computed: {
         // v4.6.15 — presenceConfig / decisionsConfig / timelineConfig joined the
         // list so the watchers below see the toggles this view itself commits.
-        ...mapState(['intravoxAvailable', 'collectivesConfig', 'resourceWarningFocus', 'presenceModuleEnabled', 'decisionsModuleEnabled', 'presenceConfig', 'decisionsConfig', 'timelineConfig', 'project', 'projectTabFocus', 'manageTeamDeepLink', 'dashboardConfig', 'availableTabs', 'dashboardWidgetCatalog', 'teamType', 'openProjectConfig']),
+        ...mapState(['intravoxAvailable', 'collectivesConfig', 'resourceWarningFocus', 'presenceModuleEnabled', 'decisionsModuleEnabled', 'presenceConfig', 'decisionsConfig', 'timelineConfig', 'project', 'projectTabFocus', 'manageTeamDeepLink', 'dashboardConfig', 'availableTabs', 'dashboardWidgetCatalog', 'teamType', 'openProjectConfig', 'licensed', 'resources', 'serviceDeskConfig', 'availableTabsTeamId', 'loading']),
 
         /**
          * v4.20.0 — read from the sidebar team row, the same field that
@@ -3801,6 +3837,18 @@ export default {
             return this.pendingResourceRows.filter(r => r.status === 'ignored')
         },
 
+        /** Folders another app manages (status=managed), by name. Read-only. */
+        managedResources() {
+            return this.pendingResourceRows
+                .filter(r => r.status === 'managed')
+                .sort((a, b) => String(a.displayName || '').localeCompare(String(b.displayName || '')))
+        },
+
+        /** More managed folders than fit the Files block comfortably. */
+        managedCollapsible() {
+            return this.managedResources.length > 3
+        },
+
         /** Active resources with a risk flag set. */
         atRiskResources() {
             return this.pendingResourceRows.filter(r => r.riskStatus && r.riskStatus !== 'none')
@@ -4055,6 +4103,15 @@ export default {
             return this.teamType === 'service'
         },
 
+        /**
+         * v4.21.1 — the team this page is about has not finished loading: its
+         * layout bundle (type, module switches) is not in, or its resources
+         * are still being read.
+         */
+        teamStillLoading() {
+            return this.availableTabsTeamId !== this.team?.id || !!this.loading?.resources
+        },
+
         // `field` (v4.8.17) maps each toggle to the policy field that can govern
         // it, so one lookup greys out the right controls. The keys come from
         // `constants/policy.js` rather than being retyped — that file is the
@@ -4268,6 +4325,19 @@ export default {
         // App.vue unmounts it while Manage Team is open, so the republish has
         // to happen here. Cheap: no request, just a rebuild from store facts.
         collectivesConfig: { deep: true, handler() { this.republishTeamTabs() } },
+        // v4.21.1 — facts that may land after this page opened, because the
+        // team was still loading (TeamView, which would republish, is not
+        // mounted while Manage team is open). Each one rebuilds the pickers;
+        // the team's type also decides whether the Services tab exists.
+        resources:         { deep: true, handler() { this.republishTeamTabs() } },
+        serviceDeskConfig: { deep: true, handler() { this.republishTeamTabs() } },
+        project:           { deep: true, handler() { this.republishTeamTabs() } },
+        openProjectConfig: { deep: true, handler() { this.republishTeamTabs() } },
+        licensed()  { this.republishTeamTabs() },
+        teamType()  {
+            this.republishTeamTabs()
+            this.loadTeamServices()
+        },
         presenceConfig:    { deep: true, handler() { this.republishTeamTabs() } },
         decisionsConfig:   { deep: true, handler() { this.republishTeamTabs() } },
         timelineConfig:    { deep: true, handler() { this.republishTeamTabs() } },
@@ -5553,6 +5623,15 @@ export default {
             }
         },
 
+        /**
+         * v4.20.34 — TeamHub destroys only what it created. The server
+         * unlinks anything else on the delete route, so Delete is offered
+         * only where it would delete; Disconnect stays for every row.
+         */
+        canDestroyResource(row) {
+            return row.origin === 'teamhub_create'
+        },
+
         confirmDeleteResource(resource) {
             this.pendingDeleteResource = resource
         },
@@ -5562,9 +5641,20 @@ export default {
             const resource = this.pendingDeleteResource
             this.deletingResource = true
             try {
-                await axios.delete(
+                const { data } = await axios.delete(
                     generateUrl(`/apps/teamhub/api/v1/teams/${this.team.id}/resources/${resource.appId}/${resource.resourceId}/delete`)
                 )
+                // A page loaded before the row's origin was known, or a row the
+                // server judged differently: it unlinked instead of deleting.
+                if (data?.mode === 'unlinked') {
+                    showSuccess(t('teamhub', '"{name}" was unlinked from this team. TeamHub did not create it, so it was not deleted.', {
+                        name: resource.displayName || resource.resourceId,
+                    }))
+                } else if (data?.mode === 'detached') {
+                    showSuccess(t('teamhub', '"{name}" was removed from this team. Another team still uses it, so it was not deleted.', {
+                        name: resource.displayName || resource.resourceId,
+                    }))
+                }
                 const idx = this.pendingResourceRows.findIndex(r => r.id === resource.id)
                 if (idx !== -1) this.pendingResourceRows.splice(idx, 1)
                 this.$store.dispatch('fetchResources', this.team.id)
@@ -7223,6 +7313,15 @@ export default {
     font-weight: 700;
     margin: 0 0 4px;
 }
+/* v4.21.1 — while the team is still loading. */
+.manage-team-loading {
+    display: flex;
+    align-items: center;
+    gap: var(--th-space-sm);
+    margin: 0 0 var(--th-space-md);
+    color: var(--color-text-maxcontrast);
+}
+
 .manage-team-subtitle {
     color: var(--color-text-maxcontrast);
     margin: 0;
@@ -7871,7 +7970,7 @@ export default {
     color: var(--color-text-error);
 }
 .atrisk-resource-item--inline {
-    border-top: 1px solid var(--color-error-text);
+    border-top: 1px solid var(--color-border);
     padding: 8px 16px;
     background: transparent;
 }
@@ -7953,13 +8052,12 @@ export default {
    deliberately NOT used here: its --color-*-text partner is also meant for the
    main background, so it only holds up by luck of the theme. A neutral surface
    with --color-main-text cannot fail in either theme, and the informational
-   signal survives in the left border and the ℹ glyph — which is also what
+   signal survives in the ℹ glyph — which is also what
    keeps this off WCAG 1.4.1, since the heading says what the block is. */
 .manage-section--pending-inline {
     margin-bottom: 4px;
     padding: 12px 16px;
     border: 1px solid var(--color-border);
-    border-inline-start: 4px solid var(--color-info);
     border-radius: var(--border-radius-element);
     background: var(--color-background-hover);
     color: var(--color-main-text);
@@ -8184,6 +8282,21 @@ export default {
     background: var(--color-success);
     color: var(--color-text-success);
     border: 1px solid var(--color-success);
+}
+/* An app's name can be long: wrap it instead of squeezing out the folder. */
+.resource-type-badge--managed {
+    flex-shrink: 1;
+    margin-inline-end: 0;
+    white-space: normal;
+}
+.managed-folders {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+/* No button in this row to give it its height. */
+.resource-row--managed {
+    padding-block: var(--th-space-sm);
 }
 .resource-row__quota {
     flex-shrink: 0;
@@ -8582,20 +8695,14 @@ export default {
 
 .widget-item--sub-option {
     margin-inline-start: 32px;
-    border-inline-start: 2px solid var(--color-border);
-    padding-inline-start: 12px;
     background: transparent;
     font-size: 0.9em;
 }
 
-/* Danger zone — a large panel; the 3px error border-left and the
-   error-text heading carry the "danger" signal so the background stays
-   neutral (v3.100.14: was a 5% color-mix soft tint; SKILLS.md permits
-   neutral surfaces where the state is already communicated by another
-   channel — here the border and heading). */
+/* Danger zone — a large panel; the error-text heading carries the "danger"
+   signal, so the surface stays neutral. */
 .manage-section--danger {
     border: 1px solid var(--color-border);
-    border-inline-start: 3px solid var(--color-error);
     border-radius: var(--border-radius-element);
     padding: 20px 24px;
     background: var(--color-main-background);
@@ -9171,9 +9278,8 @@ export default {
     gap: 8px;
     margin-top: 8px;
     padding: 8px 8px;
-    border-inline-start: 3px solid var(--color-warning);
     background: var(--color-warning);
-    border-radius: 0 var(--border-radius-small) var(--border-radius-small) 0;
+    border-radius: var(--border-radius-small);
     font-size: var(--th-font-meta);
     line-height: 1.4;
     color: var(--color-warning-text);
@@ -9497,7 +9603,6 @@ export default {
     font-size: var(--th-font-meta);
     color: var(--color-main-text);
     background: var(--color-background-hover);
-    border-inline-start: 3px solid var(--color-primary-element);
     border-radius: var(--th-radius-control);
     padding: 8px 12px;
     margin-bottom: 12px;

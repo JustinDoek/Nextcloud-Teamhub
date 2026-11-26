@@ -13,10 +13,22 @@ use OCP\AppFramework\Db\Entity;
  *
  * origin values    : teamhub_create | teamhub_connect |
  *                    discovered_auto_accepted | discovered_pending
- * status values    : active | pending | ignored
+ *                    | discovered_managed
+ * status values    : active | pending | ignored | disconnected | managed
+ *                    `managed` (v4.20.48): another app claims the folder;
+ *                    decided_by is then `app:<app id>`, see managingAppId()
  * risk_status values: none | owner_disabled | transfer_failed
  */
 class TeamAppResource extends Entity {
+
+    /** Another app manages this resource; nobody is asked to review it. */
+    public const STATUS_MANAGED = 'managed';
+
+    /** Origin of a row that was claimed the first time it was seen. */
+    public const ORIGIN_MANAGED = 'discovered_managed';
+
+    /** `decided_by` prefix for an app; a Nextcloud uid cannot contain a colon. */
+    private const MANAGED_BY_PREFIX = 'app:';
 
     /** @var string circles_circle.unique_id */
     protected string $teamId = '';
@@ -63,5 +75,21 @@ class TeamAppResource extends Entity {
         $this->addType('riskSetAt',    'integer');
         $this->addType('createdAt',    'integer');
         $this->addType('updatedAt',    'integer');
+    }
+
+    /** The `decided_by` value for a resource this app manages. */
+    public static function managedBy(string $appId): string {
+        return self::MANAGED_BY_PREFIX . $appId;
+    }
+
+    /** The id of the app managing this resource, or null when none does. */
+    public function managingAppId(): ?string {
+        if ($this->status !== self::STATUS_MANAGED) {
+            return null;
+        }
+        $by = (string)$this->decidedBy;
+        return str_starts_with($by, self::MANAGED_BY_PREFIX)
+            ? substr($by, strlen(self::MANAGED_BY_PREFIX))
+            : '';
     }
 }

@@ -21,8 +21,26 @@
 				<ul class="svc-request__next" :aria-label="t('teamhub', 'Your tasks')">
 					<li v-for="task in nextTasks" :key="task.key" class="svc-request__task">
 						<span class="svc-request__task-label">{{ task.label }}</span>
+						<!-- v4.20.71 — a task with fields: filled in here, then sent. -->
+						<template v-if="(task.fields || []).length">
+							<WorkflowStepLinks v-if="hasLinks(task)" :step="task" variant="secondary" />
+							<RequestFormField
+								v-for="field in task.fields"
+								:key="field.key"
+								v-model="taskAnswers(task)[field.key]"
+								:field="field"
+								:disabled="busy" />
+							<div>
+								<NcButton
+									variant="primary"
+									:disabled="busy || !isComplete(task.fields, taskAnswers(task))"
+									@click="$emit('complete-task', { workflow: created, step: task.key, answers: answersPayload(task.fields, taskAnswers(task)) })">
+									{{ t('teamhub', 'Send') }}
+								</NcButton>
+							</div>
+						</template>
 						<WorkflowStepLinks
-							v-if="hasLinks(task)"
+							v-else-if="hasLinks(task)"
 							:step="task"
 							completes
 							variant="primary"
@@ -54,7 +72,17 @@
 			</p>
 
 
+			<!-- v4.20.54 — a service a team built asks what its team wants to
+			     know (`docs/service-builder.md` § 14.3). -->
+			<RequestFormField
+				v-for="field in fields"
+				:key="field.key"
+				v-model="answers[field.key]"
+				:field="field"
+				:disabled="busy" />
+
 			<NcTextField
+				v-if="!ownForm"
 				v-model="summary"
 				:label="isNewTeam ? t('teamhub', 'Team name') : t('teamhub', 'In one line')"
 				maxlength="255"
@@ -73,7 +101,7 @@
 				@update:template-key="templateKey = $event"
 				@update:profile-key="profileKey = $event" />
 
-			<label class="svc-request__field">
+			<label v-if="!ownForm" class="svc-request__field">
 				<span>{{ isNewTeam ? t('teamhub', 'What is the team for?') : t('teamhub', 'Describe what you need') }}</span>
 				<NcTextArea
 					v-model="details"
@@ -88,7 +116,7 @@
 			     team built (Justin, 2026-09-25): left empty, the request is the
 			     requester's own. The Nextcloud services act on a team, so there
 			     it is still asked for. -->
-			<label class="svc-request__field">
+			<label v-if="asksTeam" class="svc-request__field">
 				<span>{{ teamRequired ? t('teamhub', 'Ask from team') : t('teamhub', 'Ask from team (optional)') }}</span>
 				<NcSelect
 					v-model="teamId"
@@ -110,7 +138,7 @@
 			<FileAttachField
 				v-if="fileSettings.allowed"
 				v-model="files"
-				:note="shareNote(fileSettings, t('teamhub', 'the service team'))"
+				:note="fileNote"
 				:disabled="busy" />
 
 			<p v-if="service.leadTime" class="svc-request__note">{{ service.leadTime }}</p>
@@ -137,10 +165,12 @@ import { translate as t } from '@nextcloud/l10n'
 import { NcButton, NcLoadingIcon, NcModal, NcNoteCard, NcSelect, NcTextArea, NcTextField } from '@nextcloud/vue'
 import LifebuoyIcon from 'vue-material-design-icons/Lifebuoy.vue'
 import FileAttachField from '../mywork/FileAttachField.vue'
+import RequestFormField from './RequestFormField.vue'
 import WorkflowStepLinks from '../mywork/WorkflowStepLinks.vue'
 import TeamShapeFields from './TeamShapeFields.vue'
 import { fileSharingOf, ownOpenTasks, shareNote, stepLinks } from '../../constants/workflows.js'
 import { SERVICE } from '../../constants/serviceTeams.js'
+import { answersPayload, isComplete, keepAnswers } from '../../constants/requestForm.js'
 import { ICON_BODY, ICON_INLINE } from '../../constants/uiTokens.js'
 
 /**
@@ -166,6 +196,7 @@ export default {
 		NcButton, NcLoadingIcon, NcModal, NcNoteCard, NcSelect, NcTextArea, NcTextField,
 		LifebuoyIcon,
 		FileAttachField,
+		RequestFormField,
 		WorkflowStepLinks,
 		TeamShapeFields,
 	},
@@ -191,10 +222,14 @@ export default {
 		return {
 			ICON_BODY,
 			ICON_INLINE,
+			/** v4.20.71 — what is filled in on the first tasks, by task key. */
+			nextAnswers: {},
 			// v4.10.39 — empty unless the team must be named.
 			teamId: (this.service.teamOptional ?? this.service.builtService) ? '' : (this.teams[0]?.id || ''),
 			summary: '',
 			details: '',
+			/** v4.20.54 — field key → what was filled in, on a service with a form of its own. */
+			answers: {},
 			/** v4.10.38 — `[{ fileId, name }]` from the paperclip. */
 			files: [],
 			// v4.12.4 — the new-team card only; TeamShapeFields reports them.
@@ -212,6 +247,28 @@ export default {
 		/** v4.10.38 — what the service lets the paperclip do (the catalogue says). */
 		fileSettings() {
 			return fileSharingOf({ data: { fileSharing: this.service.fileSharing } })
+		},
+
+		/** v4.20.54 — the service asks its own questions; a Nextcloud service asks the generic two. */
+		ownForm() {
+			return !!this.service.form
+		},
+
+		fields() {
+			return this.service.form?.fields || []
+		},
+
+		/** v4.20.54 — a team that built a service may leave the team question out. */
+		asksTeam() {
+			return !this.ownForm || this.service.form.askTeam !== false
+		},
+
+		/** v4.20.58 — with whom the files are shared; whoever approves may view them too. */
+		fileNote() {
+			const note = shareNote(this.fileSettings, t('teamhub', 'the service team'))
+			return this.service.approvals
+				? [note, t('teamhub', 'Whoever approves the request can view them too.')].join(' ')
+				: note
 		},
 
 		teamOptions() {
@@ -232,15 +289,49 @@ export default {
 		},
 
 		canSubmit() {
+			if (this.ownForm) {
+				return isComplete(this.fields, this.answers)
+			}
 			return (!!this.teamId || !this.teamRequired)
 				&& this.summary.trim() !== ''
 				&& this.details.trim() !== ''
 		},
 	},
 
+	watch: {
+		/** v4.20.71 — a place for the answers of every first task that asks for fields. */
+		nextTasks: {
+			immediate: true,
+			handler(tasks) {
+				for (const task of tasks || []) {
+					if ((task.fields || []).length && !this.nextAnswers[task.key]) {
+						this.nextAnswers[task.key] = {}
+					}
+				}
+			},
+		},
+		/**
+		 * v4.20.54 — the service was published again while this form was
+		 * open, and the catalog was read again: keep what still fits.
+		 */
+		service(now, before) {
+			if (this.ownForm) {
+				this.answers = keepAnswers(before?.form?.fields, this.fields, this.answers)
+			}
+			if (!this.asksTeam) {
+				this.teamId = ''
+			}
+		},
+	},
+
 	methods: {
 		t,
-		shareNote,
+		isComplete,
+		answersPayload,
+		/** v4.20.71 — the answers of one first task. */
+		taskAnswers(task) {
+			return this.nextAnswers[task.key] || {}
+		},
 		hasLinks(task) {
 			return stepLinks(task).length > 0
 		},
@@ -253,8 +344,11 @@ export default {
 				// A personal request is recorded against the service team
 				// itself (TeamServiceDefinition::canStart()).
 				teamId: this.teamId || this.service.serviceTeamId,
-				summary: this.summary.trim(),
-				details: this.details.trim(),
+				// v4.20.54 — the answers, with the version of the form they were
+				// given on; a Nextcloud service still takes the two texts.
+				...(this.ownForm
+					? { answers: answersPayload(this.fields, this.answers), version: this.service.version }
+					: { summary: this.summary.trim(), details: this.details.trim() }),
 				fileIds: this.fileSettings.allowed ? this.files.map(f => f.fileId) : [],
 				// v4.12.4 — only the new-team request has a shape to ask for;
 				// every other definition would drop these in validateStart()

@@ -55,7 +55,7 @@ function errorOf(e) {
 // finished in the last 30 days. It is a read, never a place an action files a
 // row into; after an action that ends the desk's part the queue is re-read.
 // v4.10.35 — `withOthers`: the desk's open requests that are back with the
-// requester; the widget's *With requester* tab.
+// requester; the widget's *Waiting for others* tab.
 const emptyQueue = () => ({ unclaimed: [], mine: [], others: [], closed: [], withOthers: [] })
 
 export function createServiceTeamsModule(api = lazyApi) {

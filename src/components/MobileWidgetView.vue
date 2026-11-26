@@ -147,6 +147,14 @@
             <div v-if="activeWidget === 'widget-team-adoption'" class="teamhub-mobile-canvas-body">
                 <TeamAdoptionGrid compact />
             </div>
+            <!-- v4.20.2 — the team conversation on mobile (Communication). -->
+            <div v-if="activeWidget === 'widget-talk'" class="teamhub-mobile-canvas-body teamhub-mobile-canvas-body--notoppad">
+                <TeamChatWidget ref="chatWidget" @open-talk="$emit('set-view', 'talk')" @start-call="$emit('start-call')" />
+            </div>
+            <!-- v4.20.39 — Shared with team on mobile. -->
+            <div v-if="activeWidget === 'widget-shared'" class="teamhub-mobile-canvas-body teamhub-mobile-canvas-body--notoppad">
+                <SharedWithTeamWidget />
+            </div>
 
             <!-- ─── External integration widgets ──────────────────── -->
             <template v-for="ext in teamWidgets">
@@ -270,6 +278,7 @@ import { isCanvasCapability } from '../lib/activeWidgets.js'
 import MessageOutline from 'vue-material-design-icons/MessageOutline.vue'
 import InformationOutline from 'vue-material-design-icons/InformationOutline.vue'
 import AccountGroup from 'vue-material-design-icons/AccountGroup.vue'
+import DoorOpen from 'vue-material-design-icons/DoorOpen.vue'
 import AccountPlus from 'vue-material-design-icons/AccountPlus.vue'
 import Calendar from 'vue-material-design-icons/Calendar.vue'
 import CalendarPlus from 'vue-material-design-icons/CalendarPlus.vue'
@@ -318,6 +327,12 @@ import ServiceQueueWidget        from './ServiceQueueWidget.vue'
 import ServiceStatsWidget        from './ServiceStatsWidget.vue'
 import TeamAdoptionGrid          from './admin/TeamAdoptionGrid.vue'
 import AccountMultipleCheckOutline from 'vue-material-design-icons/AccountMultipleCheckOutline.vue'
+import TeamChatWidget            from './TeamChatWidget.vue'
+import Chat                      from 'vue-material-design-icons/Chat.vue'
+import Video                     from 'vue-material-design-icons/Video.vue'
+import SharedWithTeamWidget      from './SharedWithTeamWidget.vue'
+import ShareVariantOutline       from 'vue-material-design-icons/ShareVariantOutline.vue'
+import { callAction }            from '../lib/talkChat.js'
 
 export default {
     name: 'MobileWidgetView',
@@ -327,7 +342,7 @@ export default {
         // icons used in the icon bar / canvas headers — registered here so
         // <component :is="..."> resolves them
         MessageOutline, InformationOutline, AccountGroup, CakeVariant, BirthdaysWidget,
-        AccountPlus, Calendar, CalendarPlus, CardText, CheckboxMarkedOutline, GavelIcon,
+        AccountPlus, Calendar, CalendarPlus, CardText, CheckboxMarkedOutline, GavelIcon, DoorOpen,
         ClipboardPlusOutline, ClockOutline, Cog, ContentCopy,
         FileDocumentOutline, FilePlus, Folder, LocationExit, Plus, Puzzle,
         TrashCan, VideoIcon, ViewDashboard, BriefcaseOutline,
@@ -341,6 +356,8 @@ export default {
         OpenProjectOverviewWidget,
         ServiceQueueWidget, ServiceStatsWidget,
         TeamAdoptionGrid, AccountMultipleCheckOutline,
+        TeamChatWidget, Chat, Video,
+        SharedWithTeamWidget, ShareVariantOutline,
     },
 
     props: {
@@ -361,12 +378,14 @@ export default {
 
     emits: [
         'manage-team', 'copy-link', 'invite', 'leave-team',
-        'schedule-meeting', 'add-event', 'add-meeting',
+        'schedule-meeting', 'add-event', 'add-meeting', 'free-room-now',
         'add-deck-task', 'add-personal-task', 'add-openproject-work-package',
         // v4.13.9 - `{ workPackageId }` from a row's pencil.
         'edit-openproject-work-package',
         'create-page', 'delete-page', 'create-wiki-page', 'pages-loaded', 'collective-loaded',
         'set-view',
+        // v4.20.5 — Meet now / Join call from the Communication widget.
+        'start-call',
         'widget-actions-loaded',
     ],
 
@@ -390,6 +409,10 @@ export default {
     computed: {
         ...mapState([
             'currentTeamId', 'resources', 'teamType',
+            // v4.20.8 — gates the Free room now action.
+            'licensed',
+            // v4.20.5 — for the Communication widget's Meet now action.
+            'talkStatus',
             // v4.13.24 — `packageWidgets` joins `teamWidgets`: the two
             // registries are separate mechanisms and a team can have either.
             'teamWidgets', 'packageWidgets', 'isCurrentUserDirectMember',
@@ -592,6 +615,28 @@ export default {
                 })
             }
 
+            // v4.20.2 — same gate as TeamWidgetGrid (src/lib/activeWidgets.js).
+            if (this.resources.talk?.token) {
+                list.push({
+                    key: 'widget-talk',
+                    // TRANSLATORS: mobile navigation label for the widget that shows the team's Talk threads, polls and calls
+                    title: t('teamhub', 'Communication'),
+                    shortTitle: t('teamhub', 'Communication'),
+                    icon: 'Chat',
+                })
+            }
+
+            // v4.20.39 — Shared with team, on every team (src/lib/activeWidgets.js);
+            // v4.21.1 — licensed.
+            if (this.licensed) list.push({
+                key: 'widget-shared',
+                // TRANSLATORS: mobile navigation label for the widget that links to what other Nextcloud apps have shared with the team
+                title: t('teamhub', 'Shared with team'),
+                // TRANSLATORS: short mobile navigation label for the Shared with team widget
+                shortTitle: t('teamhub', 'Shared'),
+                icon: 'ShareVariantOutline',
+            })
+
             // v4.10.44 — the retired Services widget (v4.10.34) is the
             // Services tab now.
 
@@ -724,12 +769,24 @@ export default {
                             icon: 'CalendarPlus',
                             handler: () => this.$emit('add-event'),
                         },
-                        {
-                            key: 'add-meeting',
-                            label: t('teamhub', 'Add meeting'),
-                            icon: 'AccountGroup',
-                            handler: () => this.$emit('add-meeting'),
-                        },
+                        // v4.20.12 — Add meeting is licensed; hidden when unlicensed.
+                        ...(this.licensed
+                            ? [{
+                                key: 'add-meeting',
+                                label: t('teamhub', 'Add meeting'),
+                                icon: 'AccountGroup',
+                                handler: () => this.$emit('add-meeting'),
+                            }]
+                            : []),
+                        // v4.20.8 — licensed; hidden when unlicensed.
+                        ...(this.licensed
+                            ? [{
+                                key: 'free-room-now',
+                                label: t('teamhub', 'Free room now'),
+                                icon: 'DoorOpen',
+                                handler: () => this.$emit('free-room-now'),
+                            }]
+                            : []),
                     ]
 
                 case 'widget-deck': {
@@ -828,6 +885,26 @@ export default {
                         })
                     }
                     return actions
+                }
+
+                // v4.20.2 — the Chat widget: the same entries as its header
+                // menu on desktop and tablet (no Refresh since v4.20.19).
+                case 'widget-talk': {
+                    const call = callAction(this.talkStatus)
+                    return [
+                        ...(call ? [{
+                            key: 'start-call',
+                            label: call === 'join' ? t('teamhub', 'Join call') : t('teamhub', 'Meet now'),
+                            icon: 'Video',
+                            handler: () => this.$emit('start-call'),
+                        }] : []),
+                        {
+                            key: 'open-chat',
+                            label: t('teamhub', 'Open chat'),
+                            icon: 'Chat',
+                            handler: () => this.$emit('set-view', 'talk'),
+                        },
+                    ]
                 }
 
                 // Widgets without actions: activity, files-*, integration widgets.

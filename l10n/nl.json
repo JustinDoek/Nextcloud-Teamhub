@@ -1,5 +1,21 @@
 {
     "translations": {
+    "Show why %n person is not available": [
+        "Toon waarom %n persoon niet beschikbaar is",
+        "Toon waarom %n personen niet beschikbaar zijn"
+    ],
+    "Cannot check the calendar for {name}.": "Kan de agenda van {name} niet controleren.",
+    "{name} is not working at that time.": "{name} werkt op dat moment niet.",
+    "{name} has a calendar conflict.": "{name} heeft een agendaconflict.",
+    "Nextcloud checks a calendar through the account's email address. An account without one cannot be checked.": "Nextcloud controleert een agenda via het e-mailadres van het account. Een account zonder e-mailadres kan niet worden gecontroleerd.",
+    "_%n is not working_::_%n are not working_": [
+        "%n werkt niet",
+        "%n werken niet"
+    ],
+    "_%n cannot be checked_::_%n cannot be checked_": [
+        "%n kan niet worden gecontroleerd",
+        "%n kunnen niet worden gecontroleerd"
+    ],
     "{count} public holiday days were skipped": "{count} feestdagen zijn overgeslagen",
     "Change a workplace or mark vacation, sickness or other non-working time. Your usual workplace remains unchanged. Public holidays are managed by administrators.": "Verander je werkplek of geef vakantie, ziekte of andere afwezigheid op. Je vaste werkplek blijft behouden. Feestdagen worden door beheerders ingesteld.",
     "Set a day or date range": "Stel een dag of periode in",
@@ -184,7 +200,7 @@
         "Fold step": "Stap inklappen",
         "Unfold step": "Stap uitklappen",
         "Step {n}": "Stap {n}",
-        "{n} task": [
+        "_{n} task_::_{n} tasks_": [
             "{n} taak",
             "{n} taken"
         ],
@@ -224,19 +240,19 @@
         "The file settings could not be read.": "De bestandsinstellingen konden niet worden gelezen.",
         "Share files for a whole number of days.": "Deel bestanden voor een heel aantal dagen.",
         "Share files for 1 to %s days.": "Deel bestanden voor 1 tot %s dagen.",
-        "Files are shared with {who} for {n} day, to view and edit.": [
+        "_Files are shared with {who} for {n} day, to view and edit._::_Files are shared with {who} for {n} days, to view and edit._": [
             "Bestanden worden {n} dag gedeeld met {who}, om te bekijken en te bewerken.",
             "Bestanden worden {n} dagen gedeeld met {who}, om te bekijken en te bewerken."
         ],
-        "Files are shared with {who} for {n} day, to view only.": [
+        "_Files are shared with {who} for {n} day, to view only._::_Files are shared with {who} for {n} days, to view only._": [
             "Bestanden worden {n} dag gedeeld met {who}, alleen om te bekijken.",
             "Bestanden worden {n} dagen gedeeld met {who}, alleen om te bekijken."
         ],
-        "You can attach at most {n} file.": [
+        "_You can attach at most {n} file._::_You can attach at most {n} files._": [
             "Je kunt hoogstens {n} bestand toevoegen.",
             "Je kunt hoogstens {n} bestanden toevoegen."
         ],
-        "You can attach at most %n file.": [
+        "_You can attach at most %n file._::_You can attach at most %n files._": [
             "Je kunt hoogstens %n bestand toevoegen.",
             "Je kunt hoogstens %n bestanden toevoegen."
         ],
@@ -263,7 +279,7 @@
         "The name of a task is at most %s characters.": "De naam van een taak is hoogstens %s tekens.",
         "This task is no longer open.": "Deze taak is niet meer open.",
         "This request cannot end while \"%s\" is still open.": "Deze aanvraag kan niet eindigen zolang \"%s\" nog open is.",
-        "A step has at most %n task.": [
+        "_A step has at most %n task._::_A step has at most %n tasks._": [
             "Een stap heeft hoogstens %n taak.",
             "Een stap heeft hoogstens %n taken."
         ],
@@ -287,7 +303,7 @@
         "A link opens a page or a form.": "Een link opent een pagina of een formulier.",
         "The name of a link is at most %s characters.": "De naam van een link is hoogstens %s tekens.",
         "An address is at most %s characters.": "Een adres is hoogstens %s tekens.",
-        "A step has at most %n link.": [
+        "_A step has at most %n link._::_A step has at most %n links._": [
             "Een stap heeft hoogstens %n link.",
             "Een stap heeft hoogstens %n links."
         ],
@@ -344,15 +360,15 @@
         "Published": "Gepubliceerd",
         "Unpublished": "Niet gepubliceerd",
         "Unpublished changes": "Niet-gepubliceerde wijzigingen",
-        "Usually within %n working day": [
+        "_Usually within %n working day_::_Usually within %n working days_": [
             "Meestal binnen %n werkdag",
             "Meestal binnen %n werkdagen"
         ],
-        "A team can offer at most %n service.": [
+        "_A team can offer at most %n service._::_A team can offer at most %n services._": [
             "Een team kan hoogstens %n dienst aanbieden.",
             "Een team kan hoogstens %n diensten aanbieden."
         ],
-        "A service has at most %n step.": [
+        "_A service has at most %n step._::_A service has at most %n steps._": [
             "Een dienst heeft hoogstens %n stap.",
             "Een dienst heeft hoogstens %n stappen."
         ],
@@ -361,7 +377,7 @@
         "Give the service a name.": "Geef de dienst een naam.",
         "TeamHub services": "TeamHub-diensten",
         "My TeamHub requests": "Mijn TeamHub-verzoeken",
-        "%n request": [
+        "_%n request_::_%n requests_": [
             "%n verzoek",
             "%n verzoeken"
         ],
@@ -469,19 +485,19 @@
         "Requests": "Aanvragen",
         "Only an admin of the service team can reassign a request.": "Alleen een beheerder van het serviceteam kan een aanvraag opnieuw toewijzen.",
         "Choose a period of 7, 30 or 90 days.": "Kies een periode van 7, 30 of 90 dagen.",
-        "Last {n} day": [
+        "_Last {n} day_::_Last {n} days_": [
             "Afgelopen {n} dag",
             "Afgelopen {n} dagen"
         ],
-        "{n} hour": [
+        "_{n} hour_::_{n} hours_": [
             "{n} uur",
             "{n} uur"
         ],
-        "{n} minute": [
+        "_{n} minute_::_{n} minutes_": [
             "{n} minuut",
             "{n} minuten"
         ],
-        "{n} unclaimed request": [
+        "_{n} unclaimed request_::_{n} unclaimed requests_": [
             "{n} aanvraag niet opgepakt",
             "{n} aanvragen niet opgepakt"
         ],
@@ -607,7 +623,7 @@
         "These people are members through a group or team. Giving someone a higher role adds them to this team directly as well. They keep their group membership.": "Deze personen zijn lid via een groep of team. Wanneer je iemand een hogere rol geeft, wordt die persoon ook rechtstreeks lid van dit team, het groepslidmaatschap blijft behouden.",
         "via {source}": "via {source}",
         "%1$s needs review": "%1$s moet worden beoordeeld",
-        "%n event in this period": [
+        "_%n event in this period_::_%n events in this period_": [
             "%n gebeurtenis in deze periode",
             "%n gebeurtenissen in deze periode"
         ],
@@ -750,31 +766,31 @@
         "{name} (unavailable)": "{name} (niet beschikbaar)",
         "{action}: {title}": "{action}: {title}",
         "%1$s · %2$s": "%1$s · %2$s",
-        "%n attendee": [
+        "_%n attendee_::_%n attendees_": [
             "%n deelnemer",
             "%n deelnemers"
         ],
-        "%n attendee will be invited": [
+        "_%n attendee will be invited_::_%n attendees will be invited_": [
             "%n deelnemer wordt uitgenodigd",
             "%n deelnemers worden uitgenodigd"
         ],
-        "%n could join online": [
+        "_%n could join online_::_%n could join online_": [
             "%n kan online deelnemen",
             "%n kunnen online deelnemen"
         ],
-        "%n has a calendar conflict": [
+        "_%n has a calendar conflict_::_%n have a calendar conflict_": [
             "%n heeft een agendaconflict",
             "%n hebben een agendaconflict"
         ],
-        "%n has a conflict": [
+        "_%n has a conflict_::_%n have a conflict_": [
             "%n heeft een conflict",
             "%n hebben een conflict"
         ],
-        "%n member selected": [
+        "_%n member selected_::_%n members selected_": [
             "%n lid geselecteerd",
             "%n leden geselecteerd"
         ],
-        "%n resource needs review.": [
+        "_%n resource needs review._::_%n resources need review._": [
             "%n bron moet worden beoordeeld.",
             "%n bronnen moeten worden beoordeeld."
         ],
@@ -789,7 +805,7 @@
         "+ Connect team folder": "+ Teammap verbinden",
         "+ Create new": "+ Nieuwe aanmaken",
         "+ Create new team folder": "+ Nieuwe teammap aanmaken",
-        "+{n} other team": [
+        "_+{n} other team_::_+{n} other teams_": [
             "+{n} ander team",
             "+{n} andere teams"
         ],
@@ -812,11 +828,11 @@
         "A team folder is now connected to this team": "Een teammap is nu verbonden met dit team",
         "A kickoff meeting to align the team on scope, timeline, and roles. Mark as done once it's on the calendar.": "Een kick-off-vergadering om het team op één lijn te brengen over scope, tijdlijn en rollen. Markeer als klaar zodra deze in de agenda staat.",
         "A message with a link to the meeting notes will be posted in the Talk room asking team members to add agenda items.": "Er wordt een bericht geplaatst in de Talkruimte met een link naar de vergadernotities, waarin teamleden wordt gevraagd agendapunten toe te voegen.",
-        "A new message from TeamHub": [
+        "_A new message from TeamHub_::_{n} new messages from TeamHub_": [
             "Een nieuw bericht van TeamHub",
             "{n} nieuwe berichten van TeamHub"
         ],
-        "A new message from TeamHub is waiting for you.": [
+        "_A new message from TeamHub is waiting for you._::_{n} new messages from TeamHub are waiting for you._": [
             "Er wacht een nieuw bericht van TeamHub op je.",
             "Er wachten {n} nieuwe berichten van TeamHub op je."
         ],
@@ -1061,11 +1077,11 @@
         "Cancel superseding": "Vervanging annuleren",
         "Cancel: make team usable again": "Annuleren: team weer bruikbaar maken",
         "Cannot create page: team name not available": "Kan pagina niet aanmaken: teamnaam niet beschikbaar",
-        "Cannot delete: in use by {n} entry": [
+        "_Cannot delete: in use by {n} entry_::_Cannot delete: in use by {n} entries_": [
             "Verwijderen niet mogelijk: in gebruik door {n} item",
             "Verwijderen niet mogelijk: in gebruik door {n} items"
         ],
-        "Cannot delete: status type is in use by {n} entry": [
+        "_Cannot delete: status type is in use by {n} entry_::_Cannot delete: status type is in use by {n} entries_": [
             "Verwijderen niet mogelijk: statustype is in gebruik door {n} item",
             "Verwijderen niet mogelijk: statustype is in gebruik door {n} items"
         ],
@@ -1390,7 +1406,7 @@
         "Delete time entry": "Tijdvermelding verwijderen",
         "Delete {label}?": "{label} verwijderen?",
         "Delete {name}": "{name} verwijderen",
-        "Delete {n} event": [
+        "_Delete {n} event_::_Delete {n} events_": [
             "{n} gebeurtenis verwijderen",
             "{n} gebeurtenissen verwijderen"
         ],
@@ -1644,7 +1660,7 @@
         "Loading the request…": "Aanvraag laden…",
         "Request extension": "Verlenging aanvragen",
         "This request is no longer waiting for a decision. Refresh to update the list.": "Deze aanvraag wacht niet meer op een beslissing. Ververs om de lijst bij te werken.",
-        "{n} team is waiting for a decision on its expiration date:": [
+        "_{n} team is waiting for a decision on its expiration date:_::_{n} teams are waiting for a decision on their expiration date:_": [
             "{n} team wacht op een beslissing over de vervaldatum:",
             "{n} teams wachten op een beslissing over hun vervaldatum:"
         ],
@@ -1846,7 +1862,7 @@
         "Ignore resource {id}": "Bron {id} negeren",
         "Image URL (https://…)": "Afbeeldings-URL (https://…)",
         "Image attachment": "Afbeeldingsbijlage",
-        "Image cache cleared (%n file removed)": [
+        "_Image cache cleared (%n file removed)_::_Image cache cleared (%n files removed)_": [
             "Afbeeldingscache geleegd (%n bestand verwijderd)",
             "Afbeeldingscache geleegd (%n bestanden verwijderd)"
         ],
@@ -2216,7 +2232,7 @@
         "Not installed": "Niet geïnstalleerd",
         "not readable: requester and timing are unknown, so Waiting for others falls back to rule membership": "niet leesbaar: aanvrager en tijdstip zijn onbekend, dus Wacht op anderen valt terug op regel-lidmaatschap",
         "not readable": "niet leesbaar",
-        "Not set": "Not set",
+        "Not set": "Niet ingesteld",
         "Not user-selectable": "Niet door gebruiker te selecteren",
         "Note": "Notitie",
         "Note (optional)": "Notitie (optioneel)",
@@ -2253,7 +2269,7 @@
         "Team name cannot consist only of dots.": "Teamnaam mag niet alleen uit punten bestaan.",
         "A team with this name already exists. Team names must be unique.": "Er bestaat al een team met deze naam. Teamnamen moeten uniek zijn.",
         "Only members of the selected groups can create teams. Leave empty to allow all users.": "Alleen leden van de geselecteerde groepen kunnen teams aanmaken. Laat leeg om alle gebruikers toe te staan.",
-        "Only proposals in the %n selected category will be added.": [
+        "_Only proposals in the %n selected category will be added._::_Only proposals in the %n selected categories will be added._": [
             "Alleen voorstellen in de %n geselecteerde categorie worden toegevoegd.",
             "Alleen voorstellen in de %n geselecteerde categorieën worden toegevoegd."
         ],
@@ -2298,7 +2314,7 @@
         "Other": "Overig",
         "Over your licensed seats: {used} of {cap} used.": "Boven uw gelicentieerde plaatsen: {used} van {cap} gebruikt.",
         "Overdue": "Achterstallig",
-        "Overdue by {n} day": [
+        "_Overdue by {n} day_::_Overdue by {n} days_": [
             "{n} dag te laat",
             "{n} dagen te laat"
         ],
@@ -2490,7 +2506,7 @@
         "Remove {name} from the project time budget? Their existing logs are kept for the audit trail.": "{name} verwijderen uit het tijdbudget? Bestaande registraties blijven bewaard voor het audit-spoor.",
         "Remove {user} from all teams": "{user} uit alle teams verwijderen",
         "Remove {user} from {team}": "{user} uit {team} verwijderen",
-        "Removed from {n} team": [
+        "_Removed from {n} team_::_Removed from {n} teams_": [
             "Verwijderd uit {n} team",
             "Verwijderd uit {n} teams"
         ],
@@ -2533,7 +2549,7 @@
         "Resources pending review": "Bronnen die wachten op beoordeling",
         "Restore": "Herstellen",
         "Restore team {name}": "Team {name} herstellen",
-        "Restricted to {n} group": [
+        "_Restricted to {n} group_::_Restricted to {n} groups_": [
             "Beperkt tot {n} groep",
             "Beperkt tot {n} groepen"
         ],
@@ -2672,7 +2688,7 @@
         "Short note": "Korte notitie",
         "Short summary of the feedback": "Korte samenvatting van de feedback",
         "Show": "Tonen",
-        "Show %n ignored resource": [
+        "_Show %n ignored resource_::_Show %n ignored resources_": [
             "%n genegeerde bron tonen",
             "%n genegeerde bronnen tonen"
         ],
@@ -2898,13 +2914,13 @@
         "The team itself and every other resource are unaffected. Only Collectives is being removed.": "Het team zelf en alle andere bronnen blijven ongewijzigd. Alleen Collectives wordt verwijderd.",
         "The team will be hidden immediately and permanently deleted in 30 days. An administrator can restore it before then. No archive will be produced.": "Het team wordt direct verborgen en over 30 dagen definitief verwijderd. Een beheerder kan het team binnen die termijn herstellen. Er wordt geen archief gemaakt.",
         "The team will be hidden immediately and permanently deleted in 60 days. An administrator can restore it before then. No archive will be produced.": "Het team wordt direct verborgen en over 60 dagen definitief verwijderd. Een beheerder kan het team binnen die termijn herstellen. Er wordt geen archief gemaakt.",
-        "The team will be hidden immediately and permanently deleted in {n} day. Administrators can restore it before that deadline.": [
+        "_The team will be hidden immediately and permanently deleted in {n} day. Administrators can restore it before that deadline._::_The team will be hidden immediately and permanently deleted in {n} days. Administrators can restore it before that deadline._": [
             "Het team wordt onmiddellijk verborgen en over {n} dag permanent verwijderd. Beheerders kunnen het vóór die deadline herstellen.",
             "Het team wordt onmiddellijk verborgen en over {n} dagen permanent verwijderd. Beheerders kunnen het vóór die deadline herstellen."
         ],
         "The team will be permanently deleted immediately after the archive is produced. This cannot be undone.": "Het team wordt onmiddellijk na het aanmaken van het archief permanent verwijderd. Dit kan niet ongedaan worden gemaakt.",
         "The team will be permanently deleted immediately. No archive bundle is produced.": "Het team wordt direct permanent verwijderd. Er wordt geen archiefpakket gemaakt.",
-        "The team will be permanently deleted in {n} day. Administrators can restore it.": [
+        "_The team will be permanently deleted in {n} day. Administrators can restore it._::_The team will be permanently deleted in {n} days. Administrators can restore it._": [
             "Het team wordt over {n} dag permanent verwijderd. Beheerders kunnen het herstellen.",
             "Het team wordt over {n} dagen permanent verwijderd. Beheerders kunnen het herstellen."
         ],
@@ -2924,7 +2940,7 @@
         "Third-party integrations": "Integraties van derden",
         "This action cannot be easily undone.": "Deze actie kan niet eenvoudig ongedaan worden gemaakt.",
         "This action cannot be undone.": "Deze actie kan niet ongedaan worden gemaakt.",
-        "This building has {n} floor": [
+        "_This building has {n} floor_::_This building has {n} floors_": [
             "Dit gebouw heeft {n} verdieping",
             "Dit gebouw heeft {n} verdiepingen"
         ],
@@ -2937,7 +2953,7 @@
         "This feature requires a license: ask your admin.": "Deze functie vereist een licentie: vraag je beheerder.",
         "This file no longer exists.": "Dit bestand bestaat niet meer.",
         "This file type cannot be previewed read-only in the browser. Download it to view its contents.": "Dit bestandstype kan niet alleen-lezen worden bekeken in de browser. Download het om de inhoud te bekijken.",
-        "This floor has {n} room": [
+        "_This floor has {n} room_::_This floor has {n} rooms_": [
             "Deze verdieping heeft {n} ruimte",
             "Deze verdieping heeft {n} ruimtes"
         ],
@@ -3191,12 +3207,12 @@
         "Yesterday": "Gisteren",
         "You approved this decision": "Je hebt dit besluit goedgekeurd",
         "You approved this file": "Je hebt dit bestand goedgekeurd",
-        "You are about to remove {user} from {n} team. This cannot be undone.": [
+        "_You are about to remove {user} from {n} team. This cannot be undone._::_You are about to remove {user} from {n} teams. This cannot be undone._": [
             "Je staat op het punt {user} uit {n} team te verwijderen. Dit kan niet ongedaan worden gemaakt.",
             "Je staat op het punt {user} uit {n} teams te verwijderen. Dit kan niet ongedaan worden gemaakt."
         ],
         "You are about to withdraw this decision and open a new proposal in its place.": "U staat op het punt om deze beslissing in te trekken en een nieuw voorstel in de plaats te openen.",
-        "You are an approver and this request has been waiting %n day": [
+        "_You are an approver and this request has been waiting %n day_::_You are an approver and this request has been waiting %n days_": [
             "Je bent fiatteur en dit verzoek wacht al %n dag",
             "Je bent fiatteur en dit verzoek wacht al %n dagen"
         ],
@@ -3232,7 +3248,7 @@
         "You’re all caught up": "Je bent helemaal bij",
         "You're getting the project off the ground. Here's what to focus on:": "Je start het project op. Waar je op moet focussen:",
         "You're setting up your project. Here's what to focus on:": "Je bent je project aan het opzetten. Dit zijn de aandachtspunten:",
-        "Your approval request has been waiting %n day": [
+        "_Your approval request has been waiting %n day_::_Your approval request has been waiting %n days_": [
             "Je goedkeuringsverzoek wacht al %n dag",
             "Je goedkeuringsverzoek wacht al %n dagen"
         ],
@@ -3298,7 +3314,7 @@
         "e.g. Weekly sync": "bijv. Wekelijkse sync",
         "e.g. en/teamhub": "bijv. nl/teamhub",
         "email address": "e-mailadres",
-        "grace: {n} day left": [
+        "_grace: {n} day left_::_grace: {n} days left_": [
             "respijt: {n} dag over",
             "respijt: {n} dagen over"
         ],
@@ -3343,7 +3359,7 @@
         "{available} of {total} available, {count} at {building}": "{available} van {total} beschikbaar, {count} op {building}",
         "{available} of {total} available, {count} at {room}": "{available} van {total} beschikbaar, {count} in {room}",
         "{cell}: {type}. Click to change.": "{cell}: {type}. Klik om te wijzigen.",
-        "{count} project member": [
+        "_{count} project member_::_{count} project members_": [
             "{count} projectlid",
             "{count} projectleden"
         ],
@@ -3361,7 +3377,7 @@
         "{name} has been approved": "{name} is goedgekeurd",
         "{name} is now the team owner. You are now a moderator.": "{name} is nu de teameigenaar. Jij bent nu moderator.",
         "{name} saved": "{name} opgeslagen",
-        "{n} altered file": [
+        "_{n} altered file_::_{n} altered files_": [
             "{n} gewijzigd bestand",
             "{n} gewijzigde bestanden"
         ],
@@ -3377,71 +3393,71 @@
             "{n} agenda",
             "{n} agenda's"
         ],
-        "{n} comment": [
+        "_{n} comment_::_{n} comments_": [
             "{n} opmerking",
             "{n} opmerkingen"
         ],
-        "{n} day": [
+        "_{n} day_::_{n} days_": [
             "{n} dag",
             "{n} dagen"
         ],
-        "{n} day ago": [
+        "_{n} day ago_::_{n} days ago_": [
             "{n} dag geleden",
             "{n} dagen geleden"
         ],
-        "{n} day left": [
+        "_{n} day left_::_{n} days left_": [
             "{n} dag over",
             "{n} dagen over"
         ],
-        "{n} decision": [
+        "_{n} decision_::_{n} decisions_": [
             "{n} besluit",
             "{n} besluiten"
         ],
-        "{n} deleted user found in team memberships.": [
+        "_{n} deleted user found in team memberships._::_{n} deleted users found in team memberships._": [
             "{n} verwijderde gebruiker gevonden in teamlidmaatschappen.",
             "{n} verwijderde gebruikers gevonden in teamlidmaatschappen."
         ],
-        "{n} event could not be deleted": [
+        "_{n} event could not be deleted_::_{n} events could not be deleted_": [
             "{n} gebeurtenis kon niet worden verwijderd",
             "{n} gebeurtenissen konden niet worden verwijderd"
         ],
-        "{n} event deleted": [
+        "_{n} event deleted_::_{n} events deleted_": [
             "{n} gebeurtenis verwijderd",
             "{n} gebeurtenissen verwijderd"
         ],
-        "{n} event selected": [
+        "_{n} event selected_::_{n} events selected_": [
             "{n} gebeurtenis geselecteerd",
             "{n} gebeurtenissen geselecteerd"
         ],
         "{n} hour ago": "{n} uur geleden",
         "{n} hours ago": "{n} uur geleden",
-        "{n} item awaiting your approval": [
+        "_{n} item awaiting your approval_::_{n} items awaiting your approval_": [
             "{n} item wacht op uw goedkeuring",
             "{n} items wachten op uw goedkeuring"
         ],
-        "{n} lane over budget": [
+        "_{n} lane over budget_::_{n} lanes over budget_": [
             "{n} werkstroom over budget",
             "{n} werkstromen over budget"
         ],
-        "{n} member invited": [
+        "_{n} member invited_::_{n} members invited_": [
             "{n} lid uitgenodigd",
             "{n} leden uitgenodigd"
         ],
-        "{n} member over hours": [
+        "_{n} member over hours_::_{n} members over hours_": [
             "{n} lid over uren",
             "{n} leden over uren"
         ],
         "{n} min ago": "{n} min geleden",
-        "{n} missing file": [
+        "_{n} missing file_::_{n} missing files_": [
             "{n} ontbrekend bestand",
             "{n} ontbrekende bestanden"
         ],
         "{n} of {total} votes": "{n} van {total} stemmen",
-        "{n} open decision": [
+        "_{n} open decision_::_{n} open decisions_": [
             "{n} open besluit",
             "{n} open besluiten"
         ],
-        "{n} over": [
+        "_{n} over_::_{n} over_": [
             "{n} over",
             "{n} over"
         ],
@@ -3450,35 +3466,35 @@
             "{n} reactie: chat openen",
             "{n} reacties: chat openen"
         ],
-        "{n} team": [
+        "_{n} team_::_{n} teams_": [
             "{n} team",
             "{n} teams"
         ],
-        "{n} team selected": [
+        "_{n} team selected_::_{n} teams selected_": [
             "{n} team geselecteerd",
             "{n} teams geselecteerd"
         ],
-        "{n} type allowed": [
+        "_{n} type allowed_::_{n} types allowed_": [
             "{n} type toegestaan",
             "{n} typen toegestaan"
         ],
-        "{n} unassigned card": [
+        "_{n} unassigned card_::_{n} unassigned cards_": [
             "{n} niet-toegewezen kaart",
             "{n} niet-toegewezen kaarten"
         ],
-        "{n} unassigned card in {board}: open board": [
+        "_{n} unassigned card in {board}: open board_::_{n} unassigned cards in {board}: open board_": [
             "{n} niet-toegewezen kaart in {board}: bord openen",
             "{n} niet-toegewezen kaarten in {board}: bord openen"
         ],
-        "{n} unexpected file": [
+        "_{n} unexpected file_::_{n} unexpected files_": [
             "{n} onverwacht bestand",
             "{n} onverwachte bestanden"
         ],
-        "{n} unsolved question": [
+        "_{n} unsolved question_::_{n} unsolved questions_": [
             "{n} onopgeloste vraag",
             "{n} onopgeloste vragen"
         ],
-        "{n} user": [
+        "_{n} user_::_{n} users_": [
             "{n} gebruiker",
             "{n} gebruikers"
         ],
@@ -3502,11 +3518,11 @@
         "{team} is ready": "{team} is klaar",
         "{title} disabled for this team": "{title} uitgeschakeld voor dit team",
         "{title} enabled for this team": "{title} ingeschakeld voor dit team",
-        "{total} total vote": [
+        "_{total} total vote_::_{total} total votes_": [
             "{total} stem totaal",
             "{total} stemmen totaal"
         ],
-        "{total} total vote: Poll closed": [
+        "_{total} total vote: Poll closed_::_{total} total votes: Poll closed_": [
             "{total} stem totaal: Peiling gesloten",
             "{total} stemmen totaal: Peiling gesloten"
         ],
@@ -3608,7 +3624,7 @@
         "Write a reply…": "Schrijf een reactie…",
         "You cannot post in this conversation.": "Je kunt niet posten in dit gesprek.",
         "This role does not allow commenting in this team.": "Deze rol staat geen reacties toe in dit team.",
-        "{n} reply": [
+        "_{n} reply_::_{n} replies_": [
             "{n} reactie",
             "{n} reacties"
         ],
@@ -3626,7 +3642,7 @@
         "Try widening the period, or clearing a team or type selection.": "Probeer de periode te verruimen of een team- of typeselectie te wissen.",
         "Turn on at least one row under Show in the Feed control panel.": "Zet minstens één regel onder Tonen aan in het Feed-instellingen paneel.",
         "You’ve reached the end": "Je bent bij het einde",
-        "{n} item shown": [
+        "_{n} item shown_::_{n} items shown_": [
             "{n} item getoond",
             "{n} items getoond"
         ],
@@ -3652,7 +3668,7 @@
         "Scans every user-created team for system bits that should never appear on a user team (CFG_SINGLE, CFG_PERSONAL, CFG_SYSTEM, CFG_NO_OWNER, CFG_HIDDEN, CFG_BACKEND). Nextcloud Circles refuses any config update on a team carrying one of these, so apps can no longer change it. Use Repair to reset a team's config to clean defaults.": "Scant elk door gebruikers aangemaakt team op systeembits die nooit op een gebruikersteam mogen voorkomen (CFG_SINGLE, CFG_PERSONAL, CFG_SYSTEM, CFG_NO_OWNER, CFG_HIDDEN, CFG_BACKEND). Nextcloud Circles weigert elke configuratiewijziging op een team met een van deze bits, waardoor apps het niet meer kunnen aanpassen. Gebruik Herstellen om de configuratie van een team terug te zetten naar schone standaardwaarden.",
         "These teams carry the CFG_APP flag, which a Nextcloud app sets to mark the team as managed by it: enabling a Collective does this. It is not corruption and needs no repair. The flag stays behind if the app that set it is later removed.": "Deze teams dragen de CFG_APP-vlag, die een Nextcloud-app instelt om het team als door haar beheerd te markeren: het inschakelen van een Collective doet dit. Het is geen corruptie en hoeft niet hersteld te worden. De vlag blijft achter als de app die hem heeft ingesteld later wordt verwijderd.",
         "Current config: {config}. App flag: {appBits}": "Huidige configuratie: {config}. App-vlag: {appBits}",
-        "{n} team is claimed by another app": [
+        "_{n} team is claimed by another app_::_{n} teams are claimed by another app_": [
             "{n} team is geclaimd door een andere app",
             "{n} teams zijn geclaimd door een andere app"
         ],
@@ -3715,27 +3731,27 @@
         "{message} ({error})": "{message} ({error})",
         "Bulk team import": "Teams bulksgewijs importeren",
         "Create many teams at once from a CSV file, each with its own owner and team admins.": "Maak in één keer veel teams aan vanuit een CSV-bestand, elk met een eigen eigenaar en eigen teambeheerders.",
-        "{n} team ready": [
+        "_{n} team ready_::_{n} teams ready_": [
             "{n} team gereed",
             "{n} teams gereed"
         ],
-        "{n} created": [
+        "_{n} created_::_{n} created_": [
             "{n} aangemaakt",
             "{n} aangemaakt"
         ],
-        "{n} skipped": [
+        "_{n} skipped_::_{n} skipped_": [
             "{n} overgeslagen",
             "{n} overgeslagen"
         ],
-        "{n} error": [
+        "_{n} error_::_{n} errors_": [
             "{n} fout",
             "{n} fouten"
         ],
-        "Create {n} team": [
+        "_Create {n} team_::_Create {n} teams_": [
             "{n} team aanmaken",
             "{n} teams aanmaken"
         ],
-        "{n} team will be created, with its apps, privacy settings and modules. This cannot be undone from here. A team created by mistake has to be deleted individually.": [
+        "_{n} team will be created, with its apps, privacy settings and modules. This cannot be undone from here. A team created by mistake has to be deleted individually._::_{n} teams will be created, each with its apps, privacy settings and modules. This cannot be undone from here. A team created by mistake has to be deleted individually._": [
             "Er wordt {n} team aangemaakt, met bijbehorende apps, privacyinstellingen en modules. Dit kan hier niet ongedaan worden gemaakt, een per ongeluk aangemaakt team moet afzonderlijk worden verwijderd.",
             "Er worden {n} teams aangemaakt, elk met bijbehorende apps, privacyinstellingen en modules. Dit kan hier niet ongedaan worden gemaakt, een per ongeluk aangemaakt team moet afzonderlijk worden verwijderd."
         ],
@@ -3857,7 +3873,7 @@
         "Audit log retention details": "Details bewaartermijn auditlogboek",
         "Audit log:": "Auditlogboek:",
         "Events are appended and purged in bulk after the retention window. No code path updates or deletes an individual row, so a record cannot be rewritten before it expires.": "Gebeurtenissen worden toegevoegd en na de bewaartermijn in bulk gewist. Geen enkel codepad werkt een afzonderlijke regel bij of verwijdert die, dus een record kan niet worden herschreven voordat het verloopt.",
-        "{n} day retention": [
+        "_{n} day retention_::_{n} days retention_": [
             "{n} dag bewaren",
             "{n} dagen bewaren"
         ],
@@ -3939,7 +3955,7 @@
             "%n vergrendeld",
             "%n vergrendeld"
         ],
-        "%n setting": [
+        "_%n setting_::_%n settings_": [
             "%n instelling",
             "%n instellingen"
         ],
@@ -3950,7 +3966,7 @@
         "Profiles": "Profielen",
         "Team expiration": "Teamvervaldatum",
         "The date the picker opens on when someone creates this kind of team. 0 leaves it on the standard six months.": "De datum waarop de kiezer opent wanneer iemand dit soort team aanmaakt. Bij 0 blijft dat de standaard zes maanden.",
-        "Default %n day": [
+        "_Default %n day_::_Default %n days_": [
             "Standaard %n dag",
             "Standaard %n dagen"
         ],
@@ -3991,7 +4007,7 @@
         "No pages yet": "Nog geen pagina's",
         "Expand {title}": "{title} uitklappen",
         "Collapse {title}": "{title} inklappen",
-        "Only the first %n page is listed": [
+        "_Only the first %n page is listed_::_Only the first %n pages are listed_": [
             "Alleen de eerste %n pagina wordt getoond",
             "Alleen de eerste %n pagina's worden getoond"
         ],
@@ -4028,35 +4044,35 @@
         "Teams to create": "Aan te maken teams",
         "This template does not allow an expiration date.": "Dit sjabloon staat geen vervaldatum toe.",
         "{done} of {total}": "{done} van {total}",
-        "%n created": [
+        "_%n created_::_%n created_": [
             "%n aangemaakt",
             "%n aangemaakt"
         ],
-        "%n failed": [
+        "_%n failed_::_%n failed_": [
             "%n mislukt",
             "%n mislukt"
         ],
-        "%n row ready": [
+        "_%n row ready_::_%n rows ready_": [
             "%n rij klaar",
             "%n rijen klaar"
         ],
-        "%n skipped": [
+        "_%n skipped_::_%n skipped_": [
             "%n overgeslagen",
             "%n overgeslagen"
         ],
-        "%n team": [
+        "_%n team_::_%n teams_": [
             "%n team",
             "%n teams"
         ],
-        "%n with a warning": [
+        "_%n with a warning_::_%n with warnings_": [
             "%n met een waarschuwing",
             "%n met waarschuwingen"
         ],
-        "%n with an error": [
+        "_%n with an error_::_%n with errors_": [
             "%n met een fout",
             "%n met fouten"
         ],
-        "Create %n team": [
+        "_Create %n team_::_Create %n teams_": [
             "%n team aanmaken",
             "%n teams aanmaken"
         ],
@@ -4071,7 +4087,7 @@
         "One row per team. Apps and settings come from the template and policy you pick, and can be changed per team afterwards. Rows without a name are ignored, so you can leave spare rows empty.": "Eén rij per team. Apps en instellingen komen uit het sjabloon en beleid dat je kiest en kunnen per team achteraf worden aangepast. Rijen zonder naam worden overgeslagen, dus je kunt lege rijen laten staan.",
         "Search a person…": "Zoek een persoon…",
         "This row cannot be created.": "Deze rij kan niet worden aangemaakt.",
-        "%n row needs attention before these teams can be created.": [
+        "_%n row needs attention before these teams can be created._::_%n rows need attention before these teams can be created._": [
             "%n rij vraagt aandacht voordat deze teams kunnen worden aangemaakt.",
             "%n rijen vragen aandacht voordat deze teams kunnen worden aangemaakt."
         ],
@@ -4079,17 +4095,17 @@
         "Creating several teams at once requires a license.": "Meerdere teams tegelijk aanmaken vereist een licentie.",
         "Templates and policy profiles": "Sjablonen en beleidsprofielen",
         "{n} of {total} adjusted": "{n} van {total} aangepast",
-        "{n} template, none adjusted": [
+        "_{n} template, none adjusted_::_{n} templates, none adjusted_": [
             "{n} sjabloon, geen aangepast",
             "{n} sjablonen, geen aangepast"
         ],
         "Templates decide which apps and modules a new team is given, and how long it may live. Adjust them under Policy → Team templates.": "Sjablonen bepalen welke apps en modules een nieuw team krijgt, en hoe lang het mag bestaan. Pas ze aan onder Beleid → Teamsjablonen.",
         "Policy profiles": "Beleidsprofielen",
-        "{total} defined, {n} team classified": [
+        "_{total} defined, {n} team classified_::_{total} defined, {n} teams classified_": [
             "{total} gedefinieerd, {n} team geclassificeerd",
             "{total} gedefinieerd, {n} teams geclassificeerd"
         ],
-        "{n} profile, no team classified": [
+        "_{n} profile, no team classified_::_{n} profiles, no team classified_": [
             "{n} profiel, geen team geclassificeerd",
             "{n} profielen, geen team geclassificeerd"
         ],
@@ -4099,7 +4115,7 @@
         "Team profiles:": "Teamprofielen:",
         "No teams classified": "Geen teams geclassificeerd",
         "Team profile compliance details": "Details over naleving van teamprofielen",
-        "{n} team classified, {ok} still matching": [
+        "_{n} team classified, {ok} still matching_::_{n} teams classified, {ok} still matching_": [
             "{n} team geclassificeerd, {ok} nog passend",
             "{n} teams geclassificeerd, {ok} nog passend"
         ],
@@ -4129,7 +4145,7 @@
         "This team already matches the profile. Applying it changes no setting.": "Dit team komt al overeen met het profiel. Toepassen wijzigt geen enkele instelling.",
         "Not changed by applying: existing members are never removed. The team will be reported as non-compliant until they are.": "Wordt niet gewijzigd door toepassen: bestaande leden worden nooit verwijderd. Het team wordt als niet-conform gemeld totdat dat gebeurt.",
         "These integrations are switched off for the team: {apps}. Their own data is not deleted.": "Deze integraties worden voor het team uitgeschakeld: {apps}. Hun eigen gegevens worden niet verwijderd.",
-        "The profile also governs {n} setting this team already matches.": [
+        "_The profile also governs {n} setting this team already matches._::_The profile also governs {n} settings this team already matches._": [
             "Het profiel bepaalt ook {n} instelling waaraan dit team al voldoet.",
             "Het profiel bepaalt ook {n} instellingen waaraan dit team al voldoet."
         ],
@@ -4138,7 +4154,7 @@
         "The team keeps its current settings and stops being checked against a profile.": "Het team behoudt zijn huidige instellingen en wordt niet meer aan een profiel getoetst.",
         "Apply the profile": "Profiel toepassen",
         "Profile applied to {team}.": "Profiel toegepast op {team}.",
-        "Profile applied. {n} setting could not be changed and is reported instead. See the team’s profile chip.": [
+        "_Profile applied. {n} setting could not be changed and is reported instead. See the team’s profile chip._::_Profile applied. {n} settings could not be changed and are reported instead. See the team’s profile chip._": [
             "Profiel toegepast. {n} instelling kon niet worden gewijzigd en wordt in plaats daarvan gemeld, zie het profiellabel van het team.",
             "Profiel toegepast. {n} instellingen konden niet worden gewijzigd en worden in plaats daarvan gemeld, zie het profiellabel van het team."
         ],
@@ -4193,11 +4209,11 @@
         "This review is already closed.": "Deze review is al afgesloten.",
         "This review no longer exists.": "Deze review bestaat niet meer.",
         "That did not work. Try again.": "Dat is niet gelukt. Probeer het opnieuw.",
-        "There is already %n open review on this file.": [
+        "_There is already %n open review on this file._::_There are already %n open reviews on this file._": [
             "Er loopt al %n review op dit bestand.",
             "Er lopen al %n reviews op dit bestand."
         ],
-        "%n team member will be asked.": [
+        "_%n team member will be asked._::_%n team members will be asked._": [
             "%n teamlid wordt gevraagd.",
             "%n teamleden worden gevraagd."
         ],
@@ -4246,23 +4262,23 @@
         "failed": "mislukt",
         "needs {apps} added by hand": "moet {apps} handmatig toevoegen",
         "no longer uses this": "gebruikt dit niet meer",
-        "Apply to all {n} team": [
+        "_Apply to all {n} team_::_Apply to all {n} teams_": [
             "Toepassen op alle {n} team",
             "Toepassen op alle {n} teams"
         ],
-        "Apply to {n} team": [
+        "_Apply to {n} team_::_Apply to {n} teams_": [
             "Toepassen op {n} team",
             "Toepassen op {n} teams"
         ],
-        "{eligible} of {total} team still matches what this said before the change.": [
+        "_{eligible} of {total} team still matches what this said before the change._::_{eligible} of {total} teams still match what this said before the change._": [
             "{eligible} van {total} team komt nog overeen met wat dit vóór de wijziging zei.",
             "{eligible} van {total} teams komen nog overeen met wat dit vóór de wijziging zei."
         ],
-        "{n} more team was not processed in this run. Save the change again to continue.": [
+        "_{n} more team was not processed in this run. Save the change again to continue._::_{n} more teams were not processed in this run. Save the change again to continue._": [
             "{n} team is in deze ronde niet verwerkt. Sla de wijziging opnieuw op om verder te gaan.",
             "{n} teams zijn in deze ronde niet verwerkt. Sla de wijziging opnieuw op om verder te gaan."
         ],
-        "{n} team updated.": [
+        "_{n} team updated._::_{n} teams updated._": [
             "{n} team bijgewerkt.",
             "{n} teams bijgewerkt."
         ],
@@ -4278,11 +4294,11 @@
         "left for you: {apps}": "voor jou overgelaten: {apps}",
         "not applied: {fields}": "niet toegepast: {fields}",
         "removed {apps}": "{apps} verwijderd",
-        "{n} needs attention.": [
+        "_{n} needs attention._::_{n} need attention._": [
             "{n} vraagt aandacht.",
             "{n} vragen aandacht."
         ],
-        "{n} setting applied": [
+        "_{n} setting applied_::_{n} settings applied_": [
             "{n} instelling toegepast",
             "{n} instellingen toegepast"
         ],
@@ -4403,7 +4419,7 @@
         "OpenProject data could not be loaded.": "OpenProject-gegevens konden niet worden geladen.",
         "Project info": "Projectinfo",
         "Work package": "Werkpakket",
-        "Show {n} more work package": [
+        "_Show {n} more work package_::_Show {n} more work packages_": [
             "Nog {n} werkpakket tonen",
             "Nog {n} werkpakketten tonen"
         ],
@@ -4429,7 +4445,7 @@
         "My OpenProject work": "Mijn OpenProject-werk",
         "OpenProject project": "OpenProject-project",
         "My work": "Mijn werk",
-        "Due in {n} day": [
+        "_Due in {n} day_::_Due in {n} days_": [
             "Binnen {n} dag",
             "Binnen {n} dagen"
         ],
@@ -4437,7 +4453,7 @@
             "{shown} van {n} werkpakket",
             "{shown} van {n} werkpakketten"
         ],
-        "Showing the first {n} match. Narrow the search to find others.": [
+        "_Showing the first {n} match. Narrow the search to find others._::_Showing the first {n} matches. Narrow the search to find others._": [
             "Alleen het eerste resultaat wordt getoond. Verfijn de zoekopdracht om andere te vinden.",
             "Alleen de eerste {n} resultaten worden getoond. Verfijn de zoekopdracht om andere te vinden."
         ],
@@ -4576,7 +4592,7 @@
         "TeamHub dashboard": "TeamHub-dashboard",
         "Guest": "Gast",
         "Open project in OpenProject": "Project openen in OpenProject",
-        "{n} member has no OpenProject account. Decide what to do with them before continuing.": [
+        "_{n} member has no OpenProject account. Decide what to do with them before continuing._::_{n} members have no OpenProject account. Decide what to do with them before continuing._": [
             "{n} lid heeft geen OpenProject-account. Bepaal wat ermee gebeurt voordat je verdergaat.",
             "{n} leden hebben geen OpenProject-account. Bepaal wat ermee gebeurt voordat je verdergaat."
         ],
@@ -4594,15 +4610,15 @@
         "Add to the team only": "Alleen aan het team toevoegen",
         "Leave out": "Weglaten",
         "Team page, {apps}": "Teampagina, {apps}",
-        "{n} attempt": [
+        "_{n} attempt_::_{n} attempts_": [
             "{n} poging",
             "{n} pogingen"
         ],
-        "{n} member could not be added in OpenProject": [
+        "_{n} member could not be added in OpenProject_::_{n} members could not be added in OpenProject_": [
             "{n} lid kon niet in OpenProject worden toegevoegd",
             "{n} leden konden niet in OpenProject worden toegevoegd"
         ],
-        "{n} member added in OpenProject": [
+        "_{n} member added in OpenProject_::_{n} members added in OpenProject_": [
             "{n} lid toegevoegd in OpenProject",
             "{n} leden toegevoegd in OpenProject"
         ],
@@ -4620,19 +4636,19 @@
         "Created {name}": "{name} aangemaakt",
         "The project folder OpenProject manages is linked": "De projectmap die OpenProject beheert, is gekoppeld",
         "Existing resource kept": "Bestaande bron behouden",
-        "Add {n} missing member to OpenProject": [
+        "_Add {n} missing member to OpenProject_::_Add {n} missing members to OpenProject_": [
             "{n} ontbrekend lid aan OpenProject toevoegen",
             "{n} ontbrekende leden aan OpenProject toevoegen"
         ],
-        "{n} member is in step on both sides.": [
+        "_{n} member is in step on both sides._::_{n} members are in step on both sides._": [
             "{n} lid is aan beide kanten gelijk.",
             "{n} leden zijn aan beide kanten gelijk."
         ],
-        "OpenProject refused {n} member.": [
+        "_OpenProject refused {n} member._::_OpenProject refused {n} members._": [
             "OpenProject heeft {n} lid geweigerd.",
             "OpenProject heeft {n} leden geweigerd."
         ],
-        "Added {n} member to the project.": [
+        "_Added {n} member to the project._::_Added {n} members to the project._": [
             "{n} lid aan het project toegevoegd.",
             "{n} leden aan het project toegevoegd."
         ],
@@ -4706,22 +4722,22 @@
         "{source} answered slowly, so not every project was read this time. Refresh to try again.": "{source} antwoordde traag, dus niet elk project is deze keer gelezen. Vernieuw om het opnieuw te proberen.",
         "{source} no longer accepts your connection. Reconnect your account in your personal settings.": "{source} accepteert je verbinding niet meer. Verbind je account opnieuw in je persoonlijke instellingen.",
         "Opens in {app}, in a new tab": "Opent in {app}, in een nieuw tabblad",
-        "Milestone in {n} day: {subject}": [
+        "_Milestone in {n} day: {subject}_::_Milestone in {n} days: {subject}_": [
             "Mijlpaal over {n} dag: {subject}",
             "Mijlpaal over {n} dagen: {subject}"
         ],
         "Milestone today: {subject}": "Mijlpaal vandaag: {subject}",
         "Your attention": "Voor jou",
         "{n} of your work packages due within {days} days, {today} today": "{n} van je werkpakketten vervallen binnen {days} dagen, {today} vandaag",
-        "{n} of your work packages is due within {days} days": [
+        "_{n} of your work packages is due within {days} days_::_{n} of your work packages are due within {days} days_": [
             "{n} van je werkpakketten vervalt binnen {days} dagen",
             "{n} van je werkpakketten vervallen binnen {days} dagen"
         ],
-        "{n} of your work packages is overdue": [
+        "_{n} of your work packages is overdue_::_{n} of your work packages are overdue_": [
             "{n} van je werkpakketten is te laat",
             "{n} van je werkpakketten zijn te laat"
         ],
-        "{n} work package changed in the last 7 days": [
+        "_{n} work package changed in the last 7 days_::_{n} work packages changed in the last 7 days_": [
             "{n} werkpakket gewijzigd in de laatste 7 dagen",
             "{n} werkpakketten gewijzigd in de laatste 7 dagen"
         ],
@@ -4734,12 +4750,12 @@
         "All projects": "Alle projecten",
         "All work types": "Alle werktypen",
         "Work type": "Werktype",
-        "Overdue by %n day": [
+        "_Overdue by %n day_::_Overdue by %n days_": [
             "%n dag te laat",
             "%n dagen te laat"
         ],
         "Due tomorrow": "Morgen",
-        "Due in %n day": [
+        "_Due in %n day_::_Due in %n days_": [
             "Over %n dag",
             "Over %n dagen"
         ],
@@ -4748,7 +4764,7 @@
         "Completed in OpenProject": "Afgerond in OpenProject",
         "Milestone today": "Mijlpaal vandaag",
         "Milestone tomorrow": "Mijlpaal morgen",
-        "Milestone in %n day": [
+        "_Milestone in %n day_::_Milestone in %n days_": [
             "Mijlpaal over %n dag",
             "Mijlpaal over %n dagen"
         ],
@@ -4998,7 +5014,7 @@
         "This workflow is blocked; lift the block first.": "Deze workflow is geblokkeerd; hef de blokkade eerst op.",
         "You are not part of this workflow.": "Je maakt geen deel uit van deze workflow.",
         "Workflow not found.": "Workflow niet gevonden.",
-        "You already asked for an update on this step; you can ask again in %n hour.": [
+        "_You already asked for an update on this step; you can ask again in %n hour._::_You already asked for an update on this step; you can ask again in %n hours._": [
             "Je hebt al om een update gevraagd bij deze stap; je kunt over %n uur opnieuw vragen.",
             "Je hebt al om een update gevraagd bij deze stap; je kunt over %n uur opnieuw vragen."
         ],
@@ -5145,15 +5161,15 @@
         "That team does not answer requests.": "Dat team behandelt geen aanvragen.",
         "The service team creates the team": "Het serviceteam maakt het team aan",
         "The owner or a moderator of the team you ask from approves the request; the service team then creates the team and you confirm it.": "De eigenaar of een moderator van het team waaruit je aanvraagt keurt de aanvraag goed; daarna maakt het serviceteam het team aan en bevestig jij het.",
-        "%n person can work the queue.": [
+        "_%n person can work the queue._::_%n people can work the queue._": [
             "%n persoon kan de wachtrij afwerken.",
             "%n personen kunnen de wachtrij afwerken."
         ],
-        "%n person can work the queue right now.": [
+        "_%n person can work the queue right now._::_%n people can work the queue right now._": [
             "%n persoon kan de wachtrij nu afwerken.",
             "%n personen kunnen de wachtrij nu afwerken."
         ],
-        "{n} person can work the queue.": [
+        "_{n} person can work the queue._::_{n} people can work the queue._": [
             "{n} persoon kan de wachtrij afwerken.",
             "{n} personen kunnen de wachtrij afwerken."
         ],
@@ -5210,7 +5226,7 @@
         "%s is now in TeamHub": "%s staat nu in TeamHub",
         "{team} was not added to TeamHub": "{team} is niet aan TeamHub toegevoegd",
         "%s was not added to TeamHub": "%s is niet aan TeamHub toegevoegd",
-        "{n} to review": [
+        "_{n} to review_::_{n} to review_": [
             "{n} om na te kijken",
             "{n} om na te kijken"
         ],
@@ -5391,7 +5407,7 @@
         "%s answered your review request": "%s heeft je reviewaanvraag beantwoord",
         "%s has been archived.": "%s is gearchiveerd.",
         "%s still stands.": "%s blijft staan.",
-        "Reviewed every month": [
+        "_Reviewed every month_::_Reviewed every {n} months_": [
             "Elke maand gereviewd",
             "Elke {n} maanden gereviewd"
         ],
@@ -5536,7 +5552,7 @@
         "The team was created, but not everything finished: {error}": "Het team is aangemaakt, maar niet alles is afgerond: {error}",
         "Could not create the team. Try again.": "Kon het team niet aanmaken. Probeer het opnieuw.",
         "Could not decline the group. Try again.": "Kon de groep niet afwijzen. Probeer het opnieuw.",
-        "%n person": [
+        "_%n person_::_%n people_": [
             "%n persoon",
             "%n personen"
         ],
@@ -5658,7 +5674,7 @@
         "Only its own members and this team's administrators know it exists.": "Alleen de eigen leden en de beheerders van dit team weten dat het bestaat.",
         "Members are picked from this team. You can invite people from outside once the sub-team exists.": "Leden kies je uit dit team. Mensen van buiten kunt u uitnodigen zodra het subteam bestaat.",
         "A sub-team is a smaller group inside this team, with its own files and its own members. You pick who is in it from this team, and you can invite people from outside. Everything about a sub-team is managed from here.": "Een subteam is een kleinere groep binnen dit team, met eigen bestanden en eigen leden. U kiest de leden uit dit team en kunt mensen van buiten uitnodigen. Alles rond een subteam beheert u hier.",
-        "{n} member": [
+        "_{n} member_::_{n} members_": [
             "{n} lid",
             "{n} leden"
         ],
@@ -5728,7 +5744,7 @@
         "Failed to remove banner: {error}": "Mislukt om banner te verwijderen: {error}",
         "Open team maintenance to request an extension": "Open teamonderhoud om verlenging aan te vragen",
         "This team passed its expiration date on {date}.": "Dit team is op {date} verlopen.",
-        "This team expires in %n day.": [
+        "_This team expires in %n day._::_This team expires in %n days._": [
             "Dit team verloopt over %n dag.",
             "Dit team verloopt over %n dagen."
         ],
@@ -5736,7 +5752,7 @@
         "Compliment {name}": "Compliment voor {name}",
         "They will see this the next time they open TeamHub.": "Ze zien dit de volgende keer dat ze TeamHub openen.",
         "Say what they did well": "Vertel wat ze goed hebben gedaan",
-        "%n character left": [
+        "_%n character left_::_%n characters left_": [
             "Nog %n teken",
             "Nog %n tekens"
         ],
@@ -5744,12 +5760,12 @@
         "Compliment sent to {name}": "Compliment verstuurd naar {name}",
         "Could not send the compliment": "Kon het compliment niet versturen",
         "Could not send the compliment: {error}": "Kon het compliment niet versturen: {error}",
-        "A compliment for you": [
+        "_A compliment for you_::_%n compliments for you_": [
             "Een compliment voor jou",
             "%n complimenten voor jou"
         ],
         "{name} sent you a compliment.": "{name} heeft je een compliment gegeven.",
-        "%n person sent you a compliment.": [
+        "_%n person sent you a compliment._::_%n people sent you a compliment._": [
             "%n persoon heeft je een compliment gegeven.",
             "%n personen hebben je een compliment gegeven."
         ],
@@ -5847,7 +5863,7 @@
         "Review became due": "Beoordeling werd verschuldigd",
         "Team admin confirms the list": "Teambeheerder bevestigt de lijst",
         "Membership confirmed. The review is recorded with your name and today's date.": "Lidmaatschap bevestigd. De beoordeling is vastgelegd met uw naam en de datum van vandaag.",
-        "Reviewed every %n month. This team has not been reviewed yet.": [
+        "_Reviewed every %n month. This team has not been reviewed yet._::_Reviewed every %n months. This team has not been reviewed yet._": [
             "Elke %n maand beoordeeld. Dit team is nog niet beoordeeld.",
             "Elke %n maanden beoordeeld. Dit team is nog niet beoordeeld."
         ],
@@ -5878,11 +5894,11 @@
         "Teams using it": "Teams die het gebruiken",
         "Show the teams using {app}": "Toon de teams die {app} gebruiken",
         "Could not build the integrations register.": "Kon het integratieregister niet opbouwen.",
-        "{n} row written since the last hourly pass is not chained yet": [
+        "_{n} row written since the last hourly pass is not chained yet_::_{n} rows written since the last hourly pass are not chained yet_": [
             "{n} regel geschreven sinds de laatste uurlijkse ronde is nog niet geketend",
             "{n} regels geschreven sinds de laatste uurlijkse ronde zijn nog niet geketend"
         ],
-        "{n} row predates this feature and can never be verified": [
+        "_{n} row predates this feature and can never be verified_::_{n} rows predate this feature and can never be verified_": [
             "{n} regel is ouder dan deze functie en kan nooit worden gecontroleerd",
             "{n} regels zijn ouder dan deze functie en kunnen nooit worden gecontroleerd"
         ],
@@ -5978,32 +5994,32 @@
         "{title} is included in {template}.": "{title} is opgenomen in {template}.",
         "{title} is no longer included in {template}. Nothing was deleted.": "{title} is niet meer opgenomen in {template}. Er is niets verwijderd.",
         "{title} is shown in this team.": "{title} wordt weergegeven in dit team.",
-        "%n team has previously hidden one of these and will keep it hidden.": [
+        "_%n team has previously hidden one of these and will keep it hidden._::_%n teams have previously hidden one of these and will keep them hidden._": [
             "%n team heeft er eerder een van verborgen en houdt die verborgen.",
             "%n teams hebben er eerder een van verborgen en houden die verborgen."
         ],
-        "%n widget": [
+        "_%n widget_::_%n widgets_": [
             "%n widget",
             "%n widgets"
         ],
-        "%n team tab": [
+        "_%n team tab_::_%n team tabs_": [
             "%n teamtabblad",
             "%n teamtabbladen"
         ],
-        "%n My Work source": [
+        "_%n My Work source_::_%n My Work sources_": [
             "%n bron voor Mijn werk",
             "%n bronnen voor Mijn werk"
         ],
-        "The integration was notified about every team but one, which reported a problem.": [
+        "_The integration was notified about every team but one, which reported a problem._::_The integration was notified, but {failed} teams reported a problem._": [
             "De integratie is op de hoogte gebracht van alle teams op één na, dat een probleem meldde.",
             "De integratie is op de hoogte gebracht, maar {failed} teams meldden een probleem."
         ],
-        "{n} integration enabled": [
+        "_{n} integration enabled_::_{n} integrations enabled_": [
             "{n} integratie ingeschakeld",
             "{n} integraties ingeschakeld"
         ],
         "\"{name}\" will no longer be offered when someone creates a team.": "\"{name}\" wordt niet langer aangeboden wanneer iemand een team aanmaakt.",
-        "%n team was created from it. It keeps every app, module and setting it was created with.": [
+        "_%n team was created from it. It keeps every app, module and setting it was created with._::_%n teams were created from it. They keep every app, module and setting they were created with._": [
             "%n team is hiermee aangemaakt. Het houdt elke app, module en instelling waarmee het is aangemaakt.",
             "%n teams zijn hiermee aangemaakt. Zij houden elke app, module en instelling waarmee ze zijn aangemaakt."
         ],
@@ -6020,7 +6036,7 @@
         "New template": "Nieuw sjabloon",
         "Template created. Its integrations can be included below.": "Sjabloon aangemaakt. De integraties ervan kunnen hieronder worden opgenomen.",
         "Template deleted.": "Sjabloon verwijderd.",
-        "Template deleted. %n existing team keeps what it was created with.": [
+        "_Template deleted. %n existing team keeps what it was created with._::_Template deleted. %n existing teams keep what they were created with._": [
             "Sjabloon verwijderd. %n bestaand team houdt waarmee het is aangemaakt.",
             "Sjabloon verwijderd. %n bestaande teams houden waarmee ze zijn aangemaakt."
         ],
@@ -6034,15 +6050,15 @@
         "This widget has no address to load.": "Deze widget heeft geen adres om te laden.",
         "Created from the {template} template.": "Gemaakt vanuit het sjabloon {template}.",
         "The team was created, but its template could not be saved. Integrations and the expiration date that come with the template will not apply until an administrator sets the template again.": "Het team is aangemaakt, maar het sjabloon kon niet worden opgeslagen. Integraties en de einddatum die bij het sjabloon horen, gelden pas wanneer een beheerder het sjabloon opnieuw instelt.",
-        "No member report has reached the licensing service for {n} day.": [
+        "_No member report has reached the licensing service for {n} day._::_No member report has reached the licensing service for {n} days._": [
             "Er is {n} dag geen ledenrapport bij de licentieservice aangekomen.",
             "Er is {n} dagen geen ledenrapport bij de licentieservice aangekomen."
         ],
-        "No member report for {n} day. Action needed.": [
+        "_No member report for {n} day. Action needed._::_No member report for {n} days. Action needed._": [
             "Al {n} dag geen ledenrapport. Actie nodig.",
             "Al {n} dagen geen ledenrapport. Actie nodig."
         ],
-        "Advanced features are locked: no member report for {n} day.": [
+        "_Advanced features are locked: no member report for {n} day._::_Advanced features are locked: no member report for {n} days._": [
             "Geavanceerde functies zijn vergrendeld: al {n} dag geen ledenrapport.",
             "Geavanceerde functies zijn vergrendeld: al {n} dagen geen ledenrapport."
         ],
@@ -6167,76 +6183,76 @@
         "Home layout removed. Teams of this template open with the layout TeamHub ships.": "Indeling van Home verwijderd. Teams van dit sjabloon openen met de indeling die TeamHub meelevert.",
         "Could not save the home layout.": "Kon de indeling van Home niet opslaan.",
         "Teams of this template open with the layout TeamHub ships.": "Teams van dit sjabloon openen met de indeling die TeamHub meelevert.",
-        "Teams of this template open with a layout of %n card.": [
+        "_Teams of this template open with a layout of %n card._::_Teams of this template open with a layout of %n cards._": [
             "Teams van dit sjabloon openen met een indeling van %n kaart.",
             "Teams van dit sjabloon openen met een indeling van %n kaarten."
         ],
-        "No member of this team has an email address on their account.": "No member of this team has an email address on their account.",
-        "{n} team member has no email address and will not receive this.": [
-            "{n} team member has no email address and will not receive this.",
-            "{n} team members have no email address and will not receive this."
+        "No member of this team has an email address on their account.": "Geen enkel lid van dit team heeft een e-mailadres in het account.",
+        "_{n} team member has no email address and will not receive this._::_{n} team members have no email address and will not receive this._": [
+            "{n} teamlid heeft geen e-mailadres en ontvangt dit niet.",
+            "{n} teamleden hebben geen e-mailadres en ontvangen dit niet."
         ],
-        "Workstream name": "Workstream name",
-        "Allocated budget for {lane}": "Allocated budget for {lane}",
-        "Available hours for {name}": "Available hours for {name}",
-        "Search team members": "Search team members",
-        "Bulk team export": "Bulk team export",
-        "Write teams out to a CSV file in the importer’s own format, either all of them or a selection.": "Write teams out to a CSV file in the importer’s own format, either all of them or a selection.",
-        "Expiration date for {name}": "Expiration date for {name}",
-        "Remove the expiration date entirely": "Remove the expiration date entirely",
-        "Change the expiration date for {name}": "Change the expiration date for {name}",
-        "Set an expiration date for {name}": "Set an expiration date for {name}",
-        "Requested by": "Requested by",
-        "Requested until": "Requested until",
-        "Note to the requester": "Note to the requester",
-        "Optional: required reading if you deny": "Optional: required reading if you deny",
-        "Set date": "Set date",
-        "Expired {date}": "Expired {date}",
-        "No expiration date. Click to set one.": "No expiration date. Click to set one.",
-        "This date has passed. The team still works normally. Nothing is deleted automatically. Click to set a new date.": "This date has passed. The team still works normally. Nothing is deleted automatically. Click to set a new date.",
-        "Expires in {n} day. Click to change or clear the date.": [
-            "Expires in {n} day. Click to change or clear the date.",
-            "Expires in {n} days. Click to change or clear the date."
+        "Workstream name": "Naam van de werkstroom",
+        "Allocated budget for {lane}": "Toegewezen budget voor {lane}",
+        "Available hours for {name}": "Beschikbare uren voor {name}",
+        "Search team members": "Teamleden zoeken",
+        "Bulk team export": "Teams bulksgewijs exporteren",
+        "Write teams out to a CSV file in the importer’s own format, either all of them or a selection.": "Schrijf teams weg naar een CSV-bestand in de indeling van de importfunctie: allemaal of een selectie.",
+        "Expiration date for {name}": "Vervaldatum voor {name}",
+        "Remove the expiration date entirely": "Vervaldatum helemaal verwijderen",
+        "Change the expiration date for {name}": "Vervaldatum voor {name} wijzigen",
+        "Set an expiration date for {name}": "Vervaldatum voor {name} instellen",
+        "Requested by": "Aangevraagd door",
+        "Requested until": "Aangevraagd tot",
+        "Note to the requester": "Opmerking voor de aanvrager",
+        "Optional: required reading if you deny": "Optioneel: bij afwijzing leest de aanvrager dit",
+        "Set date": "Datum instellen",
+        "Expired {date}": "Verlopen op {date}",
+        "No expiration date. Click to set one.": "Geen vervaldatum. Klik om er een in te stellen.",
+        "This date has passed. The team still works normally. Nothing is deleted automatically. Click to set a new date.": "Deze datum is verstreken. Het team werkt nog gewoon. Er wordt niets automatisch verwijderd. Klik om een nieuwe datum in te stellen.",
+        "_Expires in {n} day. Click to change or clear the date._::_Expires in {n} days. Click to change or clear the date._": [
+            "Verloopt over {n} dag. Klik om de datum te wijzigen of te wissen.",
+            "Verloopt over {n} dagen. Klik om de datum te wijzigen of te wissen."
         ],
-        "Pick a date, or use Clear to remove the expiration date.": "Pick a date, or use Clear to remove the expiration date.",
-        "Expiration date saved.": "Expiration date saved.",
-        "Expiration date removed.": "Expiration date removed.",
-        "Failed to save the expiration date: {error}": "Failed to save the expiration date: {error}",
-        "Failed to save the expiration date": "Failed to save the expiration date",
-        "Failed to load extension requests": "Failed to load extension requests",
-        "Extension approved. {team} now expires on {date}.": "Extension approved. {team} now expires on {date}.",
-        "Failed to approve the request: {error}": "Failed to approve the request: {error}",
-        "Failed to approve the request": "Failed to approve the request",
-        "Extension denied. {name} has been notified.": "Extension denied. {name} has been notified.",
-        "Failed to deny the request: {error}": "Failed to deny the request: {error}",
-        "Failed to deny the request": "Failed to deny the request",
-        "Importing this file back into the same server creates nothing: every team in it already exists, and the importer skips a name it already knows. Use it to move teams to another server, to build new teams by editing the rows first, or as a record of how things are set up today.": "Importing this file back into the same server creates nothing: every team in it already exists, and the importer skips a name it already knows. Use it to move teams to another server, to build new teams by editing the rows first, or as a record of how things are set up today.",
-        "What to export": "What to export",
-        "Every team on this server": "Every team on this server",
-        "Only the teams I pick": "Only the teams I pick",
-        "Search teams…": "Search teams…",
-        "Teams to export": "Teams to export",
-        "Check what will be exported": "Check what will be exported",
-        "Download CSV": "Download CSV",
-        "What the file will contain": "What the file will contain",
-        "{n} team will be written.": [
-            "{n} team will be written.",
-            "{n} teams will be written."
+        "Pick a date, or use Clear to remove the expiration date.": "Kies een datum, of gebruik Wissen om de vervaldatum te verwijderen.",
+        "Expiration date saved.": "Vervaldatum opgeslagen.",
+        "Expiration date removed.": "Vervaldatum verwijderd.",
+        "Failed to save the expiration date: {error}": "Opslaan van de vervaldatum mislukt: {error}",
+        "Failed to save the expiration date": "Opslaan van de vervaldatum mislukt",
+        "Failed to load extension requests": "Laden van verlengingsverzoeken mislukt",
+        "Extension approved. {team} now expires on {date}.": "Verlenging goedgekeurd. {team} verloopt nu op {date}.",
+        "Failed to approve the request: {error}": "Goedkeuren van het verzoek mislukt: {error}",
+        "Failed to approve the request": "Goedkeuren van het verzoek mislukt",
+        "Extension denied. {name} has been notified.": "Verlenging afgewezen. {name} heeft een melding gekregen.",
+        "Failed to deny the request: {error}": "Afwijzen van het verzoek mislukt: {error}",
+        "Failed to deny the request": "Afwijzen van het verzoek mislukt",
+        "Importing this file back into the same server creates nothing: every team in it already exists, and the importer skips a name it already knows. Use it to move teams to another server, to build new teams by editing the rows first, or as a record of how things are set up today.": "Dit bestand weer importeren op dezelfde server maakt niets aan: elk team erin bestaat al, en de import slaat een naam over die al bekend is. Gebruik het om teams naar een andere server te verplaatsen, om nieuwe teams te maken door eerst de rijen te bewerken, of om vast te leggen hoe alles nu is ingericht.",
+        "What to export": "Wat wil je exporteren",
+        "Every team on this server": "Alle teams op deze server",
+        "Only the teams I pick": "Alleen de teams die ik kies",
+        "Search teams…": "Teams zoeken…",
+        "Teams to export": "Te exporteren teams",
+        "Check what will be exported": "Controleren wat wordt geëxporteerd",
+        "Download CSV": "CSV downloaden",
+        "What the file will contain": "Wat het bestand bevat",
+        "_{n} team will be written._::_{n} teams will be written._": [
+            "{n} team wordt weggeschreven.",
+            "{n} teams worden weggeschreven."
         ],
-        "{n} of them cannot be imported again as-is: see below.": [
-            "{n} of them cannot be imported again as-is: see below.",
-            "{n} of them cannot be imported again as-is: see below."
+        "_{n} of them cannot be imported again as-is: see below._::_{n} of them cannot be imported again as-is: see below._": [
+            "{n} daarvan kan niet ongewijzigd opnieuw worden geïmporteerd: zie hieronder.",
+            "{n} daarvan kunnen niet ongewijzigd opnieuw worden geïmporteerd: zie hieronder."
         ],
-        "All of them can be imported again without editing.": "All of them can be imported again without editing.",
-        "What is missing": "What is missing",
-        "The file is written anyway: it is a faithful picture of what is on this server. A row that cannot be imported again is reported when you try, and the other rows are unaffected.": "The file is written anyway: it is a faithful picture of what is on this server. A row that cannot be imported again is reported when you try, and the other rows are unaffected.",
-        "The file lists the account names of every member of every exported team. Downloading one is recorded in the audit log, per team.": "The file lists the account names of every member of every exported team. Downloading one is recorded in the audit log, per team.",
-        "Checking the selection…": "Checking the selection…",
-        "Failed to load the team list": "Failed to load the team list",
-        "Failed to check the selection": "Failed to check the selection",
-        "Building the file. Your browser will save it when it is ready.": "Building the file. Your browser will save it when it is ready.",
-        "Remove this team?": "Remove this team?",
-        "Remove team": "Remove team",
+        "All of them can be imported again without editing.": "Ze kunnen allemaal zonder bewerking opnieuw worden geïmporteerd.",
+        "What is missing": "Wat ontbreekt",
+        "The file is written anyway: it is a faithful picture of what is on this server. A row that cannot be imported again is reported when you try, and the other rows are unaffected.": "Het bestand wordt toch gemaakt: het is een getrouwe weergave van wat er op deze server staat. Een rij die niet opnieuw kan worden geïmporteerd, wordt gemeld zodra je het probeert. De andere rijen hebben daar geen last van.",
+        "The file lists the account names of every member of every exported team. Downloading one is recorded in the audit log, per team.": "Het bestand bevat de accountnamen van alle leden van elk geëxporteerd team. Een download wordt per team vastgelegd in de auditlog.",
+        "Checking the selection…": "Selectie controleren…",
+        "Failed to load the team list": "Laden van de teamlijst mislukt",
+        "Failed to check the selection": "Controleren van de selectie mislukt",
+        "Building the file. Your browser will save it when it is ready.": "Het bestand wordt gemaakt. Je browser slaat het op zodra het klaar is.",
+        "Remove this team?": "Dit team verwijderen?",
+        "Remove team": "Team verwijderen",
         "Edit team layout": "Teamindeling bewerken",
         "Publish team layout": "Teamindeling publiceren",
         "Team layout published": "Teamindeling gepubliceerd",
@@ -6293,7 +6309,7 @@
         "Could not load birthdays.": "Verjaardagen konden niet worden geladen.",
         "No upcoming birthdays to show.": "Geen komende verjaardagen om te tonen.",
         "Happy birthday, {name}!": "Gefeliciteerd met je verjaardag, {name}!",
-        "Wishing you a wonderful day from everyone at TeamHub!": "Namens iedereen bij TeamHub wensen we je een fantastische dag!",
+        "Wishing you a wonderful day from all your colleagues.": "Al je collega’s wensen je een fantastische dag.",
         "Birthday sharing controls the Department birthday widget and birthday celebration. Work anniversary and people-directory sharing will be used by future features.": "Met de instelling voor het delen van je verjaardag bepaal je of je in de verjaardagswidget van je afdeling verschijnt en de verjaardagsviering ziet. De instellingen voor werkjubilea en de collega-gids worden in latere functies gebruikt.",
         "Nextcloud account start date": "Startdatum Nextcloud-account",
         "Account creation date when recorded; otherwise first login if known. This is not your employment start date.": "Datum van aanmaak van het account, anders de eerste aanmelding indien bekend. Dit is niet je indiensttredingsdatum.",
@@ -6355,7 +6371,7 @@
         "Clear list": "Lijst wissen",
         "Clear the list of recent imports": "De lijst met recente imports wissen",
         "The list could not be cleared.": "De lijst kon niet worden gewist.",
-        "{n} import removed from the list": ["{n} import uit de lijst verwijderd", "{n} imports uit de lijst verwijderd"],
+        "_{n} import removed from the list_::_{n} imports removed from the list_": ["{n} import uit de lijst verwijderd", "{n} imports uit de lijst verwijderd"],
         "Off disables Nextcloud’s own Teams app: its navigation entry, its pages and its dashboard widget stop answering, so a team is managed in TeamHub only. Leave it on if you use the Collectives app, which manages a collective’s members through that same frontend.": "Uit schakelt de eigen Teams-app van Nextcloud uit: het navigatie-item, de pagina’s en de dashboardwidget reageren niet meer, zodat een team alleen in TeamHub wordt beheerd. Laat het aan staan als je de Collectives-app gebruikt, die de leden van een collectief via diezelfde frontend beheert.",
         "Give every category a name of its own to save the list.": "Geef elke categorie een eigen naam om de lijst op te slaan.",
         "Full": "Volledig",
@@ -6366,7 +6382,7 @@
         "All statuses": "Alle statussen",
         "Clear the status filter": "Statusfilter wissen",
         "No member has the selected status this week.": "Geen lid heeft deze week de geselecteerde status.",
-        "Showing {shown} of {total} member": [
+        "_Showing {shown} of {total} member_::_Showing {shown} of {total} members_": [
             "{shown} van {total} lid weergegeven",
             "{shown} van {total} leden weergegeven"
         ],
@@ -6383,7 +6399,7 @@
             "{count} leden in {status} op {day}"
         ],
         "Show the selected statuses for {day}": "Toon de geselecteerde statussen voor {day}",
-        "{status}, {count} member on {day}": [
+        "_{status}, {count} member on {day}_::_{status}, {count} members on {day}_": [
             "{status}, {count} lid op {day}",
             "{status}, {count} leden op {day}"
         ],
@@ -6412,15 +6428,15 @@
         "Could not remove the shift.": "Kon de dienst niet verwijderen.",
         "Could not take the shift.": "Kon de dienst niet overnemen.",
         "Could not publish the roster.": "Kon het rooster niet publiceren.",
-        "{count} shift is still a draft": [
+        "_{count} shift is still a draft_::_{count} shifts are still a draft_": [
             "{count} dienst is nog een concept",
             "{count} diensten zijn nog een concept"
         ],
-        "{count} place still open on {day}": [
+        "_{count} place still open on {day}_::_{count} places still open on {day}_": [
             "{count} plek nog open op {day}",
             "{count} plekken nog open op {day}"
         ],
-        "{count} more person needed": [
+        "_{count} more person needed_::_{count} more people needed_": [
             "{count} persoon meer nodig",
             "{count} personen meer nodig"
         ],
@@ -6458,7 +6474,7 @@
         "Could not save the schedule.": "Kon het schema niet opslaan.",
         "Could not delete the schedule.": "Kon het schema niet verwijderen.",
         "Delete the schedule {name}? Rosters already planned from it stay as they are.": "Schema {name} verwijderen? Roosters die er al mee zijn gepland blijven zoals ze zijn.",
-        "{count} shift a week": [
+        "_{count} shift a week_::_{count} shifts a week_": [
             "{count} dienst per week",
             "{count} diensten per week"
         ],
@@ -6523,7 +6539,7 @@
         "{name} is asking to be replaced. Show why.": "{name} vraagt om vervanging. Toon waarom.",
         "Take the {shift} shift over from {name}": "Neem de dienst {shift} over van {name}",
         "Could not invite {names}": "Kon {names} niet uitnodigen",
-        "{n} person already had an invite": [
+        "_{n} person already had an invite_::_{n} people already had an invite_": [
             "{n} persoon had al een uitnodiging",
             "{n} personen hadden al een uitnodiging"
         ],
@@ -6548,7 +6564,7 @@
         "Build one under Manage team, Module settings. A template says which roles you need on which days.": "Maak er een onder Team beheren, Module-instellingen. Een template zegt welke rollen je op welke dagen nodig hebt.",
         "Pick a template": "Kies een template",
         "{name} ({count}), set by an administrator": "{name} ({count}), ingesteld door een beheerder",
-        "{count} person": [
+        "_{count} person_::_{count} people_": [
             "{count} persoon",
             "{count} personen"
         ],
@@ -6568,20 +6584,20 @@
         "Failed to repair member ids: {error}": "Kon de lid-ID's niet herstellen: {error}",
         "Repair member ids": "Lid-ID's herstellen",
         "Repairing": "Bezig met herstellen",
-        "The owner row of this team carries a member id Nextcloud Teams refuses, so the team cannot be shared with another server. {n} row will be given a valid id.": [
+        "_The owner row of this team carries a member id Nextcloud Teams refuses, so the team cannot be shared with another server. {n} row will be given a valid id._::_The owner row of this team carries a member id Nextcloud Teams refuses, so the team cannot be shared with another server. {n} rows will be given a valid id._": [
             "De eigenaarsregel van dit team heeft een lid-ID dat Nextcloud Teams weigert, waardoor het team niet met een andere server kan worden gedeeld. {n} regel krijgt een geldig ID.",
             "De eigenaarsregel van dit team heeft een lid-ID dat Nextcloud Teams weigert, waardoor het team niet met een andere server kan worden gedeeld. {n} regels krijgen een geldig ID."
         ],
-        "{n} member row of this team carries a member id Nextcloud Teams refuses.": [
+        "_{n} member row of this team carries a member id Nextcloud Teams refuses._::_{n} member rows of this team carry a member id Nextcloud Teams refuses._": [
             "{n} ledenregel van dit team heeft een lid-ID dat Nextcloud Teams weigert.",
             "{n} ledenregels van dit team hebben een lid-ID dat Nextcloud Teams weigert."
         ],
-        "{n} member row repaired. The team can be shared with another server again.": [
+        "_{n} member row repaired. The team can be shared with another server again._::_{n} member rows repaired. The team can be shared with another server again._": [
             "{n} ledenregel hersteld. Het team kan weer met een andere server worden gedeeld.",
             "{n} ledenregels hersteld. Het team kan weer met een andere server worden gedeeld."
         ],
         "Add my shifts to my calendar": "Mijn diensten aan mijn agenda toevoegen",
-        "Add {count} shift": [
+        "_Add {count} shift_::_Add {count} shifts_": [
             "{count} dienst toevoegen",
             "{count} diensten toevoegen"
         ],
@@ -6594,11 +6610,11 @@
         "Show these hours as": "Deze uren tonen als",
         "Somebody planning a meeting sees you are not available.": "Wie een vergadering plant, ziet dat je niet beschikbaar bent.",
         "You have no calendar of your own to add shifts to. Create one in Calendar first.": "Je hebt geen eigen agenda om diensten aan toe te voegen. Maak er eerst een aan in Agenda.",
-        "{count} shift could not be added to your calendar.": [
+        "_{count} shift could not be added to your calendar._::_{count} shifts could not be added to your calendar._": [
             "{count} dienst kon niet aan je agenda worden toegevoegd.",
             "{count} diensten konden niet aan je agenda worden toegevoegd."
         ],
-        "{count} shift is in your calendar": [
+        "_{count} shift is in your calendar_::_{count} shifts are in your calendar_": [
             "{count} dienst staat in je agenda",
             "{count} diensten staan in je agenda"
         ],
@@ -6650,7 +6666,7 @@
         "Intended TeamHub seats": "Beoogd aantal TeamHub-plaatsen",
         "Enter a number of seats between 1 and {max}.": "Voer een aantal plaatsen in tussen 1 en {max}.",
         "The number of people you expect to use TeamHub. An estimate is fine.": "Het aantal mensen dat TeamHub naar verwachting gaat gebruiken. Een schatting is prima.",
-        "Keep the comment under {n} character.": ["Houd de opmerking onder {n} teken.", "Houd de opmerking onder {n} tekens."],
+        "_Keep the comment under {n} character._::_Keep the comment under {n} characters._": ["Houd de opmerking onder {n} teken.", "Houd de opmerking onder {n} tekens."],
         "Billing preference, a deadline, an existing Nextcloud provider, or a question.": "Factuurvoorkeur, een deadline, een bestaande Nextcloud-provider of een vraag.",
         "The request also carries this server’s instance UUID and its number of unique team members, so the quotation can be bound to this server. No names and no team content are sent.": "De aanvraag bevat ook de instance-UUID van deze server en het aantal unieke teamleden, zodat de offerte aan deze server gekoppeld kan worden. Er worden geen namen en geen teaminhoud verstuurd.",
         "Too many requests from this server. Try again later, or send the request by email.": "Te veel aanvragen vanaf deze server. Probeer het later opnieuw, of stuur de aanvraag per e-mail.",
@@ -6691,7 +6707,579 @@
         "Let members write one email to the whole team from the team menu in the sidebar.": "Laat leden vanuit het teammenu in de zijbalk één e-mail naar het hele team sturen.",
         "Allow emailing all members of this team": "E-mailen naar alle leden van dit team toestaan",
         "Could not save the email setting. Try again.": "Kon de e-mailinstelling niet opslaan. Probeer het opnieuw.",
-        "Emailing all members is switched off for this team.": "E-mailen naar alle leden is uitgeschakeld voor dit team."
+        "Emailing all members is switched off for this team.": "E-mailen naar alle leden is uitgeschakeld voor dit team.",
+        "Expand banner": "Banner uitklappen",
+        "Collapse banner": "Banner inklappen",
+        "You are not a participant in the team conversation.": "Je bent geen deelnemer aan het teamgesprek.",
+        "Could not load the team conversation.": "Kon het teamgesprek niet laden.",
+        "Open polls": "Open peilingen",
+        "_Choose up to {n} option_::_Choose up to {n} options_": ["Kies maximaal {n} optie","Kies maximaal {n} opties"],
+        "Vote": "Stemmen",
+        "Your vote": "Jouw stem",
+        "You are up to date": "Je bent helemaal bij",
+        "_{n} unread message, you were mentioned_::_{n} unread messages, you were mentioned_": ["{n} ongelezen bericht, je bent genoemd","{n} ongelezen berichten, je bent genoemd"],
+        "_{n} unread message_::_{n} unread messages_": ["{n} ongelezen bericht","{n} ongelezen berichten"],
+        "Call in progress": "Gesprek bezig",
+        "Call in progress since {time}": "Gesprek bezig sinds {time}",
+        "Could not send your vote.": "Kon je stem niet versturen.",
+        "Chat views": "Chatweergaven",
+        "_{n} poll awaits your vote_::_{n} polls await your vote_": ["{n} peiling wacht op je stem","{n} peilingen wachten op je stem"],
+        "No open polls": "Geen open peilingen",
+        "Thread": "Draad",
+        "{name}: {message}": "{name}: {message}",
+        "Threads": "Draden",
+        "No threads yet": "Nog geen draden",
+        "Communication": "Communicatie",
+        "Meet now": "Nu vergaderen",
+        "_%n room booked at this time_::_%n rooms booked at this time_": ["%n ruimte bezet op dit tijdstip","%n ruimtes bezet op dit tijdstip"],
+        "_%n room is free and fits everyone_::_%n rooms are free and fit everyone_": ["%n ruimte is vrij en past voor iedereen","%n ruimtes zijn vrij en passen voor iedereen"],
+        "_%n room is too small_::_%n rooms are too small_": ["%n ruimte is te klein","%n ruimtes zijn te klein"],
+        "_%n seat_::_%n seats_": ["%n plaats","%n plaatsen"],
+        "Availability unknown": "Beschikbaarheid onbekend",
+        "Best fit": "Beste keuze",
+        "Booked": "Bezet",
+        "Booked for the rest of the day": "Bezet voor de rest van de dag",
+        "Bookings for {room} between {start} and {end}": "Boekingen van {room} tussen {start} en {end}",
+        "Building": "Gebouw",
+        "Capacity not set": "Capaciteit niet ingesteld",
+        "Checking availability": "Beschikbaarheid controleren",
+        "Choose a building": "Kies een gebouw",
+        "Choose a building to see which rooms are free.": "Kies een gebouw om te zien welke ruimtes vrij zijn.",
+        "Could not check room availability": "Kon de beschikbaarheid van ruimtes niet controleren",
+        "Free again at {time}": "Weer vrij om {time}",
+        "_No free room fits %n person at this time_::_No free room fits %n people at this time_": ["Geen vrije ruimte voor %n persoon op dit tijdstip","Geen vrije ruimte voor %n personen op dit tijdstip"],
+        "No rooms match the search.": "Geen ruimtes gevonden.",
+        "Other rooms": "Overige ruimtes",
+        "Pick a date and time first to see which rooms are free.": "Kies eerst een datum en tijd om te zien welke ruimtes vrij zijn.",
+        "Search rooms": "Ruimtes zoeken",
+        "Show %n more room": ["Nog %n ruimte tonen","Nog %n ruimtes tonen"],
+        "Video conferencing": "Videovergaderen",
+        "{room} is booked at this time. Pick another room or time.": "{room} is op dit tijdstip bezet. Kies een andere ruimte of tijd.",
+        "_%n room fits everyone_::_%n rooms fit everyone_": ["%n ruimte past voor iedereen","%n ruimtes passen voor iedereen"],
+        "_Show all %n room_::_Show all %n rooms_": ["%n ruimte tonen","Alle %n ruimtes tonen"],
+        "All floors": "Alle verdiepingen",
+        "Floor": "Verdieping",
+        "Free for the rest of the day": "Vrij voor de rest van de dag",
+        "Free until {time}": "Vrij tot {time}",
+        "Picking a room on this day also moves the meeting to {date}.": "Als je op deze dag een ruimte kiest, wordt de vergadering ook verplaatst naar {date}.",
+        "Remove room": "Ruimte verwijderen",
+        "Select the room to book it, or choose another one.": "Selecteer de ruimte om hem te boeken, of kies een andere.",
+        "{date} from {start} to {end}": "{date} van {start} tot {end}",
+        "After": "Na",
+        "Choose the last date of the series.": "Kies de laatste datum van de reeks.",
+        "Daily": "Dagelijks",
+        "Does not repeat": "Herhaalt niet",
+        "Enter a number between 1 and 99.": "Voer een getal tussen 1 en 99 in.",
+        "Enter a number of times between 1 and 500.": "Voer een aantal keer tussen 1 en 500 in.",
+        "Every": "Elke",
+        "Last date": "Laatste datum",
+        "Monthly": "Maandelijks",
+        "Number of times": "Aantal keer",
+        "On date": "Op datum",
+        "On day {day}": "Op dag {day}",
+        "On the first {weekday}": "Op de eerste {weekday}",
+        "On the second {weekday}": "Op de tweede {weekday}",
+        "On the third {weekday}": "Op de derde {weekday}",
+        "On the fourth {weekday}": "Op de vierde {weekday}",
+        "On the last {weekday}": "Op de laatste {weekday}",
+        "Repeat": "Herhalen",
+        "Repeat on": "Herhalen op",
+        "The last date is before the first meeting.": "De laatste datum ligt voor de eerste vergadering.",
+        "Weekly": "Wekelijks",
+        "Yearly": "Jaarlijks",
+        "_day_::_days_": ["dag","dagen"],
+        "_week_::_weeks_": ["week","weken"],
+        "_month_::_months_": ["maand","maanden"],
+        "_year_::_years_": ["jaar","jaar"],
+        "_time_::_times_": ["keer","keer"],
+        "_%n room is free for the next {minutes} minutes_::_%n rooms are free for the next {minutes} minutes_": ["%n ruimte is de komende {minutes} minuten vrij","%n ruimtes zijn de komende {minutes} minuten vrij"],
+        "Book": "Boeken",
+        "Book {room}": "{room} boeken",
+        "Failed to book the room": "Kon de ruimte niet boeken",
+        "Failed to book the room: {error}": "Kon de ruimte niet boeken: {error}",
+        "For": "Voor",
+        "Free room now": "Nu een vrije ruimte",
+        "No bookable rooms": "Geen boekbare ruimtes",
+        "_No room is free for the next %n minute._::_No room is free for the next %n minutes._": ["Geen ruimte is de komende %n minuut vrij.","Geen ruimte is de komende %n minuten vrij."],
+        "Quick meeting": "Kort overleg",
+        "Rooms you can walk into now. Book one in a click.": "Ruimtes waar je nu naar binnen kunt. Boek er een met één klik.",
+        "Your Nextcloud has no meeting rooms you can book.": "Je Nextcloud heeft geen vergaderruimtes die je kunt boeken.",
+        "{room} is booked until {time}": "{room} is geboekt tot {time}",
+        "{room} was just booked by someone else. Pick another room.": "{room} is net door iemand anders geboekt. Kies een andere ruimte.",
+        "_%n of {total} accepted_::_%n of {total} accepted_": ["%n van {total} geaccepteerd","%n van {total} geaccepteerd"],
+        "Details of {room}": "Details van {room}",
+        "Equipment": "Voorzieningen",
+        "Organizer": "Organisator",
+        "Projector": "Beamer",
+        "Room number": "Ruimtenummer",
+        "Screen": "Scherm",
+        "Wheelchair accessible": "Rolstoeltoegankelijk",
+        "Whiteboard": "Whiteboard",
+        "Booked on {count} of {total} dates": "Bezet op {count} van {total} data",
+        "Free on all {total} dates": "Vrij op alle {total} data",
+        "Partly booked": "Deels bezet",
+        "_{room} is booked on %n date of this series. Pick another room._::_{room} is booked on %n dates of this series. Pick another room._": ["{room} is bezet op %n datum van deze reeks. Kies een andere ruimte.","{room} is bezet op %n data van deze reeks. Kies een andere ruimte."],
+        "_{room} is booked on %n date of this series ({dates}). Pick another room._::_{room} is booked on %n dates of this series ({dates}). Pick another room._": ["{room} is bezet op %n datum van deze reeks ({dates}). Kies een andere ruimte.","{room} is bezet op %n data van deze reeks ({dates}). Kies een andere ruimte."],
+        "Check the repeat settings first.": "Controleer eerst de herhaalinstellingen.",
+        "Recurring meetings need an active TeamHub licence.": "Terugkerende vergaderingen vereisen een actieve TeamHub-licentie.",
+        "You accepted the meeting.": "Je hebt de vergadering geaccepteerd.",
+        "You answered maybe.": "Je hebt misschien geantwoord.",
+        "You declined the meeting.": "Je hebt de vergadering afgewezen.",
+        "Your reply": "Jouw antwoord",
+        "Your reply could not be saved. Try again, or reply in Calendar.": "Je antwoord kon niet worden opgeslagen. Probeer het opnieuw of antwoord in Agenda.",
+        "_%n day before_::_%n days before_": ["%n dag van tevoren","%n dagen van tevoren"],
+        "Each meeting gets its own notes file, and the attendees are mentioned in the team chat with a link to it.": "Elke vergadering krijgt een eigen notitiebestand, en de deelnemers worden in de teamchat genoemd met een link ernaartoe.",
+        "Notes and chat reminder": "Notities en chatherinnering",
+        "📅 Coming up: **%1$s** on %2$s at %3$s.\nAdd your agenda items to the meeting notes: %4$s": "📅 Binnenkort: **%1$s** op %2$s om %3$s.\nVoeg je agendapunten toe aan de vergadernotities: %4$s",
+        "You have not set your workplace yet, so colleagues see you at the office Monday to Friday, all day. Change any day that does not match your week.": "Je hebt je werkplek nog niet ingesteld, dus collega's zien je van maandag tot en met vrijdag de hele dag op kantoor. Pas elke dag aan die niet bij je week past.",
+        "Keep this workplace": "Deze werkplek behouden",
+        "Show busy times": "Drukke tijden tonen",
+        "People whose busy times are shown": "Mensen van wie de drukke tijden worden getoond",
+        "Choose people": "Kies mensen",
+        "_Busy times can be shown for %n person at a time._::_Busy times can be shown for %n people at a time._": [
+            "Drukke tijden kunnen voor %n persoon tegelijk worden getoond.",
+            "Drukke tijden kunnen voor %n mensen tegelijk worden getoond."
+        ],
+        "Nobody on this team shows busy times here. Busy times need an email address on the account.": "Niemand in dit team toont hier drukke tijden. Daarvoor is een e-mailadres op het account nodig.",
+        "_%n member is not shown: they switched busy times off, keep their email private or have none._::_%n members are not shown: they switched busy times off, keep their email private or have none._": [
+            "%n lid wordt niet getoond: die heeft drukke tijden uitgezet, houdt het e-mailadres privé of heeft er geen.",
+            "%n leden worden niet getoond: zij hebben drukke tijden uitgezet, houden hun e-mailadres privé of hebben er geen."
+        ],
+        "The busy times could not be loaded.": "De drukke tijden konden niet worden geladen.",
+        "Team calendars": "Teamagenda's",
+        "The people on your teams can see when you are busy on the team calendar. Only the times are shown, never what the event is. Events you show as free in Calendar do not count.": "De mensen in je teams zien in de teamagenda wanneer je bezet bent. Alleen de tijden worden getoond, nooit wat de afspraak is. Afspraken die je in Agenda als vrij weergeeft, tellen niet mee.",
+        "Show my busy times on team calendars": "Mijn drukke tijden tonen in teamagenda's",
+        "This only affects TeamHub. Anyone who adds you to an event in Calendar can still see when you are busy, as Nextcloud always allows.": "Dit geldt alleen voor TeamHub. Wie je in Agenda aan een afspraak toevoegt, ziet nog steeds wanneer je bezet bent, zoals Nextcloud altijd toestaat.",
+        "Could not load the setting.": "De instelling kon niet worden geladen.",
+        "Busy times": "Drukke tijden",
+        "Busy, {when}": "Bezet, {when}",
+        "Not confirmed": "Niet bevestigd",
+        "Not confirmed, {when}": "Niet bevestigd, {when}",
+        "Work week": "Werkweek",
+        "{name}: no busy times in this period": "{name}: geen drukke tijden in deze periode",
+        "{name}: {times}": "{name}: {times}",
+        "Any equipment": "Alle voorzieningen",
+        "No room in this building has all of this equipment.": "Geen ruimte in dit gebouw heeft al deze voorzieningen.",
+        "Select a room to book it.": "Selecteer een ruimte om hem te boeken.",
+        "_%n of {total} accepted, your reply is needed_::_%n of {total} accepted, your reply is needed_": ["%n van {total} geaccepteerd, jouw antwoord is nodig","%n van {total} geaccepteerd, jouw antwoord is nodig"],
+        "_%n action item was found in the notes. Check who does it and by when._::_%n action items were found in the notes. Check who does each and by when._": ["%n actiepunt gevonden in de notities. Controleer wie het doet en wanneer.","%n actiepunten gevonden in de notities. Controleer wie wat doet en wanneer."],
+        "_%n task could not be created: {titles}_::_%n tasks could not be created: {titles}_": ["%n taak kon niet worden aangemaakt: {titles}","%n taken konden niet worden aangemaakt: {titles}"],
+        "Action items": "Actiepunten",
+        "Action items become tasks, which need the Tasks app. Ask your administrator to install it.": "Actiepunten worden taken, en daarvoor is de app Taken nodig. Vraag je beheerder om die te installeren.",
+        "Add action item": "Actiepunt toevoegen",
+        "By when": "Wanneer klaar",
+        "Each one becomes a team task for the person named, in their My Work.": "Elk punt wordt een teamtaak voor de genoemde persoon, in diens Mijn werk.",
+        "Each proposal you tick gets a link to these notes in its history. The approvers still decide in Decisions.": "Elk voorstel dat je aanvinkt krijgt een link naar deze notities in zijn geschiedenis. De goedkeurders beslissen nog steeds in Beslissingen.",
+        "Meeting wrapped up": "Vergadering afgerond",
+        "No action items were written in the notes. Add them below, or leave this empty.": "Er staan geen actiepunten in de notities. Voeg ze hieronder toe, of laat dit leeg.",
+        "On the agenda": "Op de agenda",
+        "Open the notes": "Notities openen",
+        "Proposals discussed": "Besproken voorstellen",
+        "Reading the meeting notes": "Vergadernotities lezen",
+        "Remove action item {n}": "Actiepunt {n} verwijderen",
+        "The meeting could not be wrapped up. Try again.": "De vergadering kon niet worden afgerond. Probeer het opnieuw.",
+        "The notes file could not be found. Add the action items below; nothing is written back.": "Het notitiebestand is niet gevonden. Voeg de actiepunten hieronder toe; er wordt niets teruggeschreven.",
+        "The wrap-up could not be loaded.": "De afronding kon niet worden geladen.",
+        "This meeting has no wrap-up for you. Only its organiser can wrap it up, after it has ended.": "Deze vergadering heeft geen afronding voor jou. Alleen de organisator kan haar afronden, nadat ze is afgelopen.",
+        "This meeting is already wrapped up.": "Deze vergadering is al afgerond.",
+        "This meeting was marked as needing no wrap-up.": "Deze vergadering is gemarkeerd als zonder afronding.",
+        "What": "Wat",
+        "Wrap up meeting": "Vergadering afronden",
+        "Discussed in a meeting": "Besproken in een vergadering",
+        "Meeting: {title}": "Vergadering: {title}",
+        "Open the meeting notes": "Vergadernotities openen",
+        "Meetings to wrap up": "Af te ronden vergaderingen",
+        "Wrapped up meetings": "Afgeronde vergaderingen",
+        "Wrap up": "Afronden",
+        "Wrap up %1$s": "%1$s afronden",
+        "The meeting is over. Hand out the action items and link the proposals you discussed.": "De vergadering is voorbij. Deel de actiepunten uit en koppel de besproken voorstellen.",
+        "Marked as needing no wrap-up": "Gemarkeerd als zonder afronding",
+        "Marked as needing no wrap-up.": "Gemarkeerd als zonder afronding.",
+        "_Wrapped up with %n task_::_Wrapped up with %n tasks_": ["Afgerond met %n taak","Afgerond met %n taken"],
+        "No wrap-up needed": "Geen afronding nodig",
+        "No tasks are handed out and no proposals are linked to the notes. You can still do that by hand.": "Er worden geen taken uitgedeeld en geen voorstellen aan de notities gekoppeld. Dat kan nog steeds met de hand.",
+        "Meeting held": "Vergadering gehouden",
+        "Organiser wraps up": "Organisator rondt af",
+        "Tasks are with the people named": "Taken liggen bij de genoemde personen",
+        "Only the organiser can wrap up this meeting.": "Alleen de organisator kan deze vergadering afronden.",
+        "This meeting was already wrapped up.": "Deze vergadering was al afgerond.",
+        "From the meeting %1$s on %2$s.": "Uit de vergadering %1$s op %2$s.",
+        "Meeting notes: %1$s": "Vergadernotities: %1$s",
+        "Wrap-up": "Afronding",
+        "Wrapped up by %1$s on %2$s.": "Afgerond door %1$s op %2$s.",
+        "No tasks were handed out.": "Er zijn geen taken uitgedeeld.",
+        "the team": "het team",
+        "%1$s (%2$s, due %3$s)": "%1$s (%2$s, uiterlijk %3$s)",
+        "%1$s (%2$s)": "%1$s (%2$s)",
+        "The approvers decide on these in Decisions.": "De goedkeurders beslissen hierover in Beslissingen.",
+        "Could not send your reply.": "Je antwoord kon niet worden verstuurd.",
+        "Pinned by {name}": "Vastgemaakt door {name}",
+        "Reply sent": "Antwoord verstuurd",
+        "Reply to {title}": "Reageren op {title}",
+        "Send reply": "Antwoord versturen",
+        "This reply is too long.": "Dit antwoord is te lang.",
+        "Could not end the poll.": "De peiling kon niet worden beëindigd.",
+        "End poll": "Peiling beëindigen",
+        "End this poll?": "Deze peiling beëindigen?",
+        "Nobody can vote after this, and everyone in the conversation sees the results.": "Daarna kan niemand meer stemmen, en iedereen in het gesprek ziet de uitslag.",
+        "Poll ended": "Peiling beëindigd",
+        "Add reaction": "Emoji-reactie toevoegen",
+        "_Remove your {emoji} reaction. %n person reacted_::_Remove your {emoji} reaction. %n people reacted_": [
+            "Je {emoji}-reactie verwijderen. %n persoon heeft gereageerd",
+            "Je {emoji}-reactie verwijderen. %n personen hebben gereageerd"
+        ],
+        "_React with {emoji}. %n person reacted_::_React with {emoji}. %n people reacted_": [
+            "Reageren met {emoji}. %n persoon heeft gereageerd",
+            "Reageren met {emoji}. %n personen hebben gereageerd"
+        ],
+        "_{names} and %n other reacted with {emoji}_::_{names} and %n others reacted with {emoji}_": [
+            "{names} en %n ander hebben gereageerd met {emoji}",
+            "{names} en %n anderen hebben gereageerd met {emoji}"
+        ],
+        "{names} reacted with {emoji}": "Gereageerd met {emoji}: {names}",
+        "Could not add the reaction": "Kon de emoji-reactie niet toevoegen",
+        "Could not remove the reaction": "Kon de emoji-reactie niet verwijderen",
+        "Failed to link attachment {name}: {error}": "Kon bijlage {name} niet koppelen: {error}",
+        "_Expired %n day ago_::_Expired %n days ago_": [
+            "%n dag geleden verlopen",
+            "%n dagen geleden verlopen"
+        ],
+        "_Expires in %n day_::_Expires in %n days_": [
+            "Verloopt over %n dag",
+            "Verloopt over %n dagen"
+        ],
+        "_The roster for %s to %s is published. %n place is still open._::_The roster for %s to %s is published. %n places are still open._": [
+            "Het rooster van %s tot %s is gepubliceerd. Er is nog %n plek open.",
+            "Het rooster van %s tot %s is gepubliceerd. Er zijn nog %n plekken open."
+        ],
+        "_No member count has reached the licensing service for %n day, so this licence cannot be honoured. Existing Advanced teams still work read-only._::_No member count has reached the licensing service for %n days, so this licence cannot be honoured. Existing Advanced teams still work read-only._": [
+            "Er is al %n dag geen ledental bij de licentiedienst aangekomen, dus deze licentie kan niet worden gehonoreerd. Bestaande geavanceerde teams werken nog, alleen-lezen.",
+            "Er is al %n dagen geen ledental bij de licentiedienst aangekomen, dus deze licentie kan niet worden gehonoreerd. Bestaande geavanceerde teams werken nog, alleen-lezen."
+        ],
+        "_No member count has reached the licensing service for %n day._::_No member count has reached the licensing service for %n days._": [
+            "Er is al %n dag geen ledental bij de licentiedienst aangekomen.",
+            "Er is al %n dagen geen ledental bij de licentiedienst aangekomen."
+        ],
+        "_No member count has reached the licensing service for %n day. Check that this server can reach it, then send a report from the License tab._::_No member count has reached the licensing service for %n days. Check that this server can reach it, then send a report from the License tab._": [
+            "Er is al %n dag geen ledental bij de licentiedienst aangekomen. Controleer of deze server de dienst kan bereiken en verstuur dan een rapport vanuit het tabblad Licentie.",
+            "Er is al %n dagen geen ledental bij de licentiedienst aangekomen. Controleer of deze server de dienst kan bereiken en verstuur dan een rapport vanuit het tabblad Licentie."
+        ],
+        "Links to {page}": "Koppelt naar {page}",
+        "this page": "deze pagina",
+        "{tab} in {team}": "{tab} in {team}",
+        "Open the page this task was made on": "Open de pagina waarop deze taak is gemaakt",
+        "Open page": "Pagina openen",
+        "Create follow-up task": "Vervolgtaak aanmaken",
+        "this message": "dit bericht",
+        "this comment": "deze reactie",
+        "this decision": "dit besluit",
+        "My Work views": "Weergaven van Mijn werk",
+        "Nothing is waiting on others": "Er wacht niets op anderen",
+        "Nothing completed recently": "Niets recent voltooid",
+        "Work you handed to someone else, and requests waiting on another person, appear here.": "Werk dat je aan iemand anders hebt gegeven, en verzoeken die op een ander wachten, verschijnen hier.",
+        "Work that was finished in the last few days appears here, yours and what others did for you.": "Werk dat de afgelopen dagen is afgerond verschijnt hier, dat van jou en wat anderen voor je deden.",
+        "Team backlog": "Teambacklog",
+        "\"{name}\" was unlinked from this team. TeamHub did not create it, so it was not deleted.": "\"{name}\" is losgekoppeld van dit team. TeamHub heeft het niet gemaakt, dus het is niet verwijderd.",
+        "\"{name}\" was removed from this team. Another team still uses it, so it was not deleted.": "\"{name}\" is uit dit team verwijderd. Een ander team gebruikt het nog, dus het is niet verwijderd.",
+    "Shared with team": "Gedeeld met team",
+    "Could not load what is shared with this team.": "Kan niet laden wat met dit team is gedeeld.",
+    "This Nextcloud cannot list what is shared with teams.": "Deze Nextcloud kan niet tonen wat met teams is gedeeld.",
+    "Nothing else is shared with this team.": "Er is verder niets met dit team gedeeld.",
+    "Opens in a new tab": "Opent in een nieuw tabblad",
+    "Show fewer": "Minder tonen",
+    "No answer from {apps}. This list may be incomplete.": "Geen antwoord van {apps}. Deze lijst is mogelijk onvolledig.",
+    "_Show %n more_::_Show %n more_": [
+        "Nog %n tonen",
+        "Nog %n tonen"
+    ],
+    "Apps that list team resources through Nextcloud's Teams API appear in the Shared with team card on every team home. Switch one off to stop its resources appearing in TeamHub. Nextcloud's own Teams page is not affected.": "Apps die teamonderdelen tonen via de Teams-API van Nextcloud verschijnen op elke teamstartpagina in de kaart Gedeeld met team. Zet een app uit om de onderdelen ervan niet meer in TeamHub te tonen. De eigen Teams-pagina van Nextcloud verandert niet.",
+    "The saved list of switched off apps cannot be read, so every app is switched off. Changing any switch saves a new list, with every other app switched on.": "De opgeslagen lijst van uitgezette apps kan niet worden gelezen, dus alle apps staan uit. Als je een schakelaar wijzigt, wordt een nieuwe lijst opgeslagen waarin alle andere apps aan staan.",
+    "No app shares team resources": "Geen app deelt teamonderdelen",
+    "An installed app appears here when it lists resources for teams through Nextcloud's Teams API.": "Een geïnstalleerde app verschijnt hier zodra die via de Teams-API van Nextcloud onderdelen voor teams toont.",
+    "Stop showing {name} in TeamHub": "{name} niet meer tonen in TeamHub",
+    "Show {name} in TeamHub": "{name} tonen in TeamHub",
+    "Shown in TeamHub": "Getoond in TeamHub",
+    "Not shown in TeamHub": "Niet getoond in TeamHub",
+    "Could not load the apps that share team resources.": "Kan de apps die teamonderdelen delen niet laden.",
+    "{name} is shown in Shared with team again.": "{name} wordt weer getoond in Gedeeld met team.",
+    "{name} no longer appears in Shared with team.": "{name} verschijnt niet meer in Gedeeld met team.",
+    "Could not save the setting.": "Kan de instelling niet opslaan.",
+    "Modules enabled": "Ingeschakelde modules",
+    "Announcement popup": "Pop-up met mededelingen",
+    "Turned off by an administrator": "Uitgeschakeld door een beheerder",
+    "Not turned off": "Niet uitgeschakeld",
+    "Folders managed by other apps": "Mappen beheerd door andere apps",
+    "These apps give teams access to Team folders of their own. Team admins see such a folder as managed by the app and are not asked to review it. Switch an app off to send its folders back to the team admins' review.": "Deze apps geven teams toegang tot hun eigen teammappen. Teambeheerders zien zo'n map als beheerd door de app en hoeven die niet te beoordelen. Schakel een app uit om de mappen weer door de teambeheerders te laten beoordelen.",
+    "Let team admins review the folders of {name}": "Teambeheerders de mappen van {name} laten beoordelen",
+    "Let {name} manage its own folders": "{name} de eigen mappen laten beheren",
+    "Managed by the app": "Beheerd door de app",
+    "Reviewed by team admins": "Beoordeeld door teambeheerders",
+    "{name} manages its own folders again.": "{name} beheert de eigen mappen weer.",
+    "Team admins review the folders of {name}. The folders appear in the review within an hour.": "Teambeheerders beoordelen de mappen van {name}. De mappen verschijnen binnen een uur ter beoordeling.",
+    "Another app decides who can open these folders, so there is nothing to review here. Change the access in that app.": "Een andere app bepaalt wie deze mappen kan openen, dus hier valt niets te beoordelen. Wijzig de toegang in die app.",
+    "Managed by {app}": "Beheerd door {app}",
+    "_Show %n folder managed by another app_::_Show %n folders managed by other apps_": [
+        "%n map beheerd door een andere app tonen",
+        "%n mappen beheerd door andere apps tonen"
+    ],
+        "Add field": "Veld toevoegen",
+        "Ask which team the request is for": "Vragen voor welk team de aanvraag is",
+        "Enter at most {max} options of at most 100 characters.": "Vul hoogstens {max} opties van hoogstens 100 tekens in.",
+        "Every request is personal: only the requester and this team can follow it.": "Elke aanvraag is persoonlijk: alleen de aanvrager en dit team kunnen hem volgen.",
+        "Explanation (optional)": "Uitleg (optioneel)",
+        "Explanation of field {n} (optional)": "Uitleg van veld {n} (optioneel)",
+        "Field name": "Naam van het veld",
+        "Fields of the request form": "Velden van het aanvraagformulier",
+        "Move field {n} down": "Veld {n} omlaag verplaatsen",
+        "Move field {n} up": "Veld {n} omhoog verplaatsen",
+        "Must be filled in": "Moet worden ingevuld",
+        "Name of field {n}": "Naam van veld {n}",
+        "Options of field {n}, one per line": "Opties van veld {n}, één per regel",
+        "Options, one per line": "Opties, één per regel",
+        "Remove field": "Veld verwijderen",
+        "Remove field {n}": "Veld {n} verwijderen",
+        "Request form": "Aanvraagformulier",
+        "The name of the service": "De naam van de dienst",
+        "The request is named after": "De aanvraag heet naar",
+        "The requester may leave it empty. The members of the team they pick can follow the request.": "De aanvrager mag dit leeg laten. De leden van het gekozen team kunnen de aanvraag volgen.",
+        "Type of field {n}": "Type van veld {n}",
+        "What somebody fills in to make a request. Without fields they only read the description and send the request.": "Wat iemand invult om een aanvraag te doen. Zonder velden leest die alleen de beschrijving en verstuurt de aanvraag.",
+        "An admin of the team can close the request instead.": "Een beheerder van het team kan de aanvraag ook sluiten.",
+        "Automatic": "Automatisch",
+        "Confirm automatically after (days)": "Automatisch bevestigen na (dagen)",
+        "Confirmation": "Bevestiging",
+        "No confirmation": "Geen bevestiging",
+        "The request ends without a confirmation": "De aanvraag eindigt zonder bevestiging",
+        "The requester confirms the result": "De aanvrager bevestigt het resultaat",
+        "The requester confirms, or it is confirmed automatically": "De aanvrager bevestigt, of het wordt automatisch bevestigd",
+        "When the last step is done": "Als de laatste stap klaar is",
+        "Give every field of the request form a name.": "Geef elk veld van het aanvraagformulier een naam.",
+        "Give every field with choices at least two options.": "Geef elk keuzeveld minstens twee opties.",
+        "Short text": "Korte tekst",
+        "Long text": "Lange tekst",
+        "One option": "Eén optie",
+        "Several options": "Meerdere opties",
+        "Number": "Getal",
+        "Yes or no": "Ja of nee",
+        "Person": "Persoon",
+        "Choose an option": "Kies een optie",
+        "Search for a person": "Zoek een persoon",
+        "{field} (optional)": "{field} (optioneel)",
+        "{name} ({detail})": "{name} ({detail})",
+        "Confirmed automatically from {date}.": "Wordt vanaf {date} automatisch bevestigd.",
+        "Confirmed automatically": "Automatisch bevestigd",
+        "The name of a field is at most %s characters.": "De naam van een veld is hoogstens %s tekens.",
+        "The explanation of a field is at most %s characters.": "De uitleg van een veld is hoogstens %s tekens.",
+        "The request form could not be read.": "Het aanvraagformulier kon niet worden gelezen.",
+        "Pick one of the field types.": "Kies een van de veldtypen.",
+        "Fill in \"%s\".": "Vul \"%s\" in.",
+        "This service has changed. Check your answers and send the request again.": "Deze dienst is gewijzigd. Controleer je antwoorden en verstuur de aanvraag opnieuw.",
+        "The answers could not be read.": "De antwoorden konden niet worden gelezen.",
+        "\"%s\" contains characters that are not allowed.": "\"%s\" bevat tekens die niet zijn toegestaan.",
+        "\"%1$s\" is at most %2$s characters.": "\"%1$s\" is hoogstens %2$s tekens.",
+        "\"%s\" is not a date.": "\"%s\" is geen datum.",
+        "\"%s\" is not a number.": "\"%s\" is geen getal.",
+        "Pick a person for \"%s\".": "Kies een persoon voor \"%s\".",
+        "An option is at most %s characters.": "Een optie is hoogstens %s tekens.",
+        "Names and options cannot contain line breaks or special characters.": "Namen en opties mogen geen regeleinden of speciale tekens bevatten.",
+        "The answer to \"%s\" could not be read.": "Het antwoord op \"%s\" kon niet worden gelezen.",
+        "Pick one of the options for \"%s\".": "Kies een van de opties voor \"%s\".",
+        "The confirmation could not be read.": "De bevestiging kon niet worden gelezen.",
+        "Pick how a request is confirmed.": "Kies hoe een aanvraag wordt bevestigd.",
+        "Confirm automatically after 1 to %s days.": "Bevestig automatisch na 1 tot %s dagen.",
+        "_{n} field_::_{n} fields_": ["{n} veld", "{n} velden"],
+        "_Automatic after {n} day_::_Automatic after {n} days_": ["Automatisch na {n} dag", "Automatisch na {n} dagen"],
+        "_A request form has at most %n field._::_A request form has at most %n fields._": ["Een aanvraagformulier heeft hoogstens %n veld.", "Een aanvraagformulier heeft hoogstens %n velden."],
+        "_A field has at most %n option._::_A field has at most %n options._": ["Een veld heeft hoogstens %n optie.", "Een veld heeft hoogstens %n opties."],
+        "Add a field of the type Person to the request form first.": "Voeg eerst een veld van het type Persoon toe aan het aanvraagformulier.",
+        "Everybody in the group can answer. The first answer decides.": "Iedereen in de groep kan antwoorden. Het eerste antwoord beslist.",
+        "Field of the request form": "Veld van het aanvraagformulier",
+        "Text of the approve button (optional)": "Tekst van de goedkeurknop (optioneel)",
+        "Text of the approve button of step {n} (optional)": "Tekst van de goedkeurknop van stap {n} (optioneel)",
+        "Text of the reject button (optional)": "Tekst van de afwijsknop (optioneel)",
+        "Text of the reject button of step {n} (optional)": "Tekst van de afwijsknop van stap {n} (optioneel)",
+        "The approver sees the request, its files and the steps so far from the moment it is their turn. They do not see the messages or your internal notes.": "De goedkeurder ziet de aanvraag, de bestanden en de stappen tot nu toe vanaf het moment dat die aan de beurt is. De berichten en jullie interne notities ziet die niet.",
+        "The field that names who approves step {n}": "Het veld dat bepaalt wie stap {n} goedkeurt",
+        "The group that approves step {n}": "De groep die stap {n} goedkeurt",
+        "The manager in the requester's account, as an administrator set it.": "De manager in het account van de aanvrager, zoals een beheerder die heeft ingesteld.",
+        "The person who approves step {n}": "De persoon die stap {n} goedkeurt",
+        "The request ends": "De aanvraag eindigt",
+        "The request goes on, and the team decides what follows": "De aanvraag gaat door en het team beslist wat volgt",
+        "Used when there is nobody else, or when the approver made the request. Nobody approves their own request.": "Gebruikt als er niemand anders is, of als de goedkeurder de aanvraag deed. Niemand keurt de eigen aanvraag goed.",
+        "When the approver rejects": "Als de goedkeurder afwijst",
+        "Who approves": "Wie keurt goed",
+        "Who approves otherwise": "Wie keurt anders goed",
+        "Who approves otherwise (optional)": "Wie keurt anders goed (optioneel)",
+        "Who approves step {n}": "Wie keurt stap {n} goed",
+        "Who approves step {n} otherwise": "Wie keurt stap {n} anders goed",
+        "A group": "Een groep",
+        "A person": "Een persoon",
+        "A person picked on the request form": "Een persoon gekozen op het aanvraagformulier",
+        "Check the request": "De aanvraag controleren",
+        "Explanation": "Uitleg",
+        "Intake form": "Intakeformulier",
+        "Issue": "Melding",
+        "Manager approves": "Manager keurt goed",
+        "Needed by": "Nodig op",
+        "Request with approval": "Aanvraag met goedkeuring",
+        "Say for every approval who approves.": "Geef bij elke goedkeuring aan wie goedkeurt.",
+        "Say who approves when there is no manager or nobody was picked.": "Geef aan wie goedkeurt als er geen manager is of niemand is gekozen.",
+        "The requester's manager": "De manager van de aanvrager",
+        "Approval asked of {name}": "Goedkeuring gevraagd aan {name}",
+        "Approval handed to {name}": "Goedkeuring overgedragen aan {name}",
+        "Approved: {step}": "Goedgekeurd: {step}",
+        "Approves a step": "Keurt een stap goed",
+        "Ask for approval": "Goedkeuring vragen",
+        "Hand to somebody else": "Aan iemand anders overdragen",
+        "What do you want approved?": "Wat wil je laten goedkeuren?",
+        "The requester can read this. The request waits for the answer, and a rejection comes back to you.": "De aanvrager kan dit lezen. De aanvraag wacht op het antwoord, en een afwijzing komt bij jou terug.",
+        "Add approval step": "Goedkeuringsstap toevoegen",
+        "Start from": "Beginnen met",
+        "Waiting for the approval you asked for.": "Wacht op de goedkeuring die je hebt gevraagd.",
+        "Whoever approves the request can view them too.": "Wie de aanvraag goedkeurt, kan ze ook bekijken.",
+        "The last step is for the team, not an approver.": "De laatste stap is voor het team, niet voor een goedkeurder.",
+        "No request is waiting for somebody else.": "Geen aanvraag wacht op iemand anders.",
+        "A step is for the team, the requester or an approver.": "Een stap is voor het team, de aanvrager of een goedkeurder.",
+        "The approval could not be read.": "De goedkeuring kon niet worden gelezen.",
+        "Pick who approves.": "Kies wie goedkeurt.",
+        "Pick what happens when the approver rejects.": "Kies wat er gebeurt als de goedkeurder afwijst.",
+        "The text of a button is at most %s characters.": "De tekst van een knop is hoogstens %s tekens.",
+        "The approver could not be read.": "De goedkeurder kon niet worden gelezen.",
+        "An approver does not exist any more. Pick somebody else.": "Een goedkeurder bestaat niet meer. Kies iemand anders.",
+        "You cannot name this approver. Pick somebody else.": "Je kunt deze goedkeurder niet aanwijzen. Kies iemand anders.",
+        "There is nobody to approve this request. Ask the service team.": "Er is niemand om deze aanvraag goed te keuren. Vraag het serviceteam.",
+        "Wait for the approval you asked for first.": "Wacht eerst op de goedkeuring die je hebt gevraagd.",
+        "Only whoever claimed this task can ask for an approval.": "Alleen wie deze taak heeft geclaimd, kan een goedkeuring vragen.",
+        "This task is not being worked on right now.": "Aan deze taak wordt nu niet gewerkt.",
+        "Say what you want approved.": "Geef aan wat je wilt laten goedkeuren.",
+        "This person was already asked.": "Deze persoon is al gevraagd.",
+        "Wait for the approvals you asked for first.": "Wacht eerst op de goedkeuringen die je hebt gevraagd.",
+        "This step is not an approval.": "Deze stap is geen goedkeuring.",
+        "The requester cannot approve their own request.": "De aanvrager kan de eigen aanvraag niet goedkeuren.",
+        "Whoever asks for an approval cannot give it.": "Wie een goedkeuring vraagt, kan die niet geven.",
+        "Pick somebody to approve this.": "Kies iemand om dit goed te keuren.",
+        "Hand the approval to somebody other than yourself.": "Draag de goedkeuring over aan iemand anders dan jezelf.",
+        "You cannot approve this request yourself.": "Je kunt deze aanvraag niet zelf goedkeuren.",
+        "{actor} asks for your approval of {workflow}": "{actor} vraagt je goedkeuring voor {workflow}",
+        "%1$s asks for your approval of %2$s": "%1$s vraagt je goedkeuring voor %2$s",
+        "{actor} approved {workflow}": "{actor} heeft {workflow} goedgekeurd",
+        "%1$s approved %2$s": "%1$s heeft %2$s goedgekeurd",
+        "{actor} did not approve {workflow}": "{actor} heeft {workflow} niet goedgekeurd",
+        "%1$s did not approve %2$s": "%1$s heeft %2$s niet goedgekeurd",
+        "{name} is waiting for your answer. What you send now answers their question.": "{name} wacht op je antwoord. Wat je nu stuurt, beantwoordt die vraag.",
+        "When enabled, an admin of a service team can have a service send an email when a step is reached, done or rejected, with the team's own text and answers from the request form. It goes to accounts on this server only. Sent email is outside Nextcloud: whoever can read it reads those answers. When disabled, services still send notifications.": "Als dit aan staat, kan een beheerder van een serviceteam een dienst een e-mail laten sturen wanneer een stap bereikt, klaar of afgewezen is, met de eigen tekst van het team en antwoorden uit het aanvraagformulier. De e-mail gaat alleen naar accounts op deze server. Een verstuurde e-mail is buiten Nextcloud: wie hem kan lezen, leest die antwoorden. Als dit uit staat, sturen diensten nog wel meldingen.",
+        "A field without a name": "Een veld zonder naam",
+        "A group of more than 100 people is not told.": "Een groep van meer dan 100 personen krijgt geen bericht.",
+        "A person or group that gets a notice does not exist any more. Pick somebody else.": "Een persoon of groep die een bericht krijgt, bestaat niet meer. Kies iemand anders.",
+        "About email from services": "Over e-mail van diensten",
+        "Add notice": "Bericht toevoegen",
+        "An email leaves Nextcloud. Whoever can read it reads these answers, whatever they may open here. The notification shows the subject and the text only.": "Een e-mail verlaat Nextcloud. Wie hem kan lezen, leest deze antwoorden, wat diegene hier ook mag openen. De melding toont alleen het onderwerp en de tekst.",
+        "As a notification in Nextcloud": "Als melding in Nextcloud",
+        "By email, to the address in the account": "Per e-mail, naar het adres in het account",
+        "Give every notice a subject.": "Geef elk bericht een onderwerp.",
+        "How it is sent": "Hoe het wordt verstuurd",
+        "It would go to more than 100 people.": "Het zou naar meer dan 100 personen gaan.",
+        "Let services send email": "Diensten e-mail laten sturen",
+        "No email could be sent to {names}.": "Er kon geen e-mail worden gestuurd naar {names}.",
+        "Notice not sent: {subject}": "Bericht niet verstuurd: {subject}",
+        "Notice: {subject}": "Bericht: {subject}",
+        "Notices": "Berichten",
+        "Open the request": "De aanvraag openen",
+        "Remove notice {n} of step {step}": "Bericht {n} van stap {step} verwijderen",
+        "Remove notice": "Bericht verwijderen",
+        "Say for every notice how it is sent.": "Geef bij elk bericht aan hoe het wordt verstuurd.",
+        "Say for every notice who gets it.": "Geef bij elk bericht aan wie het krijgt.",
+        "Services cannot send email on this server. Send the notice as a notification.": "Diensten kunnen op deze server geen e-mail sturen. Verstuur het bericht als melding.",
+        "Services cannot send email on this server.": "Diensten kunnen op deze server geen e-mail sturen.",
+        "Services may send email": "Diensten mogen e-mail sturen",
+        "Step": "Stap",
+        "Subject of notice {n} of step {step}": "Onderwerp van bericht {n} van stap {step}",
+        "Tell somebody about this step, in your own words. Whoever has to act is told already.": "Laat iemand weten wat er met deze stap gebeurt, in je eigen woorden. Wie iets moet doen, krijgt al een melding.",
+        "Text (optional)": "Tekst (optioneel)",
+        "Text of notice {n} of step {step} (optional)": "Tekst van bericht {n} van stap {step} (optioneel)",
+        "The approver": "De goedkeurder",
+        "The group that gets notice {n} of step {step}": "De groep die bericht {n} van stap {step} krijgt",
+        "The name of the requester": "De naam van de aanvrager",
+        "The notices could not be read.": "De berichten konden niet worden gelezen.",
+        "The person who gets notice {n} of step {step}": "De persoon die bericht {n} van stap {step} krijgt",
+        "The subject of a notice is at most %s characters.": "Het onderwerp van een bericht is maximaal %s tekens.",
+        "The text of a notice is at most %s characters.": "De tekst van een bericht is maximaal %s tekens.",
+        "There was nobody to send it to.": "Er was niemand om het naartoe te sturen.",
+        "To {names}, as a notification and by email": "Aan {names}, als melding en per e-mail",
+        "To {names}, as a notification": "Aan {names}, als melding",
+        "To {names}, by email": "Aan {names}, per e-mail",
+        "What the email also says": "Wat er ook in de e-mail staat",
+        "When notice {n} of step {step} is sent": "Wanneer bericht {n} van stap {step} wordt verstuurd",
+        "When the step is done": "Als de stap klaar is",
+        "When the step is reached": "Als de stap wordt bereikt",
+        "When the step is rejected": "Als de stap wordt afgewezen",
+        "Who gets it": "Wie het krijgt",
+        "Who gets notice {n} of step {step}": "Wie bericht {n} van stap {step} krijgt",
+        "Whoever has the task": "Wie de taak heeft",
+        "You cannot send a notice to this person or group. Pick somebody else.": "Je kunt deze persoon of groep geen bericht sturen. Kies iemand anders.",
+        "You get this email because the team that offers \"%s\" asked TeamHub to tell you about this step.": "Je krijgt deze e-mail omdat het team dat \"%s\" aanbiedt TeamHub heeft gevraagd je over deze stap te berichten.",
+        "_{names} and {n} more_::_{names} and {n} more_": [
+            "{names} en nog {n}",
+            "{names} en nog {n}"
+        ],
+        "_{n} notice_::_{n} notices_": [
+            "{n} bericht",
+            "{n} berichten"
+        ],
+        "_A step has at most %n notice._::_A step has at most %n notices._": [
+            "Een stap heeft maximaal %n bericht.",
+            "Een stap heeft maximaal %n berichten."
+        ],
+        "Notice {n}": "Bericht {n}",
+        "A condition asks something its field cannot answer. Pick another comparison.": "Een voorwaarde vraagt iets wat het veld niet kan beantwoorden. Kies een andere vergelijking.",
+        "A condition could not be read.": "Een voorwaarde kon niet worden gelezen.",
+        "A condition uses a field that is not on the request form any more.": "Een voorwaarde gebruikt een veld dat niet meer op het aanvraagformulier staat.",
+        "A condition uses an answer of the request form. This form has no fields.": "Een voorwaarde gebruikt een antwoord uit het aanvraagformulier. Dit formulier heeft geen velden.",
+        "At least one team step runs on every request. Remove the condition from one.": "Minstens één teamstap loopt bij elke aanvraag. Haal bij een ervan de voorwaarde weg.",
+        "Comparison": "Vergelijking",
+        "Give every condition a value.": "Geef elke voorwaarde een waarde.",
+        "Not needed": "Niet nodig",
+        "Only on some requests": "Alleen bij sommige aanvragen",
+        "Only when {field} is filled in": "Alleen als {field} is ingevuld",
+        "Only when {field} {op} {value}": "Alleen als {field} {op} {value}",
+        "Otherwise the step is left out and the request goes on to the next one. A field nobody answered never matches.": "Anders wordt de stap overgeslagen en gaat de aanvraag door naar de volgende. Een veld dat niemand heeft ingevuld, voldoet nooit.",
+        "Pick a field": "Kies een veld",
+        "The comparison of the condition of step {n}": "De vergelijking van de voorwaarde van stap {n}",
+        "The field the condition of step {n} looks at": "Het veld waar de voorwaarde van stap {n} naar kijkt",
+        "The last step runs on every request. Remove its condition.": "De laatste stap loopt bij elke aanvraag. Haal de voorwaarde weg.",
+        "The value of a condition is at most %s characters.": "De waarde van een voorwaarde is maximaal %s tekens.",
+        "The value of the condition of step {n}": "De waarde van de voorwaarde van stap {n}",
+        "When the answer to": "Als het antwoord op",
+        "does not include": "bevat niet",
+        "includes": "bevat",
+        "is at least": "is minstens",
+        "is at most": "is hoogstens",
+        "is filled in": "is ingevuld",
+        "is not": "is niet",
+        "is on or after": "is op of na",
+        "is on or before": "is op of voor",
+        "is": "is",
+        "%1$s: the step \"%2$s\" is past its deadline": "%1$s: de stap \"%2$s\" is over de deadline",
+        "{workflow}: the step \"{step}\" is past its deadline": "{workflow}: de stap \"{step}\" is over de deadline",
+        "Counted from when the request reaches this step, Monday to Friday.": "Geteld vanaf het moment dat de aanvraag deze stap bereikt, maandag tot en met vrijdag.",
+        "Deadline in working days (optional)": "Deadline in werkdagen (optioneel)",
+        "Deadline of step {n} in working days (optional)": "Deadline van stap {n} in werkdagen (optioneel)",
+        "Due:": "Uiterlijk:",
+        "Give a step 1 to %s working days, or no deadline.": "Geef een stap 1 tot %s werkdagen, of geen deadline.",
+        "Overdue since {date}": "Over tijd sinds {date}",
+        "Overdue since:": "Over tijd sinds:",
+        "Past its deadline: {step}": "Over de deadline: {step}",
+        "_Within {n} working day_::_Within {n} working days_": [
+            "Binnen {n} werkdag",
+            "Binnen {n} werkdagen"
+        ],
+        "Fields of task {t} of step {n}": "Velden van taak {t} van stap {n}",
+        "Fields the requester fills in to complete this task. Everybody on the request sees the answers.": "Velden die de aanvrager invult om deze taak af te ronden. Iedereen bij de aanvraag ziet de antwoorden.",
+        "Fields whoever does this task fills in to complete it. Only the team sees the answers.": "Velden die wie deze taak doet invult om hem af te ronden. Alleen het team ziet de antwoorden.",
+        "A condition can only use a field of the request form or of a step before it.": "Een voorwaarde kan alleen een veld van het aanvraagformulier of van een eerdere stap gebruiken.",
+        "Give every field of a task a name.": "Geef elk veld van een taak een naam.",
+        "Loading this team. More settings may appear in a moment.": "Dit team wordt geladen. Er kunnen zo meer instellingen verschijnen.",
+        "This needs a TeamHub licence.": "Hiervoor is een TeamHub-licentie nodig."
     },
     "pluralForm": "nplurals=2; plural=(n != 1);"
 }

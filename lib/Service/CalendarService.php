@@ -402,27 +402,20 @@ class CalendarService {
      * The calendar itself and its events are preserved.
      */
     public function removeCalendarAccess(string $teamId, int $calendarId, \OCP\IDBConnection $db): bool {
-        try {
-            $principalUri = 'principals/circles/' . $teamId;
-            $qb = $db->getQueryBuilder();
-            $affected = $qb->delete('dav_shares')
-                ->where($qb->expr()->eq('type',         $qb->createNamedParameter('calendar')))
-                ->andWhere($qb->expr()->eq('principaluri', $qb->createNamedParameter($principalUri)))
-                ->andWhere($qb->expr()->eq('resourceid',   $qb->createNamedParameter($calendarId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
-                ->executeStatement();
+        // v4.20.38: a failure throws. It used to return false, the same answer as "nothing to remove", so a caller could not tell a refused strip from a done one.
+        $principalUri = 'principals/circles/' . $teamId;
+        $qb = $db->getQueryBuilder();
+        $affected = $qb->delete('dav_shares')
+            ->where($qb->expr()->eq('type',         $qb->createNamedParameter('calendar')))
+            ->andWhere($qb->expr()->eq('principaluri', $qb->createNamedParameter($principalUri)))
+            ->andWhere($qb->expr()->eq('resourceid',   $qb->createNamedParameter($calendarId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+            ->executeStatement();
 
-            $this->logger->debug('[TeamHub][CalendarService] removeCalendarAccess: dav_shares row removed', [
-                'teamId' => $teamId, 'calendarId' => $calendarId,
-                'affected' => $affected, 'app' => Application::APP_ID,
-            ]);
-            return $affected > 0;
-        } catch (\Throwable $e) {
-            $this->logger->error('[TeamHub][CalendarService] removeCalendarAccess failed', [
-                'teamId' => $teamId, 'calendarId' => $calendarId,
-                'error' => $e->getMessage(), 'app' => Application::APP_ID,
-            ]);
-            return false;
-        }
+        $this->logger->debug('[TeamHub][CalendarService] removeCalendarAccess: dav_shares row removed', [
+            'teamId' => $teamId, 'calendarId' => $calendarId,
+            'affected' => $affected, 'app' => Application::APP_ID,
+        ]);
+        return $affected > 0;
     }
 
     /**
@@ -458,63 +451,6 @@ class CalendarService {
                 'calendarId' => $calendarId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
             return ['deleted' => false, 'detail' => $e->getMessage()];
-        }
-    }
-
-    public function deleteCalendar(string $teamId, \OCP\IDBConnection $db): array {
-        try {
-            // Find the calendar via dav_shares: principaluri = principals/circles/{teamId}
-            $principalUri = 'principals/circles/' . $teamId;
-            $qb = $db->getQueryBuilder();
-            $res = $qb->select('resourceid')
-                ->from('dav_shares')
-                ->where($qb->expr()->eq('type', $qb->createNamedParameter('calendar')))
-                ->andWhere($qb->expr()->eq('principaluri', $qb->createNamedParameter($principalUri)))
-                ->setMaxResults(1)
-                ->executeQuery();
-            $row = $res->fetch();
-            $res->closeCursor();
-
-            if (!$row) {
-                return ['deleted' => false, 'detail' => 'No calendar found for this team'];
-            }
-
-            $calendarId = (int)$row['resourceid'];
-
-            // Delete via CalDavBackend (cascades events, attendees, alarms)
-            try {
-                $caldav = $this->container->get(\OCA\DAV\CalDAV\CalDavBackend::class);
-                $caldav->deleteCalendar($calendarId, true);
-            } catch (\Throwable $e) {
-                // Fallback: delete dav_shares row and calendarobjects manually
-                $this->logger->warning('[TeamHub][CalendarService] deleteCalendar: CalDavBackend failed, using QB', [
-                    'error' => $e->getMessage(), 'app' => Application::APP_ID,
-                ]);
-                foreach (['dav_shares', 'calendarobjects', 'calendars'] as $tbl) {
-                    $col = ($tbl === 'dav_shares') ? 'resourceid' : 'calendarid';
-                    if ($tbl === 'calendars') {
-                        $col = 'id';
-                    }
-                    try {
-                        $dqb = $db->getQueryBuilder();
-                        $dqb->delete($tbl)
-                            ->where($dqb->expr()->eq($col, $dqb->createNamedParameter($calendarId)))
-                            ->executeStatement();
-                    } catch (\Throwable $inner) {
-                        $this->logger->warning('[TeamHub][CalendarService] deleteCalendar QB fallback failed', [
-                            'table' => $tbl, 'error' => $inner->getMessage(), 'app' => Application::APP_ID,
-                        ]);
-                    }
-                }
-            }
-
-            return ['deleted' => true, 'detail' => "Calendar {$calendarId} deleted"];
-
-        } catch (\Throwable $e) {
-            $this->logger->error('[TeamHub][CalendarService] deleteCalendar failed', [
-                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
-            ]);
-            return ['deleted' => false, 'detail' => 'Operation failed — see server log for details'];
         }
     }
 

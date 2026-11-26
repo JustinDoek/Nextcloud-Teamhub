@@ -219,7 +219,7 @@ export default {
     gap: var(--th-space-sm);
     padding: var(--th-space-sm) var(--th-space-lg);
     background: var(--color-warning);
-    border-bottom: 1px solid var(--color-warning-text);
+    border-bottom: 1px solid var(--color-border);
     font-size: var(--th-font-meta);
     color: var(--color-warning-text);
     line-height: var(--th-line-height-tight);
@@ -235,7 +235,6 @@ export default {
    so the colour is reinforcement rather than the signal (WCAG 1.4.1). */
 .th-team-notices__strip--expired {
     background: var(--color-error);
-    border-bottom-color: var(--color-error-text);
     color: var(--color-error-text);
 }
 

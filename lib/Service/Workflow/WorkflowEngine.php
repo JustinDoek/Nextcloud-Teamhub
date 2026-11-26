@@ -21,10 +21,15 @@ use OCA\TeamHub\Exception\WorkflowRateLimitException;
 use OCA\TeamHub\Exception\WorkflowTransitionException;
 use OCA\TeamHub\Service\AuditService;
 use OCA\TeamHub\Service\DecisionService;
+use OCA\TeamHub\Service\ServiceTeam\RequestForm;
+use OCA\TeamHub\Service\ServiceTeam\RequestPersonResolver;
+use OCA\TeamHub\Service\ServiceTeam\StepCondition;
 use OCA\TeamHub\Service\ServiceTeam\ServiceTeamService;
 use OCA\TeamHub\Workflow\IWorkflowDefinition;
 use OCA\TeamHub\Workflow\IWorkflowDefinitionActionPolicy;
 use OCA\TeamHub\Workflow\IWorkflowDefinitionHooks;
+use OCA\TeamHub\Workflow\Definition\TeamServiceDefinition;
+use OCA\TeamHub\Workflow\IWorkflowApprovals;
 use OCA\TeamHub\Workflow\IWorkflowClosableByDesk;
 use OCA\TeamHub\Workflow\IWorkflowDefinitionEndHook;
 use OCA\TeamHub\Workflow\IWorkflowDefinitionReference;
@@ -36,6 +41,7 @@ use OCA\TeamHub\Workflow\WorkflowCapability;
 use OCA\TeamHub\Workflow\WorkflowDefinitionRegistry;
 use OCA\TeamHub\Workflow\WorkflowEventType;
 use OCA\TeamHub\Workflow\WorkflowParticipantRole;
+use OCA\TeamHub\Workflow\WorkflowStepDefinition;
 use OCA\TeamHub\Workflow\WorkflowStatus;
 use OCA\TeamHub\Workflow\WorkflowStepStatus;
 use OCP\AppFramework\Utility\ITimeFactory;
@@ -191,6 +197,18 @@ class WorkflowEngine {
 
     private const MAX_TEXT = 1000;
 
+    /** v4.20.58 — approvals one request may have open at a time. */
+    public const MAX_OPEN_APPROVALS = 5;
+
+    /** v4.20.58 — the key of an approval somebody asked for, as against one the service planned. */
+    public const ASKED_APPROVAL_PREFIX = 'approval_';
+
+    /** v4.20.66 — what a step a condition left out says it was (`actionTaken`). */
+    public const NOT_NEEDED = 'not_needed';
+
+    /** v4.20.58 — an asked-for approval's rejection goes back to whoever asked. */
+    private const REJECT_RETURNS = 'return';
+
     /** @var array<int, callable(): void> what to do once the current transaction has committed */
     private array $afterCommit = [];
 
@@ -238,6 +256,15 @@ class WorkflowEngine {
         // decision; whether a given reader may open it, and what its question
         // is, are answered by the Decisions module against that reader.
         private ?DecisionService            $decisions = null,
+        // v4.20.58 — who may be named as an approver by the person asking.
+        // Optional like the others: without it nobody can be asked.
+        private ?RequestPersonResolver      $people = null,
+        // v4.20.62 — the notices a service sends. Optional like the others.
+        private ?WorkflowNoticeService      $notices = null,
+        // v4.20.68 — deadlines on steps. Optional like the others.
+        private ?StepDeadlineService        $deadlines = null,
+        // v4.20.71 — checks what is filled in on a task with fields.
+        private ?RequestForm                $form = null,
     ) {
     }
 
@@ -379,6 +406,19 @@ class WorkflowEngine {
                 $actor = $def->actor;
                 if ($actor->isInitiator()) {
                     $actor = WorkflowActor::user($uid);
+                } elseif ($actor->isApprover()) {
+                    // v4.20.58 — who approves depends on who asks.
+                    $actor = $definition instanceof IWorkflowApprovals ? $definition->resolveApprover($def, $uid, $data) : null;
+                    $judged = in_array((string)($def->config['when']['field'] ?? ''), array_column((array)($data['form'] ?? []), 'key'), true);
+                    if (($actor === null || $actor->isUnresolved()) && $judged && !StepCondition::holds($def->config['when'] ?? null, (array)($data['form'] ?? []))) {
+                        // v4.20.66 — nobody to approve a step this request
+                        // will never reach: it is skipped, and holds nobody.
+                        $actor = WorkflowActor::user($uid);
+                    }
+                    if ($actor === null || $actor->isUnresolved()) {
+                        throw new WorkflowTransitionException(
+                            $this->l->t('There is nobody to approve this request. Ask the service team.'));
+                    }
                 } elseif ($actor->isUnresolved()) {
                     // v4.10.20 - a placeholder the definition fills in from
                     // the payload: today the service team that handles this
@@ -408,9 +448,19 @@ class WorkflowEngine {
                 // request may move on without this one.
                 $step->setStageLabel(mb_substr($def->stageLabel, 0, 255));
                 $step->setNonBlocking($def->nonBlocking ? 1 : 0);
+                if ($def->type === WorkflowStepDefinition::TYPE_APPROVAL) {
+                    // v4.20.58 — who approves is the row's actor already; the
+                    // rest is what the service said about the approval.
+                    $step->setStepType($def->type);
+                    $step->mergeConfig(array_diff_key($def->config, ['approver' => true]));
+                } elseif ($def->config !== []) {
+                    // v4.20.62 — its notices.
+                    $step->mergeConfig($def->config);
+                }
                 if ($order === 1) {
                     $step->setStepStatus(WorkflowStepStatus::AVAILABLE);
                     $step->setEnteredAt($now);
+                    $this->deadlines?->stamp($step, $now);
                 }
                 $stepRows[] = $this->steps->insert($step);
             }
@@ -422,6 +472,10 @@ class WorkflowEngine {
             $participants[] = $this->addParticipant($instance, WorkflowActor::user($uid), WorkflowParticipantRole::INITIATOR, $uid, []);
             $seen = [WorkflowActor::user($uid)->key() => true];
             foreach ($stepRows as $step) {
+                if ($step->isApproval()) {
+                    // v4.20.58 — on the request from the moment they are asked.
+                    continue;
+                }
                 $actor = WorkflowActor::of($step->getActorType(), $step->getActorId());
                 if (isset($seen[$actor->key()])) {
                     continue;
@@ -450,6 +504,7 @@ class WorkflowEngine {
             } else {
                 $this->notifyStageAvailable($instance, $firstStage, null);
                 $this->deskAuditStage($instance, $firstStage, 'received', $uid);
+                $this->sendNotices($instance, $stepRows, 1, WorkflowNoticeService::ON_REACHED);
             }
 
             // A one-step definition that auto-completes ends here; `finish()`
@@ -517,9 +572,13 @@ class WorkflowEngine {
     public function listEvents(int $id, string $uid): array {
         $instance = $this->loadVisible($id);
         $steps    = $this->steps->findByInstance($id);
-        $this->assertMayView($uid, $instance, $this->participants->findByInstance($id));
+        $participants = $this->participants->findByInstance($id);
+        $this->assertMayView($uid, $instance, $participants);
 
         $events = $this->events->listForInstance($id);
+        if ($this->seesAsApprover($uid, $instance, $steps, $participants)) {
+            $events = $this->eventsForApprover($events, $steps, $uid, $instance);
+        }
         if (!$this->isHandlingAgent($uid, $steps)) {
             $events = array_values(array_filter(
                 $events,
@@ -777,14 +836,28 @@ class WorkflowEngine {
      *
      * @return array<string, mixed>
      */
-    public function completeStep(int $id, string $uid, ?string $note = null, ?string $stepKey = null, mixed $fileIds = []): array {
-        return $this->transactional(function () use ($id, $uid, $note, $stepKey, $fileIds): array {
+    public function completeStep(int $id, string $uid, ?string $note = null, ?string $stepKey = null, mixed $fileIds = [], mixed $answers = []): array {
+        return $this->transactional(function () use ($id, $uid, $note, $stepKey, $fileIds, $answers): array {
             [$instance, $steps, $participants] = $this->loadOpen($id);
             $step = $this->pickStep($instance, $steps, $uid, $stepKey);
             $this->assertHolder($uid, $step, $instance);
             $this->assertNotBlocked($instance);
             $this->assertMayEnd($steps, $step);
+            if ($this->openApprovalFor($steps, $step) !== null) {
+                // v4.20.58 — otherwise the request could move on and be
+                // refused afterwards.
+                throw new WorkflowTransitionException($this->l->t('Wait for the approval you asked for first.'));
+            }
             $note  = $this->text($note);
+            // v4.20.71 — a task with fields is completed by filling them in;
+            // checked before anything is written.
+            if ($step->fieldList() !== [] && $this->form !== null) {
+                if (!is_array($answers)) {
+                    throw new ValidationException($this->form->unreadableMessage());
+                }
+                $step->setAnswers(json_encode($this->form->answers(['fields' => $step->fieldList()], $answers),
+                    JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+            }
             $files = $this->attachFiles($instance, $steps, $uid, $fileIds, false, $step->getStepKey());
 
             if ($step->getStepStatus() === WorkflowStepStatus::AVAILABLE) {
@@ -1884,6 +1957,8 @@ class WorkflowEngine {
                 throw new ValidationException($this->l->t('A reason is required.'));
             }
 
+            $approval = $step->isApproval();
+            $outcome  = $approval ? (string)($step->configMap()['onReject'] ?? TeamServiceDefinition::REJECT_ENDS) : TeamServiceDefinition::REJECT_ENDS;
             $this->recordActorParticipant($instance, $step, $uid, $participants);
             $this->moveStep($step, WorkflowStepStatus::REJECTED);
             $now = $this->timeFactory->getTime();
@@ -1893,8 +1968,21 @@ class WorkflowEngine {
             $step->setReason($reason);
             $this->steps->update($step);
             $files = $this->attachFiles($instance, $steps, $uid, $fileIds, false, $step->getStepKey());
-            $this->events->record((int)$instance->getId(), WorkflowEventType::STEP_REJECTED, $uid, $step, ['reason' => $reason] + ($files !== [] ? ['files' => $files] : []));
+            $this->events->record((int)$instance->getId(), WorkflowEventType::STEP_REJECTED, $uid, $step, ['reason' => $reason] + ($approval ? ['approval' => true] : []) + ($files !== [] ? ['files' => $files] : []));
             $this->deskAudit($instance, $step, 'rejected', $uid);
+            if ($approval) {
+                $this->endApproval($instance, $step, $steps, $uid, false, $reason);
+            }
+            if ($outcome !== self::REJECT_RETURNS) {
+                $this->sendNotices($instance, $steps, $step->getStepOrder(), WorkflowNoticeService::ON_REJECTED);
+            }
+            if ($outcome === self::REJECT_RETURNS || $outcome === TeamServiceDefinition::REJECT_CARRIES_ON) {
+                // v4.20.58 — an approver's no that does not end the request:
+                // it goes back to whoever asked, or the request carries on.
+                $this->audit($instance, 'approval_rejected', $uid, ['step' => $step->getStepKey()]);
+                $instance = $this->advance($instance, $steps, $step, $uid);
+                return $this->finish($instance, $steps, $uid, $step->getStepKey());
+            }
 
             // v4.10.37 — rejecting one task rejects the request: every other
             // open task, of this step or an earlier non-blocking one, is
@@ -1963,7 +2051,7 @@ class WorkflowEngine {
             [$instance, $steps, $participants] = $this->loadOpen($id);
             // v4.10.37 — the task that asked, or the first one waiting.
             $step = $this->waitingStep($instance, $steps, $stepKey);
-            if (!$this->isParticipant($uid, $instance, $participants)) {
+            if (!$this->isParticipant($uid, $instance, $participants) || $this->seesAsApprover($uid, $instance, $steps, $participants)) {
                 throw new AccessDeniedException($this->l->t('You are not part of this workflow.'));
             }
             $this->assertNotBlocked($instance);
@@ -2010,6 +2098,10 @@ class WorkflowEngine {
             }
             $actor = WorkflowActor::of($step->getActorType(), $step->getActorId());
             if ($this->resolver->holds($uid, $actor, $instance->getTeamId())) {
+                throw new ValidationException($this->l->t('This step is waiting for you; there is nobody to ask.'));
+            }
+            // v4.20.61 — nor while it waits for the requester's own answer.
+            if ($uid === $instance->getStartedBy() && $step->getStepStatus() === WorkflowStepStatus::WAITING_FOR_INFORMATION) {
                 throw new ValidationException($this->l->t('This step is waiting for you; there is nobody to ask.'));
             }
             $note = $this->text($note);
@@ -2203,6 +2295,60 @@ class WorkflowEngine {
             $this->audit($instance, 'closed', $uid);
             $this->notifyEnded($instance, $uid, $note);
             return $this->finish($instance, $steps, $uid);
+        });
+    }
+
+    /**
+     * The requester did not confirm in time, so TeamHub does (v4.20.54,
+     * `docs/service-builder.md` § 14.3) — for a service that says so, in the
+     * setting the request was started with (`data.confirm`).
+     *
+     * Only a request that waits for nothing but that confirmation: open, not
+     * blocked, the last step the one open task, the requester's own, and not
+     * waiting for an answer. Anything else is left as it is and is not an
+     * error: the job that asks reads its candidates before this transaction.
+     *
+     * Nobody's name goes on it. The event says it was automatic, so the
+     * record never reads as if the requester had confirmed.
+     *
+     * @return bool whether the request was confirmed
+     */
+    public function confirmAutomatically(int $id): bool {
+        return $this->transactional(function () use ($id): bool {
+            $instance = $this->instances->findById($id);
+            if ($instance === null
+                || !WorkflowStatus::isOpen($instance->getStatus())
+                || $instance->getStatus() === WorkflowStatus::BLOCKED
+                || !$this->registry->get($instance->getDefinitionKey()) instanceof IWorkflowClosableByDesk
+            ) {
+                return false;
+            }
+            $confirm = $instance->getData()['confirm'] ?? null;
+            if (!is_array($confirm) || ($confirm['mode'] ?? '') !== TeamServiceDefinition::CONFIRM_AUTO) {
+                return false;
+            }
+            $steps  = $this->steps->findByInstance($id);
+            $active = $this->activeStepsOf($steps);
+            $step   = $active[0] ?? null;
+            $now    = $this->timeFactory->getTime();
+            if (count($active) !== 1
+                || $step->getStepKey() !== TeamServiceDefinition::STEP_CONFIRM
+                || $step->getActorType() !== WorkflowActor::TYPE_USER
+                || $step->getActorId() !== $instance->getStartedBy()
+                || $step->getStepStatus() === WorkflowStepStatus::WAITING_FOR_INFORMATION
+                || $step->getEnteredAt() === null
+                || $step->getEnteredAt() + (int)($confirm['days'] ?? TeamServiceDefinition::CONFIRM_DAYS) * 86400 > $now
+            ) {
+                return false;
+            }
+            if ($step->getStepStatus() === WorkflowStepStatus::AVAILABLE) {
+                $this->moveStep($step, WorkflowStepStatus::IN_PROGRESS);
+                $step->setStartedAt($now);
+                $this->steps->update($step);
+            }
+            $instance = $this->completeStepRow($instance, $steps, $step, '', null, [], ['auto' => true]);
+            $this->finish($instance, $steps, '');
+            return true;
         });
     }
 
@@ -2466,6 +2612,10 @@ class WorkflowEngine {
         // rows; removed after the commit, because a share is not part of the
         // transaction. The daily job catches one that could not be removed.
         $live = $this->shares?->liveShares($id) ?? [];
+        // v4.20.58 — and the ones an approver still had.
+        foreach ($steps as $step) {
+            $this->dropApproverShares($step);
+        }
         // Files attached to the very write that ended it are not shared:
         // the event still names them, and nobody is handed a share that
         // the ending would take back at once.
@@ -2517,6 +2667,7 @@ class WorkflowEngine {
         // not. A decision is the team's own record in the Decisions module and
         // has nothing to do with this workflow's licence.
         $this->decisionLinks?->deleteByInstance($id);
+        $this->afterCommit[] = fn () => $this->notices?->withdraw($id);
         $this->events->deleteForInstance($id);
         $this->participants->deleteByInstance($id);
         $this->steps->deleteByInstance($id);
@@ -2624,6 +2775,15 @@ class WorkflowEngine {
                 return $step;
             }
         }
+        if ($uid === $instance->getStartedBy()) {
+            // v4.20.60 — somebody waits for the requester's answer, whichever
+            // task of the request asked.
+            foreach ($active as $step) {
+                if ($step->getStepStatus() === WorkflowStepStatus::WAITING_FOR_INFORMATION) {
+                    return $step;
+                }
+            }
+        }
         foreach ($active as $step) {
             if ($step->getAssignee() === ''
                 && $this->resolver->holds($uid, WorkflowActor::of($step->getActorType(), $step->getActorId()), $instance->getTeamId())
@@ -2686,7 +2846,7 @@ class WorkflowEngine {
             }
         }
         foreach ($this->rowsOfOrder($steps, $step->getStepOrder()) as $other) {
-            if ($other !== $step && !$other->isNonBlocking() && $other->getStepStatus() !== WorkflowStepStatus::COMPLETED) {
+            if ($other !== $step && !$other->isNonBlocking() && !$this->isAnswered($other)) {
                 return false;
             }
         }
@@ -2733,6 +2893,9 @@ class WorkflowEngine {
         $actor = WorkflowActor::of($step->getActorType(), $step->getActorId());
         if (!$this->resolver->holds($uid, $actor, $instance->getTeamId())) {
             throw new AccessDeniedException($this->l->t('This step is not yours to act on.'));
+        }
+        if ($step->isApproval() && !$this->mayDecide($uid, $instance, $this->steps->findByInstance((int)$instance->getId()), $step)) {
+            throw new AccessDeniedException($this->l->t('You cannot approve this request yourself.'));
         }
         if ($step->getActorType() === WorkflowActor::TYPE_SERVICE_AGENT && $step->getAssignee() === '') {
             // v4.10.39 — see mayActOnClaimed().
@@ -2925,67 +3088,508 @@ class WorkflowEngine {
      *
      * @param WorkflowStep[] $steps
      */
-    private function completeStepRow(WorkflowInstance $instance, array $steps, WorkflowStep $step, string $uid, ?string $note, array $files = []): WorkflowInstance {
+    private function completeStepRow(WorkflowInstance $instance, array $steps, WorkflowStep $step, string $uid, ?string $note, array $files = [], array $extra = []): WorkflowInstance {
+        // v4.20.54 — '' is TeamHub itself (`confirmAutomatically()`).
+        $actor = $uid !== '' ? $uid : null;
         // v4.10.29 — the definition's side effect goes first, before any row
         // moves: when it throws, nothing below has happened and the
         // transaction rolls back to a step still waiting for its answer.
         $definition = $this->registry->get($instance->getDefinitionKey());
-        if ($definition instanceof IWorkflowDefinitionHooks) {
+        if ($definition instanceof IWorkflowDefinitionHooks && !$step->isApproval()) {
             $definition->onStepCompleted($instance, $step->getStepKey(), $uid);
+        }
+        if ($step->isApproval()) {
+            $extra += ['approval' => true];
         }
         $this->moveStep($step, WorkflowStepStatus::COMPLETED);
         $now = $this->timeFactory->getTime();
         $step->setCompletedAt($now);
-        $step->setCompletedBy($uid);
+        $step->setCompletedBy($actor);
         $step->setActionTaken('complete');
         $step->setReason($note);
         $this->steps->update($step);
-        $this->events->record((int)$instance->getId(), WorkflowEventType::STEP_COMPLETED, $uid, $step,
-            ($note !== null ? ['note' => $note] : []) + ($files !== [] ? ['files' => $files] : []));
-        $this->audit($instance, 'step_completed', $uid, ['step' => $step->getStepKey()]);
-        $this->deskAudit($instance, $step, 'answered', $uid);
+        $this->events->record((int)$instance->getId(), WorkflowEventType::STEP_COMPLETED, $actor, $step,
+            ($note !== null ? ['note' => $note] : []) + ($files !== [] ? ['files' => $files] : []) + $extra);
+        $this->audit($instance, 'step_completed', $actor, ['step' => $step->getStepKey()] + $extra);
+        $this->deskAudit($instance, $step, 'answered', $actor);
+        if ($step->isApproval()) {
+            $this->endApproval($instance, $step, $steps, $uid, true, $note);
+        }
+        return $this->advance($instance, $steps, $step, $uid, $extra);
+    }
 
+    /**
+     * A task is answered: the request moves on when nothing in its step holds
+     * it up any more.
+     *
+     * @param WorkflowStep[] $steps
+     * @param array<string, mixed> $extra on the audit line of an ending
+     */
+    private function advance(WorkflowInstance $instance, array $steps, WorkflowStep $step, string $uid, array $extra = []): WorkflowInstance {
+        $actor = $uid !== '' ? $uid : null;
+        $now   = $this->timeFactory->getTime();
         // v4.10.37 — a step moves on when every task of it the request waits
         // for is done; until then the other tasks carry on.
         $order = $step->getStepOrder();
         foreach ($this->rowsOfOrder($steps, $order) as $sibling) {
-            if (!$sibling->isNonBlocking() && $sibling->getStepStatus() !== WorkflowStepStatus::COMPLETED) {
+            if (!$sibling->isNonBlocking() && !$this->isAnswered($sibling)) {
                 return $this->syncCurrentStep($this->reflectSteps($instance, $steps), $steps);
             }
         }
 
-        $next = array_values(array_filter(
-            $this->rowsOfOrder($steps, $order + 1),
-            static fn (WorkflowStep $s): bool => $s->getStepStatus() === WorkflowStepStatus::PENDING,
-        ));
-        $later = false;
-        foreach ($steps as $other) {
-            $later = $later || $other->getStepOrder() > $order;
-        }
-        if ($next === [] && $later) {
+        $following = $this->rowsOfOrder($steps, $order + 1);
+        $pending   = static fn (WorkflowStep $s): bool => $s->getStepStatus() === WorkflowStepStatus::PENDING;
+        if ($following !== [] && array_filter($following, $pending) === []) {
             // A non-blocking task finishing after the request moved past its
             // step: nothing moves, the request carries on where it is.
             return $this->syncCurrentStep($this->reflectSteps($instance, $steps), $steps);
+        }
+        if (!$this->wasRejected($this->rowsOfOrder($steps, $order))) {
+            $this->sendNotices($instance, $steps, $order, WorkflowNoticeService::ON_DONE);
+        }
+        // v4.20.66 — the next step whose condition holds; the ones between
+        // are not needed (`docs/service-builder.md` § 14.6).
+        $next = [];
+        for ($o = $order + 1; ($rows = $this->rowsOfOrder($steps, $o)) !== []; $o++) {
+            $rows = array_values(array_filter($rows, $pending));
+            if ($rows === []) {
+                continue;
+            }
+            if ($this->isNeeded($instance, $rows, $steps)) {
+                $next = $rows;
+                break;
+            }
+            foreach ($rows as $row) {
+                $this->moveStep($row, WorkflowStepStatus::SKIPPED);
+                $row->setCompletedAt($now);
+                $row->setActionTaken(self::NOT_NEEDED);
+                $this->steps->update($row);
+                $this->events->record((int)$instance->getId(), WorkflowEventType::STEP_SKIPPED, null, $row, ['notNeeded' => true]);
+            }
         }
         if ($next !== []) {
             foreach ($next as $row) {
                 $this->moveStep($row, WorkflowStepStatus::AVAILABLE);
                 $row->setEnteredAt($now);
+                // v4.20.68 — when it is due, from now.
+                $this->deadlines?->stamp($row, $now);
                 $this->steps->update($row);
                 $this->events->record((int)$instance->getId(), WorkflowEventType::STEP_AVAILABLE, null, $row);
+                if ($row->isApproval()) {
+                    $this->admitApprover($instance, $row, $actor);
+                }
             }
             $instance->setCurrentStep($next[0]->getStepKey());
             $instance = $this->reflectSteps($instance, $steps);
             $this->notifyStageAvailable($instance, $next, $uid);
             $this->deskAuditStage($instance, $next, 'received', $instance->getStartedBy());
+            // v4.20.67 — the step it arrived at, past any it left out.
+            $this->sendNotices($instance, $steps, $next[0]->getStepOrder(), WorkflowNoticeService::ON_REACHED);
             return $instance;
         }
 
         $instance = $this->endInstance($instance, WorkflowStatus::COMPLETED, self::OUTCOME_COMPLETED, $uid);
-        $this->events->record((int)$instance->getId(), WorkflowEventType::COMPLETED, $uid);
-        $this->audit($instance, 'completed', $uid);
+        $this->events->record((int)$instance->getId(), WorkflowEventType::COMPLETED, $actor);
+        $this->audit($instance, 'completed', $actor, $extra);
         $this->notifyEnded($instance, $uid, null);
         return $instance;
+    }
+
+    /**
+     * Answered, either way: an approval that was rejected and did not end the
+     * request holds nothing up (v4.20.58).
+     */
+    private function isAnswered(WorkflowStep $step): bool {
+        return in_array($step->getStepStatus(), [WorkflowStepStatus::COMPLETED, WorkflowStepStatus::REJECTED], true);
+    }
+
+    /**
+     * Whether this viewer is shown a step's deadline (v4.20.70): the service
+     * team, and whoever has the step. The requester sees their own steps'
+     * deadlines and not the team's: the lead time on the catalogue card is
+     * the public promise (DESIGN §2.289).
+     */
+    private function seesDeadline(string $uid, bool $isAgent, WorkflowInstance $instance, WorkflowStep $step): bool {
+        return $isAgent || ($uid !== '' && $this->resolver->holds($uid, WorkflowActor::of($step->getActorType(), $step->getActorId()), $instance->getTeamId()));
+    }
+
+    /**
+     * Whether a step runs on this request (v4.20.66): the condition on its
+     * first task, against the answers the request started with.
+     *
+     * @param WorkflowStep[] $rows the tasks of one step
+     */
+    private function isNeeded(WorkflowInstance $instance, array $rows, array $steps = []): bool {
+        foreach ($rows as $row) {
+            $when = $row->configMap()['when'] ?? null;
+            if (is_array($when)) {
+                return StepCondition::holds($when, $this->answersSoFar($instance, $steps));
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Every answer of the request so far (v4.20.71): the request form's, then
+     * what was filled in on the tasks completed since.
+     *
+     * @param WorkflowStep[] $steps
+     * @return list<array<string, mixed>>
+     */
+    private function answersSoFar(WorkflowInstance $instance, array $steps): array {
+        $all = array_values(array_filter((array)($instance->getData()['form'] ?? []), 'is_array'));
+        foreach ($steps as $step) {
+            if ($step->getStepStatus() === WorkflowStepStatus::COMPLETED) {
+                $all = array_merge($all, $step->answerList());
+            }
+        }
+        return $all;
+    }
+
+    /**
+     * Whether the step's own answer was no, which is not *done*. An approval
+     * somebody asked for while working on the step is not its answer.
+     *
+     * @param WorkflowStep[] $rows
+     */
+    private function wasRejected(array $rows): bool {
+        foreach ($rows as $row) {
+            if ($row->getStepStatus() === WorkflowStepStatus::REJECTED
+                && !str_starts_with($row->getStepKey(), self::ASKED_APPROVAL_PREFIX)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * The notices of one step at one moment (v4.20.62, § 14.5): in the history
+     * now, so the record of a request that ends in this same write has them,
+     * and sent by a job after the commit.
+     *
+     * @param WorkflowStep[] $steps
+     */
+    private function sendNotices(WorkflowInstance $instance, array $steps, int $order, string $on): void {
+        if ($this->notices === null) {
+            return;
+        }
+        $id   = (int)$instance->getId();
+        $rows = $this->rowsOfOrder($steps, $order);
+        foreach ($rows as $row) {
+            foreach ($this->notices->plan($instance, $row, $rows, $on) as $notice) {
+                $this->events->record(
+                    $id,
+                    $notice['why'] === '' ? WorkflowEventType::NOTICE_SENT : WorkflowEventType::NOTICE_FAILED,
+                    null, $row, $notice['payload'], WorkflowEventType::VISIBILITY_INTERNAL,
+                );
+                if ($notice['why'] === '') {
+                    $key = $row->getStepKey();
+                    $this->afterCommit[] = fn () => $this->notices->queue($id, $key, $notice['index'], $notice['uids'], $notice['channels']);
+                }
+            }
+        }
+    }
+
+    // ── Approvals (v4.20.58, `docs/service-builder.md` § 14.4) ─────────────
+
+    /**
+     * Whoever claimed a task asks somebody to approve before they go on: an
+     * extra task in the step the request is at, for that person. The request
+     * waits for it by the rules a step with several tasks has (§ 4), and a
+     * rejection goes back to whoever asked instead of ending the request.
+     *
+     * @return array<string, mixed>
+     * @throws AccessDeniedException not the person who claimed the task
+     * @throws ValidationException nobody, or somebody who may not approve
+     */
+    public function requestApproval(int $id, string $uid, string $approver, string $question, ?string $stepKey = null): array {
+        $this->serviceTeams->requireLicence();
+        return $this->transactional(function () use ($id, $uid, $approver, $question, $stepKey): array {
+            [$instance, $steps, $participants] = $this->loadOpen($id);
+            $step = $this->requireServiceStep($uid, $instance, $steps, $stepKey);
+            if ($step->getAssignee() !== $uid) {
+                throw new AccessDeniedException($this->l->t('Only whoever claimed this task can ask for an approval.'));
+            }
+            $this->assertNotBlocked($instance);
+            if ($step->getStepStatus() !== WorkflowStepStatus::IN_PROGRESS) {
+                throw new WorkflowTransitionException($this->l->t('This task is not being worked on right now.'));
+            }
+            $question = $this->text($question);
+            if ($question === null) {
+                throw new ValidationException($this->l->t('Say what you want approved.'));
+            }
+            $this->assertMayApprove($approver, $uid, $instance);
+
+            $open = 0;
+            $key  = 1;
+            foreach ($steps as $row) {
+                if (str_starts_with($row->getStepKey(), self::ASKED_APPROVAL_PREFIX)) {
+                    $key++;
+                }
+                if (!$row->isApproval() || !WorkflowStepStatus::isActive($row->getStepStatus())) {
+                    continue;
+                }
+                $open++;
+                if ($row->getActorType() === WorkflowActor::TYPE_USER && $row->getActorId() === $approver) {
+                    throw new WorkflowTransitionException($this->l->t('This person was already asked.'));
+                }
+            }
+            if ($open >= self::MAX_OPEN_APPROVALS) {
+                throw new ValidationException($this->l->t('Wait for the approvals you asked for first.'));
+            }
+
+            $row = new WorkflowStep();
+            $row->setInstanceId($id);
+            $row->setStepKey(self::ASKED_APPROVAL_PREFIX . $key);
+            $row->setStepOrder($step->getStepOrder());
+            $row->setStepStatus(WorkflowStepStatus::AVAILABLE);
+            $row->setEnteredAt($this->timeFactory->getTime());
+            $row->setActorType(WorkflowActor::TYPE_USER);
+            $row->setActorId($approver);
+            $row->setLabel('Approval');
+            $row->setRoleLabel('');
+            $row->setStageLabel('');
+            $row->setNonBlocking(0);
+            $row->setStepType(WorkflowStepDefinition::TYPE_APPROVAL);
+            $row->mergeConfig(['onReject' => self::REJECT_RETURNS, 'askedStep' => $step->getStepKey(), 'askedBy' => $uid, 'question' => $question]);
+            $row     = $this->steps->insert($row);
+            $steps[] = $row;
+
+            $this->events->record($id, WorkflowEventType::APPROVAL_REQUESTED, $uid, $row, ['to' => $approver, 'note' => $question]);
+            $this->admitApprover($instance, $row, $uid, $participants);
+            $this->audit($instance, 'approval_requested', $uid, ['step' => $step->getStepKey(), 'to' => $approver]);
+            $this->afterCommit[] = fn () => $this->notifier->approvalRequested($instance, $row, $uid, $question);
+            return $this->finish($this->reflectSteps($instance, $steps), $steps, $uid, $step->getStepKey());
+        });
+    }
+
+    /**
+     * An approval goes to somebody else: by whoever was asked, or by an admin
+     * of the service team when the approver is away.
+     *
+     * @return array<string, mixed>
+     */
+    public function delegateApproval(int $id, string $uid, string $approver, ?string $note = null, ?string $stepKey = null): array {
+        return $this->transactional(function () use ($id, $uid, $approver, $note, $stepKey): array {
+            [$instance, $steps, $participants] = $this->loadOpen($id);
+            $step = $this->pickStep($instance, $steps, $uid, $stepKey);
+            if (!$step->isApproval()) {
+                throw new WorkflowTransitionException($this->l->t('This step is not an approval.'));
+            }
+            if (!$this->mayDelegate($uid, $instance, $steps, $step)) {
+                throw new AccessDeniedException($this->l->t('This step is not yours to act on.'));
+            }
+            $this->assertNotBlocked($instance);
+            $this->assertMayApprove($approver, (string)($step->configMap()['askedBy'] ?? ''), $instance);
+            if ($approver === $uid) {
+                // An admin of the desk moves it to somebody, never to
+                // themself: that would be the desk approving its own work.
+                throw new ValidationException($this->l->t('Hand the approval to somebody other than yourself.'));
+            }
+            if ($step->getActorType() === WorkflowActor::TYPE_USER && $step->getActorId() === $approver) {
+                throw new WorkflowTransitionException($this->l->t('This person was already asked.'));
+            }
+            $note = $this->text($note);
+            $from = ['type' => $step->getActorType(), 'id' => $step->getActorId()];
+            // Whoever had it leaves the request: they were on it to answer.
+            foreach ($participants as $p) {
+                if ($p->getWfRole() === WorkflowParticipantRole::APPROVER && $p->getRemovedAt() === null
+                    && $p->getActorType() === $from['type'] && $p->getActorId() === $from['id']) {
+                    $p->setRemovedAt($this->timeFactory->getTime());
+                    $this->participants->update($p);
+                }
+            }
+            $this->dropApproverShares($step);
+            $former = clone $step;
+            $step->setActorType(WorkflowActor::TYPE_USER);
+            $step->setActorId($approver);
+            $this->steps->update($step);
+            $this->events->record($id, WorkflowEventType::APPROVAL_DELEGATED, $uid, $step, ['from' => $from['id'], 'to' => $approver] + ($note !== null ? ['note' => $note] : []));
+            $this->admitApprover($instance, $step, $uid);
+            $this->audit($instance, 'approval_delegated', $uid, ['step' => $step->getStepKey(), 'to' => $approver]);
+            $this->afterCommit[] = function () use ($instance, $former, $step, $uid, $note): void {
+                $this->notifier->approvalWithdrawn($instance, $former);
+                $this->notifier->approvalRequested($instance, $step, $uid, $note ?? (string)($step->configMap()['question'] ?? ''));
+            };
+            return $this->finish($instance, $steps, $uid, $step->getStepKey());
+        });
+    }
+
+    /** Somebody who can be asked: known to the person asking, and neither of the two it is about. */
+    private function assertMayApprove(string $approver, string $askedBy, WorkflowInstance $instance): void {
+        if ($approver === $instance->getStartedBy()) {
+            throw new ValidationException($this->l->t('The requester cannot approve their own request.'));
+        }
+        if ($askedBy !== '' && $approver === $askedBy) {
+            throw new ValidationException($this->l->t('Whoever asks for an approval cannot give it.'));
+        }
+        if ($approver === '' || $this->people?->nameFor($approver) === null) {
+            throw new ValidationException($this->l->t('Pick somebody to approve this.'));
+        }
+    }
+
+    /**
+     * May this person answer the approval, beside holding it: never the
+     * requester, never whoever asked for it or has the task it is about.
+     *
+     * @param WorkflowStep[] $steps
+     */
+    private function mayDecide(string $uid, WorkflowInstance $instance, array $steps, WorkflowStep $step): bool {
+        if (!$step->isApproval()) {
+            return true;
+        }
+        $config = $step->configMap();
+        if ($uid === $instance->getStartedBy() || $uid === (string)($config['askedBy'] ?? '')) {
+            return false;
+        }
+        $asked = $this->taskAskedFor($steps, $step);
+        return $asked === null || $asked->getAssignee() !== $uid;
+    }
+
+    /** @param WorkflowStep[] $steps */
+    private function mayDelegate(string $uid, WorkflowInstance $instance, array $steps, WorkflowStep $step): bool {
+        $desk = $this->serviceTeamOf($steps);
+        return ($this->resolver->holds($uid, WorkflowActor::of($step->getActorType(), $step->getActorId()), $instance->getTeamId())
+                && $this->mayDecide($uid, $instance, $steps, $step))
+            || ($desk !== '' && $uid !== $instance->getStartedBy() && $this->serviceTeams->isServiceOwner($uid, $desk));
+    }
+
+    /**
+     * The task an asked-for approval is about, or null for a planned one.
+     *
+     * @param WorkflowStep[] $steps
+     */
+    private function taskAskedFor(array $steps, WorkflowStep $approval): ?WorkflowStep {
+        $key = (string)($approval->configMap()['askedStep'] ?? '');
+        foreach ($steps as $step) {
+            if ($key !== '' && $step->getStepKey() === $key) {
+                return $step;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The open approval a task waits for, or null.
+     *
+     * @param WorkflowStep[] $steps
+     */
+    private function openApprovalFor(array $steps, WorkflowStep $task): ?WorkflowStep {
+        foreach ($steps as $step) {
+            if ($step->isApproval() && WorkflowStepStatus::isActive($step->getStepStatus())
+                && (string)($step->configMap()['askedStep'] ?? '') === $task->getStepKey()) {
+                return $step;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The approver comes onto the request, now that they are asked — not at
+     * its creation, when nobody had asked them anything yet. A planned
+     * approver also gets to see the files the requester attached.
+     *
+     * @param WorkflowParticipant[]|null $participants
+     */
+    private function admitApprover(WorkflowInstance $instance, WorkflowStep $step, ?string $by, ?array $participants = null): void {
+        $actor = WorkflowActor::of($step->getActorType(), $step->getActorId());
+        foreach ($participants ?? $this->participants->findByInstance((int)$instance->getId()) as $p) {
+            if ($p->getRemovedAt() === null && $p->getWfRole() === WorkflowParticipantRole::APPROVER
+                && $p->getActorType() === $actor->type && $p->getActorId() === $actor->id) {
+                $actor = null;
+                break;
+            }
+        }
+        if ($actor !== null) {
+            $this->addParticipant($instance, $actor, WorkflowParticipantRole::APPROVER, $by, ['step' => $step->getStepKey()]);
+        }
+        if (!str_starts_with($step->getStepKey(), self::ASKED_APPROVAL_PREFIX)) {
+            $this->afterCommit[] = function () use ($instance, $step): void {
+                $ids = $this->shares?->shareForApprover($instance, WorkflowActor::of($step->getActorType(), $step->getActorId())) ?? [];
+                if ($ids !== []) {
+                    $step->mergeConfig(['shares' => $ids]);
+                    $this->steps->update($step);
+                }
+            };
+        }
+    }
+
+    /** The approver's own shares go when they have answered, or are not asked any more. */
+    private function dropApproverShares(WorkflowStep $step): void {
+        $ids = array_values(array_filter((array)($step->configMap()['shares'] ?? []), 'is_string'));
+        if ($ids === []) {
+            return;
+        }
+        $step->mergeConfig(['shares' => []]);
+        $this->steps->update($step);
+        $this->afterCommit[] = fn () => $this->shares?->removeShareIds($ids);
+    }
+
+    /**
+     * An approval was answered: its shares go, and whoever asked for it hears.
+     * A planned one tells nobody here; the next step's holders are told that
+     * it is theirs, and an ending tells everybody.
+     *
+     * @param WorkflowStep[] $steps
+     */
+    private function endApproval(WorkflowInstance $instance, WorkflowStep $step, array $steps, string $uid, bool $approved, ?string $note): void {
+        $this->dropApproverShares($step);
+        $asked = $this->taskAskedFor($steps, $step);
+        if ($asked === null) {
+            return;
+        }
+        $to = $asked->getAssignee() !== '' ? $asked->getAssignee() : (string)($step->configMap()['askedBy'] ?? '');
+        $this->afterCommit[] = function () use ($instance, $step, $to, $uid, $approved, $note): void {
+            $this->notifier->approvalWithdrawn($instance, $step);
+            $this->notifier->approvalAnswered($instance, $step, $to, $uid, $approved, $note);
+        };
+    }
+
+    /**
+     * Is this person on the request only to approve a step of it? They see
+     * what was asked, the steps and what was decided; not the conversation
+     * between the requester and the desk (§ 14.4).
+     *
+     * @param WorkflowStep[] $steps
+     * @param WorkflowParticipant[] $participants
+     */
+    private function seesAsApprover(string $uid, WorkflowInstance $instance, array $steps, array $participants): bool {
+        if ($uid === $instance->getStartedBy() || $this->isHandlingAgent($uid, $steps) || $this->resolver->isNextcloudAdmin($uid)) {
+            return false;
+        }
+        $others = array_values(array_filter($participants,
+            static fn (WorkflowParticipant $p): bool => $p->getWfRole() !== WorkflowParticipantRole::APPROVER));
+        return !$this->isParticipant($uid, $instance, $others) && $this->isParticipant($uid, $instance, $participants);
+    }
+
+    /**
+     * The history as an approver reads it: without the conversation, except
+     * what they asked the requester themselves and the answer to it.
+     *
+     * @param array<int, array<string, mixed>> $events
+     * @param WorkflowStep[] $steps
+     * @return array<int, array<string, mixed>>
+     */
+    private function eventsForApprover(array $events, array $steps, string $uid, WorkflowInstance $instance): array {
+        $own = [];
+        foreach ($steps as $step) {
+            if ($step->isApproval() && ($step->getCompletedBy() === $uid
+                || $this->resolver->holds($uid, WorkflowActor::of($step->getActorType(), $step->getActorId()), $instance->getTeamId()))) {
+                $own[$step->getStepKey()] = true;
+            }
+        }
+        return array_values(array_filter($events, static function (array $e) use ($own): bool {
+            switch ($e['type'] ?? '') {
+                case WorkflowEventType::MESSAGE:
+                case WorkflowEventType::DECISION_LINKED:
+                case WorkflowEventType::DECISION_UNLINKED:
+                    return false;
+                case WorkflowEventType::INFORMATION_REQUESTED:
+                case WorkflowEventType::INFORMATION_PROVIDED:
+                    return isset($own[(string)($e['stepKey'] ?? '')]);
+            }
+            return true;
+        }));
     }
 
     /**
@@ -3001,7 +3605,9 @@ class WorkflowEngine {
                 return;
             }
         }
-        $participants[] = $this->addParticipant($instance, WorkflowActor::user($uid), WorkflowParticipantRole::ACTOR, $uid, ['step' => $step->getStepKey()]);
+        // v4.20.58 — a member of a group that approves stays an approver.
+        $participants[] = $this->addParticipant($instance, WorkflowActor::user($uid),
+            $step->isApproval() ? WorkflowParticipantRole::APPROVER : WorkflowParticipantRole::ACTOR, $uid, ['step' => $step->getStepKey()]);
     }
 
     /** @param array<string, mixed> $payload */
@@ -3056,7 +3662,7 @@ class WorkflowEngine {
         $instance->setOutcome($outcome);
         $instance->setCurrentStep(null);
         $instance->setEndedAt($now);
-        $instance->setEndedBy($uid);
+        $instance->setEndedBy($uid !== '' ? $uid : null);
         return $this->moveInstance($instance, $status);
     }
 
@@ -3244,6 +3850,23 @@ class WorkflowEngine {
         };
     }
 
+    /**
+     * The words on an approval's two buttons: the service's own, or the
+     * app's (v4.20.58).
+     *
+     * @return array<string, string>
+     */
+    private function approvalLabels(WorkflowStep $step): array {
+        $config  = $step->configMap();
+        $approve = trim((string)($config['approveLabel'] ?? ''));
+        $reject  = trim((string)($config['rejectLabel'] ?? ''));
+        return [
+            // TRANSLATORS: button — approve a step of a service request
+            'complete' => $approve !== '' ? $approve : $this->l->t('Approve'),
+            'reject'   => $reject !== '' ? $reject : $this->l->t('Reject'),
+        ];
+    }
+
     /** Trim and cap free text; null when empty. */
     private function text(?string $raw): ?string {
         $t = trim((string)$raw);
@@ -3402,7 +4025,11 @@ class WorkflowEngine {
         // service owner) - the same rule `assertHolder()` enforces, so the
         // button and the call agree.
         $claimBlocks = $active !== null && !$this->mayActOnClaimed($viewerUid, $active);
-        $canAct     = $open && $holds && !$claimBlocks && $instance->getStatus() !== WorkflowStatus::BLOCKED;
+        $canAct     = $open && $holds && !$claimBlocks && $instance->getStatus() !== WorkflowStatus::BLOCKED
+            && $active !== null && $this->mayDecide($viewerUid, $instance, $steps, $active);
+        // v4.20.58 — a task waits for the approval its owner asked for.
+        $waitsForApproval = $active !== null && !$active->isApproval() && $this->openApprovalFor($steps, $active) !== null;
+        $approverOnly     = $this->seesAsApprover($viewerUid, $instance, $steps, $participants);
         // v4.10.31 — an admin of the desk may close the request at any step.
         $canClose   = $open && $this->mayCloseForDesk($viewerUid, $instance, $steps);
         // v4.10.31 — "action required", which is narrower than "you may
@@ -3412,6 +4039,13 @@ class WorkflowEngine {
         // and under Waiting for others otherwise.
         $actionRequired = $canAct && $active !== null
             && ($active->getActorType() !== WorkflowActor::TYPE_SERVICE_AGENT || $assignee === $viewerUid);
+        // v4.20.60 — a question turns it round: it is the requester's to
+        // answer, and whoever asked waits (`/mywork-workflows` rule 1).
+        $waitsForRequester = $open && $active !== null
+            && $active->getStepStatus() === WorkflowStepStatus::WAITING_FOR_INFORMATION;
+        if ($waitsForRequester) {
+            $actionRequired = $viewerUid === $instance->getStartedBy() && $instance->getStatus() !== WorkflowStatus::BLOCKED;
+        }
         $showSteps  = $this->tier->can(WorkflowCapability::VIEW_CURRENT_STEP);
         // v4.11.0 — the conversation: who may write, and whether a question
         // from the desk is waiting for the requester's answer.
@@ -3421,7 +4055,9 @@ class WorkflowEngine {
         $awaitingAnswer = false;
         foreach ($steps as $step) {
             $awaitingAnswer = $awaitingAnswer
-                || ($step->getActorType() === WorkflowActor::TYPE_SERVICE_AGENT
+                // v4.20.60 — an approver's question too: a plain message would
+                // never reach them.
+                || (($step->getActorType() === WorkflowActor::TYPE_SERVICE_AGENT || $step->isApproval())
                     && $step->getStepStatus() === WorkflowStepStatus::WAITING_FOR_INFORMATION);
         }
         // v4.10.17 — the cooldown is part of the answer, not only of the
@@ -3466,16 +4102,34 @@ class WorkflowEngine {
                     'canAct'      => $isOpenTask
                         && $instance->getStatus() !== WorkflowStatus::BLOCKED
                         && $this->resolver->holds($viewerUid, WorkflowActor::of($step->getActorType(), $step->getActorId()), $instance->getTeamId())
-                        && $this->mayActOnClaimed($viewerUid, $step),
+                        && $this->mayActOnClaimed($viewerUid, $step)
+                        && $this->mayDecide($viewerUid, $instance, $steps, $step),
                     // Who has a team task: the team's own business.
                     'assignee'    => $isAgent && $step->getActorType() === WorkflowActor::TYPE_SERVICE_AGENT ? $taskAssignee : '',
                     'status'      => $step->getStepStatus(),
-                    'label'       => $definition?->getStepLabel($this->l, $step->getStepKey()) ?? $step->getLabel(),
+                    'label'       => str_starts_with($step->getStepKey(), self::ASKED_APPROVAL_PREFIX)
+                        // TRANSLATORS: the name of a step in which somebody is asked to approve a service request
+                        ? $this->l->t('Approval')
+                        : ($definition?->getStepLabel($this->l, $step->getStepKey()) ?? $step->getLabel()),
+                    // v4.20.58 — 'approval' for a step somebody approves, with
+                    // what they were asked when somebody asked.
+                    'type'        => $step->isApproval() ? WorkflowStepDefinition::TYPE_APPROVAL : '',
+                    'question'    => $step->isApproval() ? (string)($step->configMap()['question'] ?? '') : '',
                     // v4.10.31 — "Needs: Functional admin"; '' for built-ins.
                     'roleLabel'   => $step->getRoleLabel(),
                     'links'       => $links,
+                    // v4.20.71 — what the task asks to fill in, and what was
+                    // filled in; a team task's for the team only, like its links.
+                    'fields'      => $step->getActorType() === WorkflowActor::TYPE_SERVICE_AGENT && !$isAgent ? [] : $step->fieldList(),
+                    'answers'     => $step->getActorType() === WorkflowActor::TYPE_SERVICE_AGENT && !$isAgent ? [] : $step->answerList(),
                     'actor'       => ['type' => $step->getActorType(), 'id' => $step->getActorId()],
                     'enteredAt'   => $step->getEnteredAt(),
+                    // v4.20.68 — when it is due; null without a deadline.
+                    // v4.20.70 — for the service team and whoever has the
+                    // step: a requester is not shown that a team is late.
+                    'dueAt'       => $this->seesDeadline($viewerUid, $isAgent, $instance, $step) && isset($step->configMap()['dueAt']) ? (int)$step->configMap()['dueAt'] : null,
+                    // v4.20.69 — the day it falls on, as the server counts days.
+                    'dueDate'     => $this->seesDeadline($viewerUid, $isAgent, $instance, $step) && isset($step->configMap()['dueDate']) ? (string)$step->configMap()['dueDate'] : null,
                     'startedAt'   => $step->getStartedAt(),
                     'completedAt' => $step->getCompletedAt(),
                     'completedBy' => $step->getCompletedBy(),
@@ -3533,18 +4187,28 @@ class WorkflowEngine {
             'status'            => $instance->getStatus(),
             'outcome'           => $instance->getOutcome(),
             'currentStep'       => $showSteps ? $instance->getCurrentStep() : null,
-            'responsible'       => $open && $active !== null ? ['type' => $active->getActorType(), 'id' => $active->getActorId()] : null,
+            'responsible'       => $open && $active !== null
+                ? ($waitsForRequester
+                    ? ['type' => WorkflowActor::TYPE_USER, 'id' => $instance->getStartedBy()]
+                    : ['type' => $active->getActorType(), 'id' => $active->getActorId()])
+                : null,
             'startedBy'         => $instance->getStartedBy(),
             'startedAt'         => $instance->getStartedAt(),
             'updatedAt'         => $instance->getUpdatedAt(),
+            // v4.20.68 — when the task this view answers for is due, while it is open.
+            'dueAt'             => $open && $active !== null && $this->seesDeadline($viewerUid, $isAgent, $instance, $active) && isset($active->configMap()['dueAt']) ? (int)$active->configMap()['dueAt'] : null,
+            'dueDate'           => $open && $active !== null && $this->seesDeadline($viewerUid, $isAgent, $instance, $active) && isset($active->configMap()['dueDate']) ? (string)$active->configMap()['dueDate'] : null,
             'endedBy'           => $instance->getEndedBy(),
             'endedAt'           => $instance->getEndedAt(),
             'data'              => $data,
             // v4.10.29 — the active step's own words for complete / reject
             // (*Grant* / *Decline*); empty when the engine's own apply.
-            'actionLabels'      => $open && $active !== null && $definition instanceof IWorkflowDefinitionHooks
-                ? $definition->getActionLabels($this->l, $active->getStepKey())
-                : [],
+            // v4.20.58 — an approval's are on its row.
+            'actionLabels'      => $open && $active !== null && $active->isApproval()
+                ? $this->approvalLabels($active)
+                : ($open && $active !== null && $definition instanceof IWorkflowDefinitionHooks
+                    ? $definition->getActionLabels($this->l, $active->getStepKey())
+                    : []),
             // v4.10.50 — where the work is done when it is not the row (the
             // adoption grid); a link in the detail view, or null.
             'reference'         => $open && $definition instanceof IWorkflowDefinitionReference
@@ -3589,6 +4253,19 @@ class WorkflowEngine {
                 // client draws no button for either; the engine refuses both
                 // as well, because hiding is not a boundary.
                 'canRequestInformation' => $canAct && $this->allowsInformationRequest($instance),
+                // v4.20.58 — approvals. The engine refuses each as well.
+                'canProvideInformation' => $isParticipant && !$approverOnly,
+                'waitsForApproval' => $waitsForApproval,
+                // v4.20.59 — on the request to approve a step of it, and not
+                // in its conversation.
+                'approverOnly'     => $approverOnly,
+                'canRequestApproval' => $canAct && $active !== null && $assignee === $viewerUid && $viewerUid !== ''
+                    && $active->getActorType() === WorkflowActor::TYPE_SERVICE_AGENT
+                    && $active->getStepStatus() === WorkflowStepStatus::IN_PROGRESS
+                    && $this->serviceTeams->isAvailable(),
+                'canDelegate' => $open && $active !== null && $active->isApproval()
+                    && $instance->getStatus() !== WorkflowStatus::BLOCKED
+                    && $this->mayDelegate($viewerUid, $instance, $steps, $active),
                 'canCancel'        => $open
                     && ($instance->getStartedBy() === $viewerUid || $isAdmin)
                     && $this->allowsWithdrawal($instance),
@@ -3596,7 +4273,8 @@ class WorkflowEngine {
                 'canClose'         => $canClose,
                 // v4.10.31 — this viewer's action is required (see above).
                 'actionRequired'   => $actionRequired,
-                'canRequestStatus' => $canAskStatus && $open && $isParticipant && !$holds,
+                'canRequestStatus' => $canAskStatus && $open && $isParticipant && !$holds
+                    && !($waitsForRequester && $viewerUid === $instance->getStartedBy()),
                 // v4.10.20 - "I am on the desk that handles this", which is
                 // what decides whether the internal half is shown at all.
                 'isServiceAgent'   => $isAgent,

@@ -355,12 +355,10 @@ export default {
 	line-height: var(--th-line-height-body, 1.4);
 }
 
-/* A standing caveat rather than an alert — it is always true, so it gets a
-   left rule and the muted colour rather than a warning background that would
+/* A standing caveat rather than an alert — it is always true, so it gets
+   the muted colour rather than a warning background that would
    read as something having gone wrong. */
 .team-export__intro--caution {
-	border-inline-start: 3px solid var(--color-border-dark);
-	padding-inline-start: 8px;
 	color: var(--color-text-maxcontrast);
 	font-size: var(--th-font-meta, 12px);
 }

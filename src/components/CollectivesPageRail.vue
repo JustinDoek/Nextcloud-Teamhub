@@ -1,111 +1,128 @@
 <template>
-    <div class="th-cpr">
-        <!-- Collective header. Clicking it goes back to the landing page,
-             which is the only page the tree cannot show as a row (it is the
-             root every other page hangs off). -->
-        <div class="th-cpr__head">
-            <!-- Raw <button>: a full-width card row with its own chrome, per
-                 SKILLS.md § "NcButton is the default; custom <button> needs a
-                 reason". NcButton would impose its own padding and 44px floor
-                 on a row that has to line up with the tree beneath it. -->
-            <button
-                class="th-cpr__row th-cpr__row--root"
-                :class="{ 'th-cpr__row--active': isActive(rootUrl) }"
-                :aria-current="isActive(rootUrl) ? 'page' : undefined"
-                @click="open(rootUrl)">
-                <span v-if="collective && collective.emoji" class="th-cpr__emoji" aria-hidden="true">{{ collective.emoji }}</span>
-                <BookOpenOutline v-else :size="iconBody" aria-hidden="true" />
-                <span class="th-cpr__title">{{ collectiveName }}</span>
-            </button>
-
+    <!-- v4.20.50 (issue 114): on a narrow screen the rail is a bar with one
+         button, and the list is a panel over the frame. It used to be hidden
+         there, which left a phone with no way to reach another page. -->
+    <div class="th-cpr" :class="{ 'th-cpr--compact': compact }" @keydown.esc="onEscape">
+        <div v-if="compact" class="th-cpr__bar">
             <NcButton
+                ref="toggle"
                 variant="tertiary"
-                :aria-label="t('teamhub', 'New page')"
-                :title="t('teamhub', 'New page')"
-                @click="$emit('create')">
-                <template #icon><Plus :size="iconBody" /></template>
-            </NcButton>
-            <NcButton
-                variant="tertiary"
-                :aria-label="t('teamhub', 'Refresh page list')"
-                :title="t('teamhub', 'Refresh page list')"
-                @click="refresh">
-                <template #icon><Refresh :size="iconBody" /></template>
+                :aria-expanded="panelOpen ? 'true' : 'false'"
+                :aria-controls="panelId"
+                @click="panelOpen = !panelOpen">
+                <template #icon><Menu :size="iconBody" /></template>
+                {{ t('teamhub', 'Pages') }}
             </NcButton>
         </div>
 
-        <div class="th-cpr__filter">
-            <!-- Bare on purpose. NcTextField's trailing-button props are
-                 declared on NcInputField underneath rather than on the
-                 wrapper, so whether the clear button's click reaches us is
-                 a fall-through question this has not verified — and a clear
-                 button is not worth guessing an NC prop contract for
-                 (SKILLS.md § NC component uncertainty rule). Emptying the
-                 field by hand restores the full tree. -->
-            <NcTextField
-                v-model="filter"
-                :label="t('teamhub', 'Search pages')" />
+        <div v-show="!compact || panelOpen" :id="panelId" class="th-cpr__panel">
+            <!-- Collective header. Clicking it goes back to the landing page,
+                 which is the only page the tree cannot show as a row (it is the
+                 root every other page hangs off). -->
+            <div class="th-cpr__head">
+                <!-- Raw <button>: a full-width card row with its own chrome, per
+                     SKILLS.md § "NcButton is the default; custom <button> needs a
+                     reason". NcButton would impose its own padding and 44px floor
+                     on a row that has to line up with the tree beneath it. -->
+                <button
+                    class="th-cpr__row th-cpr__row--root"
+                    :class="{ 'th-cpr__row--active': isActive(rootUrl) }"
+                    :aria-current="isActive(rootUrl) ? 'page' : undefined"
+                    @click="open(rootUrl)">
+                    <span v-if="collective && collective.emoji" class="th-cpr__emoji" aria-hidden="true">{{ collective.emoji }}</span>
+                    <BookOpenOutline v-else :size="iconBody" aria-hidden="true" />
+                    <span class="th-cpr__title">{{ collectiveName }}</span>
+                </button>
+
+                <NcButton
+                    variant="tertiary"
+                    :aria-label="t('teamhub', 'New page')"
+                    :title="t('teamhub', 'New page')"
+                    @click="create">
+                    <template #icon><Plus :size="iconBody" /></template>
+                </NcButton>
+                <NcButton
+                    variant="tertiary"
+                    :aria-label="t('teamhub', 'Refresh page list')"
+                    :title="t('teamhub', 'Refresh page list')"
+                    @click="refresh">
+                    <template #icon><Refresh :size="iconBody" /></template>
+                </NcButton>
+            </div>
+
+            <div class="th-cpr__filter">
+                <!-- Bare on purpose. NcTextField's trailing-button props are
+                     declared on NcInputField underneath rather than on the
+                     wrapper, so whether the clear button's click reaches us is
+                     a fall-through question this has not verified — and a clear
+                     button is not worth guessing an NC prop contract for
+                     (SKILLS.md § NC component uncertainty rule). Emptying the
+                     field by hand restores the full tree. -->
+                <NcTextField
+                    v-model="filter"
+                    :label="t('teamhub', 'Search pages')" />
+            </div>
+
+            <div v-if="loading" class="th-cpr__state">
+                <NcLoadingIcon :size="iconNav" />
+            </div>
+
+            <p v-else-if="error" class="th-cpr__state th-cpr__state--error">
+                {{ t('teamhub', 'Could not load the page list') }}
+            </p>
+
+            <p v-else-if="rows.length === 0 && filter" class="th-cpr__state">
+                {{ t('teamhub', 'No matching pages') }}
+            </p>
+
+            <p v-else-if="rows.length === 0" class="th-cpr__state">
+                {{ t('teamhub', 'No pages yet') }}
+            </p>
+
+            <!-- Deliberately a plain list rather than role="tree" (v4.8.8).
+                 role="tree" is a promise of the full treeview keyboard contract —
+                 arrow-key roving focus, Home/End, type-ahead — and claiming it
+                 without implementing it is worse for a screen-reader user than
+                 not claiming it. As a list of buttons every row is in the normal
+                 tab order, the disclosure state is on aria-expanded, and the page
+                 being shown carries aria-current. -->
+            <ul v-else class="th-cpr__list">
+                <li v-for="row in rows" :key="row.page.id" class="th-cpr__item">
+                    <div class="th-cpr__line" :style="{ paddingInlineStart: indentFor(row.depth) }">
+                        <!-- Twisty and row are separate controls on purpose: one
+                             opens the page, the other only reveals its children. -->
+                        <NcButton
+                            v-if="row.hasChildren"
+                            class="th-cpr__twisty"
+                            :aria-expanded="row.expanded ? 'true' : 'false'"
+                            :aria-label="expandLabel(row)"
+                            @click="toggle(row.page.id)"
+                            variant="tertiary">
+                            <template #icon>
+                                <ChevronDown v-if="row.expanded" :size="iconInline" aria-hidden="true" />
+                                <ChevronRight v-else :size="iconInline" aria-hidden="true" />
+                            </template>
+                        </NcButton>
+                        <span v-else class="th-cpr__twisty th-cpr__twisty--empty" aria-hidden="true" />
+
+                        <!-- Raw <button>: same card-row carve-out as the header. -->
+                        <button
+                            class="th-cpr__row"
+                            :class="{ 'th-cpr__row--active': isActive(row.page.url) }"
+                            :aria-current="isActive(row.page.url) ? 'page' : undefined"
+                            @click="open(row.page.url)">
+                            <span v-if="row.page.emoji" class="th-cpr__emoji" aria-hidden="true">{{ row.page.emoji }}</span>
+                            <FileDocumentOutline v-else :size="iconBody" aria-hidden="true" />
+                            <span class="th-cpr__title">{{ titleOf(row.page) }}</span>
+                        </button>
+                    </div>
+                </li>
+            </ul>
+
+            <p v-if="truncated" class="th-cpr__state th-cpr__state--note">
+                {{ n('teamhub', 'Only the first %n page is listed', 'Only the first %n pages are listed', maxPages, { n: maxPages }) }}
+            </p>
         </div>
-
-        <div v-if="loading" class="th-cpr__state">
-            <NcLoadingIcon :size="iconNav" />
-        </div>
-
-        <p v-else-if="error" class="th-cpr__state th-cpr__state--error">
-            {{ t('teamhub', 'Could not load the page list') }}
-        </p>
-
-        <p v-else-if="rows.length === 0 && filter" class="th-cpr__state">
-            {{ t('teamhub', 'No matching pages') }}
-        </p>
-
-        <p v-else-if="rows.length === 0" class="th-cpr__state">
-            {{ t('teamhub', 'No pages yet') }}
-        </p>
-
-        <!-- Deliberately a plain list rather than role="tree" (v4.8.8).
-             role="tree" is a promise of the full treeview keyboard contract —
-             arrow-key roving focus, Home/End, type-ahead — and claiming it
-             without implementing it is worse for a screen-reader user than
-             not claiming it. As a list of buttons every row is in the normal
-             tab order, the disclosure state is on aria-expanded, and the page
-             being shown carries aria-current. -->
-        <ul v-else class="th-cpr__list">
-            <li v-for="row in rows" :key="row.page.id" class="th-cpr__item">
-                <div class="th-cpr__line" :style="{ paddingInlineStart: indentFor(row.depth) }">
-                    <!-- Twisty and row are separate controls on purpose: one
-                         opens the page, the other only reveals its children. -->
-                    <NcButton
-                        v-if="row.hasChildren"
-                        class="th-cpr__twisty"
-                        :aria-expanded="row.expanded ? 'true' : 'false'"
-                        :aria-label="expandLabel(row)"
-                        @click="toggle(row.page.id)"
-                        variant="tertiary">
-                        <template #icon>
-                            <ChevronDown v-if="row.expanded" :size="iconInline" aria-hidden="true" />
-                            <ChevronRight v-else :size="iconInline" aria-hidden="true" />
-                        </template>
-                    </NcButton>
-                    <span v-else class="th-cpr__twisty th-cpr__twisty--empty" aria-hidden="true" />
-
-                    <!-- Raw <button>: same card-row carve-out as the header. -->
-                    <button
-                        class="th-cpr__row"
-                        :class="{ 'th-cpr__row--active': isActive(row.page.url) }"
-                        :aria-current="isActive(row.page.url) ? 'page' : undefined"
-                        @click="open(row.page.url)">
-                        <span v-if="row.page.emoji" class="th-cpr__emoji" aria-hidden="true">{{ row.page.emoji }}</span>
-                        <FileDocumentOutline v-else :size="iconBody" aria-hidden="true" />
-                        <span class="th-cpr__title">{{ titleOf(row.page) }}</span>
-                    </button>
-                </div>
-            </li>
-        </ul>
-
-        <p v-if="truncated" class="th-cpr__state th-cpr__state--note">
-            {{ n('teamhub', 'Only the first %n page is listed', 'Only the first %n pages are listed', maxPages, { n: maxPages }) }}
-        </p>
     </div>
 </template>
 
@@ -118,6 +135,7 @@ import BookOpenOutline from 'vue-material-design-icons/BookOpenOutline.vue'
 import ChevronDown from 'vue-material-design-icons/ChevronDown.vue'
 import ChevronRight from 'vue-material-design-icons/ChevronRight.vue'
 import FileDocumentOutline from 'vue-material-design-icons/FileDocumentOutline.vue'
+import Menu from 'vue-material-design-icons/Menu.vue'
 import Plus from 'vue-material-design-icons/Plus.vue'
 import Refresh from 'vue-material-design-icons/Refresh.vue'
 import { ICON_INLINE, ICON_BODY, ICON_NAV } from '../constants/uiTokens.js'
@@ -140,18 +158,25 @@ import { ICON_INLINE, ICON_BODY, ICON_NAV } from '../constants/uiTokens.js'
  * routes there in place (AppEmbed::tryInPlaceNavigation), so following the
  * tree costs no app reboot.
  *
+ * On a narrow screen (`compact`) the list does not fit beside the frame, so it
+ * sits behind a Pages button and opens over the frame. Picking a page closes it.
+ *
  * Staleness: pages created or deleted inside the iframe are invisible to us
  * until something refetches. The Refresh button is the explicit answer; the
  * `activeUrl` watcher is the implicit one — landing on a page the tree has
  * never heard of refetches once, which covers "created a page in Collectives
  * and it is not in the list".
  */
+// Nextcloud's own mobile breakpoint. KEEP IN SYNC with the media query on
+// `.th-collectives-tab` in TeamView.vue, which stacks the rail above the frame.
+const COMPACT_QUERY = '(max-width: 1024px)'
+
 export default {
     name: 'CollectivesPageRail',
 
     components: {
         NcButton, NcLoadingIcon, NcTextField,
-        BookOpenOutline, ChevronDown, ChevronRight, FileDocumentOutline, Plus, Refresh,
+        BookOpenOutline, ChevronDown, ChevronRight, FileDocumentOutline, Menu, Plus, Refresh,
     },
 
     props: {
@@ -175,6 +200,10 @@ export default {
             loading: true,
             error: false,
             filter: '',
+            /** Narrow screen: the list is a panel behind the Pages button. */
+            compact: false,
+            panelOpen: false,
+            panelId: 'th-cpr-panel',
             /** Page ids whose children are shown. Top-level rows are always shown. */
             expandedIds: [],
             /** Guards the auto-refetch below against firing twice for one URL. */
@@ -251,6 +280,7 @@ export default {
         teamId() {
             this.filter = ''
             this.expandedIds = []
+            this.panelOpen = false
             this.load()
         },
 
@@ -260,7 +290,18 @@ export default {
     },
 
     mounted() {
+        this._compactMql = window.matchMedia(COMPACT_QUERY)
+        this._compactHandler = (e) => {
+            this.compact = e.matches
+            this.panelOpen = false
+        }
+        this.compact = this._compactMql.matches
+        this._compactMql.addEventListener('change', this._compactHandler)
         this.load()
+    },
+
+    beforeUnmount() {
+        this._compactMql?.removeEventListener('change', this._compactHandler)
     },
 
     methods: {
@@ -301,6 +342,31 @@ export default {
         open(url) {
             if (url) {
                 this.$emit('open', url)
+                this.closePanel()
+            }
+        },
+
+        create() {
+            this.closePanel()
+            this.$emit('create')
+        },
+
+        /**
+         * Close the narrow-screen panel and hand focus back to its button, so
+         * a keyboard user is not left on a row that is no longer there.
+         */
+        closePanel() {
+            if (!this.compact || !this.panelOpen) {
+                return
+            }
+            this.panelOpen = false
+            this.$refs.toggle?.$el?.focus()
+        },
+
+        onEscape(event) {
+            if (this.compact && this.panelOpen) {
+                event.stopPropagation()
+                this.closePanel()
             }
         },
 
@@ -444,6 +510,14 @@ export default {
     background-color: var(--color-main-background);
 }
 
+.th-cpr__panel {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    background-color: var(--color-main-background);
+}
+
 .th-cpr__head {
     display: flex;
     align-items: center;
@@ -560,11 +634,41 @@ export default {
     text-align: start;
 }
 
-/* Below NC's own mobile breakpoint the tab is too narrow to spend 260px on a
-   rail; the widget on the Home tab is the page list at that size. */
-@media only screen and (max-width: 1024px) {
-    .th-cpr {
-        display: none;
-    }
+/* Narrow screen: a bar in the flow, and the panel over the frame. The panel is
+   positioned against `.th-collectives-tab` (TeamView), so opening it covers the
+   frame without resizing the app inside. */
+.th-cpr--compact {
+    --th-cpr-bar-height: calc(var(--default-clickable-area) + 2 * var(--th-space-xs) + 1px);
+    width: 100%;
+    height: auto;
+    flex: 0 0 auto;
+    overflow: visible;
+    border-inline-end: none;
+}
+
+.th-cpr__bar {
+    display: flex;
+    align-items: center;
+    box-sizing: border-box;
+    height: var(--th-cpr-bar-height);
+    padding: var(--th-space-xs) var(--th-space-sm);
+    border-block-end: 1px solid var(--color-border);
+}
+
+.th-cpr--compact .th-cpr__panel {
+    position: absolute;
+    inset-block: var(--th-cpr-bar-height) 0;
+    inset-inline: 0;
+    z-index: 1;
+}
+
+/* Finger-sized rows and disclosure controls. */
+.th-cpr--compact .th-cpr__row {
+    min-height: var(--clickable-area-large);
+}
+
+.th-cpr--compact .th-cpr__twisty {
+    width: var(--default-clickable-area);
+    max-width: var(--default-clickable-area);
 }
 </style>

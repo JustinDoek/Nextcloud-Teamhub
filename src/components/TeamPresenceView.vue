@@ -888,10 +888,12 @@ export default {
     color: var(--color-primary-text, var(--color-main-text));
 }
 
-/* The column the filtered rows are about. An inset edge rather than a fill,
-   so it composes with --today instead of fighting it for the background. */
+/* The column the filtered rows are about. Its ink rather than a fill, so it
+   composes with --today instead of fighting it for the background. The
+   header's button also says it is pressed. */
 .presence-week-grid__day-col--scoped {
-    box-shadow: inset 0 -2px 0 0 var(--color-primary-element);
+    color: var(--color-primary-element);
+    font-weight: 600;
 }
 
 /* An unset half-day is blank, not a grey block announcing "Workplace not

@@ -5,8 +5,6 @@ namespace OCA\TeamHub\Service;
 
 use OCA\TeamHub\AppInfo\Application;
 use OCA\TeamHub\Constants\CirclesMemberType;
-use OCA\TeamHub\Db\DecisionMapper;
-use OCA\TeamHub\Db\DecisionTeamConfigMapper;
 use OCP\DB\QueryBuilder\IQueryBuilder;
 use OCP\Http\Client\IClientService;
 use OCP\IAppConfig;
@@ -24,9 +22,10 @@ use Psr\Log\LoggerInterface;
  *   - Reporting is licence-derived, not a toggle: an instance with an active
  *     licence or trial never sends. See isEnabled() for the full rule and
  *     setEnabled() for why the old admin switch is a no-op.
- *   - The full payload is logged at DEBUG level so admins can verify what is sent.
- *   - Custom link URLs are reduced to their bare hostname before aggregation —
- *     no paths, query strings, ports, fragments, or IP addresses are ever sent.
+ *   - Admin → TeamHub → Reporting shows an administrator every field below with
+ *     its current value. A field added to collectStats() is added there too.
+ *   - No hostname leaves the instance. Until v4.20.44 the payload carried the
+ *     domains of teams' web links, which could include the organisation's own.
  *
  * Payload shape (POST JSON):
  * {
@@ -40,16 +39,16 @@ use Psr\Log\LoggerInterface;
  *   "message_count":        904,
  *   "integrations":         ["teamhublists", "otherapp"],
  *   "builtin_integrations": {"files": 30, "calendar": 20, "deck": 12, "talk": 8},
- *   "presence_module":      true,
- *   "link_domains":         {"github.com": 12, "trello.com": 5, "notion.so": 3},
- *   "announcement_popup":   {"feedback.md": {"shown": 3, "read": 2, "ack": 2, "optout": 1}},
+ *   "modules_enabled":      ["presence", "decisions"],
+ *   "suggest_wizard_uses":  31,
+ *   "announcement_popup":   "enabled" | "disabled",
  *   "event":                "daily_report" | "installed" | "uninstalled"
  * }
  */
 class TelemetryService {
 
     /** The remote endpoint that receives reports. */
-    public const REPORT_URL = 'https://tldr.host/teamhub/report/'; // trailing slash required — Apache 301-redirects bare URL, flipping POST to GET
+    public const REPORT_URL = 'https://teleserv.doekworks.eu/'; // since 4.20.43 (was https://tldr.host/teamhub/report/). Keep it redirect-free: a 301 turns the POST into a GET
 
     /**
      * IConfig key of the retired admin opt-out flag.
@@ -63,6 +62,12 @@ class TelemetryService {
     /** IConfig key: the persistent anonymous UUID. Auto-generated on first use. */
     private const KEY_UUID = 'telemetry_uuid';
 
+    /** Module id in the payload => its instance switch. All default on. See getEnabledModules(). */
+    private const MODULE_SWITCHES = [
+        'presence'  => 'presence_module_enabled',
+        'decisions' => 'decisions_module_enabled',
+    ];
+
     /** HTTP timeout in seconds for the stats POST. */
     private const TIMEOUT = 10;
 
@@ -71,8 +76,6 @@ class TelemetryService {
         private IDBConnection             $db,
         private IClientService            $clientService,
         private IUserManager              $userManager,
-        private DecisionTeamConfigMapper  $decisionTeamConfigMapper,
-        private DecisionMapper            $decisionMapper,
         private LoggerInterface           $logger,
     ) {}
 
@@ -239,27 +242,9 @@ class TelemetryService {
             'message_count'        => $this->countMessages(),
             'integrations'         => $this->getRegisteredIntegrations(),
             'builtin_integrations' => $this->getBuiltinIntegrationUsage(),
-            'presence_module'             => $this->isPresenceModuleEnabled(),
-            'decisions_module'            => $this->isDecisionsModuleEnabled(),
-            'teams_with_decisions_enabled' => $this->countTeamsWithDecisionsEnabled(),
-            'decisions_count'             => $this->countDecisionsTotal(),
-            'decisions_by_status'         => $this->countDecisionsByStatus(),
-            'decision_categories_count'   => $this->countDecisionCategoriesTotal(),
+            'modules_enabled'      => $this->getEnabledModules(),
             'suggest_wizard_uses'  => (int)$this->config->getAppValue(Application::APP_ID, 'suggest_wizard_uses', '0'),
-            // v4.13.56 — the in-app announcement popup, per announcement:
-            // how many administrators were shown it, scrolled it to the end,
-            // pressed OK, and ticked "do not show again". Counts only, no user
-            // and no content; the per-user ledger that stops one person
-            // reloading from reading as twenty instances lives in
-            // AnnouncementService.
-            //
-            // Read from the config value rather than through
-            // AnnouncementService: that service constructs LicenseService, and
-            // this one already cannot inject LicenseService without a cycle
-            // (see isEnabled()). The value is this payload's own shape, so a
-            // decode here costs nothing a getter would save.
-            'announcement_popup'   => $this->getAnnouncementPopupStats(),
-            'link_domains'         => $this->getLinkDomains(),
+            'announcement_popup'   => $this->getAnnouncementPopupState(),
         ];
         return $stats;
     }
@@ -269,41 +254,28 @@ class TelemetryService {
     // -------------------------------------------------------------------------
 
     /**
-     * The announcement popup's counters (v4.13.56).
+     * Whether an administrator has turned an announcement popup off (v4.20.44):
+     * 'disabled' once anybody ticked "Do not show this message again", else
+     * 'enabled'. No counts, no announcement names and no user.
      *
-     * Shape: `{ "<filename>": { shown: n, read: n, ack: n, optout: n } }`.
-     * Empty array when nothing has been recorded, which is also what an
-     * instance that has never had an announcement reports.
+     * The choice is per message and per administrator, and there is no switch
+     * for all of them, so 'disabled' means "at least one administrator opted
+     * out of at least one message" and stays that way for later messages.
      *
-     * Every value is cast rather than trusted. The config string is written
-     * only by AnnouncementService, but it is still a config string, and a
-     * hand edit on an instance must not be able to put an object or a string
-     * into the stats payload.
-     *
-     * @return array<string,array<string,int>>
+     * Read from the config value rather than through AnnouncementService: that
+     * service constructs LicenseService, and this one cannot inject
+     * LicenseService without a cycle (see isEnabled()).
      */
-    private function getAnnouncementPopupStats(): array {
+    private function getAnnouncementPopupState(): string {
         $raw = $this->config->getAppValue(Application::APP_ID, 'announce_popup_stats', '');
-        if ($raw === '') {
-            return [];
-        }
-        $decoded = json_decode($raw, true);
-        if (!is_array($decoded)) {
-            return [];
-        }
-        $out = [];
-        foreach ($decoded as $filename => $events) {
-            if (!is_string($filename) || !is_array($events)) {
-                continue;
+        $decoded = $raw === '' ? null : json_decode($raw, true);
+        foreach (is_array($decoded) ? $decoded : [] as $events) {
+            $optOuts = is_array($events) ? ($events['optout'] ?? 0) : 0;
+            if (is_numeric($optOuts) && (int)$optOuts > 0) {
+                return 'disabled';
             }
-            $out[$filename] = [
-                'shown'  => (int)($events['shown']  ?? 0),
-                'read'   => (int)($events['read']   ?? 0),
-                'ack'    => (int)($events['ack']    ?? 0),
-                'optout' => (int)($events['optout'] ?? 0),
-            ];
         }
-        return $out;
+        return 'enabled';
     }
 
     private function send(string $event): void {
@@ -353,102 +325,27 @@ class TelemetryService {
     }
 
     /**
-     * Whether the TeamHub Presence module is enabled instance-wide. This is the
-     * same app value the LayoutController exposes to the frontend
-     * (presence_module_enabled, '1' = on). Reported in telemetry so we can see
-     * how widely the Presence internal integration is adopted. No content, no
-     * per-team or per-user data — just the on/off state of the module.
-     */
-    private function isPresenceModuleEnabled(): bool {
-        return $this->config->getAppValue(Application::APP_ID, 'presence_module_enabled', '1') === '1';
-    }
-
-    /**
-     * Whether the Decisions module is globally enabled.
-     * (decisions_module_enabled, '1' = on). Reported in telemetry for adoption tracking.
-     */
-    private function isDecisionsModuleEnabled(): bool {
-        return $this->config->getAppValue(Application::APP_ID, 'decisions_module_enabled', '1') === '1';
-    }
-
-    /**
-     * Count teams that have decisions enabled in teamhub_decision_team.
-     * Returns 0 if the table doesn't exist yet (fresh installs mid-migration).
-     */
-    private function countTeamsWithDecisionsEnabled(): int {
-        try {
-            return $this->decisionTeamConfigMapper->countEnabledTeams();
-        } catch (\Throwable) {
-            return 0;
-        }
-    }
-
-    /**
-     * Count total decision rows across all teams. Used for telemetry.
-     */
-    private function countDecisionsTotal(): int {
-        try {
-            $qb = $this->db->getQueryBuilder();
-            $r = $qb->select($qb->func()->count('*', 'cnt'))
-                ->from('teamhub_decisions')
-                ->executeQuery();
-            $val = $r->fetchOne();
-            $r->closeCursor();
-            return (int)$val;
-        } catch (\Throwable) {
-            return 0;
-        }
-    }
-
-    /**
-     * Aggregate counts per decision status. Keys are the five Session H
-     * lifecycle states; values are always present (zero if no rows).
-     * Aggregate-only — no team-id, no proposer-id, no content. Matches the
-     * privacy bar set by DESIGN.md §2.8.
+     * Ids of the modules switched on for the whole instance (v4.20.44, replacing
+     * the `presence_module` and `decisions_module` booleans). 'presence' is the
+     * module the interface calls People.
      *
-     * @return array{open:int, finalized:int, approved:int, denied:int, withdrawn:int}
+     * Only modules the instance can actually use. OpenProject, service teams and
+     * sub-teams also need a licence, and a licensed instance never reports, so
+     * they cannot appear: reading their stored switches would claim sub-teams
+     * for every instance, because that switch defaults to on and is inert
+     * without a licence. Messages, Timeline, Budget and Time are per team and
+     * have no instance switch.
+     *
+     * @return list<string>
      */
-    private function countDecisionsByStatus(): array {
-        $out = [
-            'open' => 0, 'finalized' => 0, 'approved' => 0,
-            'denied' => 0, 'withdrawn' => 0,
-        ];
-        try {
-            $qb = $this->db->getQueryBuilder();
-            $r = $qb->select('status')
-                ->selectAlias($qb->func()->count('*'), 'cnt')
-                ->from('teamhub_decisions')
-                ->groupBy('status')
-                ->executeQuery();
-            while ($row = $r->fetch()) {
-                $key = (string)$row['status'];
-                if (isset($out[$key])) {
-                    $out[$key] = (int)$row['cnt'];
-                }
+    private function getEnabledModules(): array {
+        $enabled = [];
+        foreach (self::MODULE_SWITCHES as $module => $key) {
+            if ($this->config->getAppValue(Application::APP_ID, $key, '1') === '1') {
+                $enabled[] = $module;
             }
-            $r->closeCursor();
-        } catch (\Throwable) {
-            // Fall through with zeros.
         }
-        return $out;
-    }
-
-    /**
-     * Count distinct predefined categories across all teams. Aggregate
-     * only — proves the feature is being used without revealing names.
-     */
-    private function countDecisionCategoriesTotal(): int {
-        try {
-            $qb = $this->db->getQueryBuilder();
-            $r = $qb->select($qb->func()->count('*', 'cnt'))
-                ->from('teamhub_dec_categories')
-                ->executeQuery();
-            $val = $r->fetchOne();
-            $r->closeCursor();
-            return (int)$val;
-        } catch (\Throwable) {
-            return 0;
-        }
+        return $enabled;
     }
 
     private function getRegisteredIntegrations(): array {
@@ -675,93 +572,6 @@ class TelemetryService {
         } catch (\Throwable $e) {
             return [];
         }
-    }
-
-    /**
-     * Aggregates custom web-link URLs by bare hostname, returning a domain => count map.
-     *
-     * Privacy: only the lowercase hostname is kept — no scheme, path, query,
-     * port, or fragment. Localhost and numeric IPs are dropped because they
-     * are not useful for a "popular apps" ranking.
-     *
-     * Example return:
-     *   ['github.com' => 12, 'trello.com' => 5, 'notion.so' => 3]
-     */
-    private function getLinkDomains(): array {
-        $counts = [];
-        try {
-            $qb = $this->db->getQueryBuilder();
-            $result = $qb->select('url')
-                ->from('teamhub_web_links')
-                ->executeQuery();
-            while ($row = $result->fetch()) {
-                $domain = $this->extractDomain((string)$row['url']);
-                if ($domain !== null) {
-                    $counts[$domain] = ($counts[$domain] ?? 0) + 1;
-                }
-            }
-            $result->closeCursor();
-            return $counts;
-        } catch (\Throwable $e) {
-            return [];
-        }
-    }
-
-    /**
-     * Reduces a URL to its lowercase bare hostname, or returns null if the URL
-     * is unusable (empty, unparseable, localhost, or a numeric IP).
-     *
-     * Examples:
-     *   "https://github.com/our-org/repo"    -> "github.com"
-     *   "http://GitLab.Example.com:8080/"    -> "gitlab.example.com"
-     *   "trello.com/b/xyz"                   -> "trello.com"     (scheme auto-prepended)
-     *   "http://192.168.1.10/internal"       -> null             (IP dropped)
-     *   "http://localhost:3000"              -> null             (localhost dropped)
-     *   "not a url"                          -> null
-     */
-    private function extractDomain(string $url): ?string {
-        $url = trim($url);
-        if ($url === '') {
-            return null;
-        }
-
-        // parse_url needs a scheme to reliably extract the host.
-        if (!preg_match('#^[a-z][a-z0-9+.\-]*://#i', $url)) {
-            $url = 'http://' . $url;
-        }
-
-        $host = parse_url($url, PHP_URL_HOST);
-        if (!is_string($host) || $host === '') {
-            return null;
-        }
-
-        $host = strtolower($host);
-
-        // Strip IPv6 brackets so the IP validator sees the raw address.
-        $forValidate = $host;
-        if (str_starts_with($forValidate, '[') && str_ends_with($forValidate, ']')) {
-            $forValidate = substr($forValidate, 1, -1);
-        }
-
-        // Drop numeric IPs (v4 or v6) — not useful for "popular apps" stats.
-        if (filter_var($forValidate, FILTER_VALIDATE_IP) !== false) {
-            return null;
-        }
-
-        // Drop localhost.
-        if ($host === 'localhost' || $host === 'localhost.localdomain') {
-            return null;
-        }
-
-        // Must be a plausible hostname: only [a-z0-9.-] and at least one dot.
-        // This filters garbage URLs like "not a url" (which parse_url happily
-        // accepts as a host) and bare intranet hostnames that won't aggregate
-        // usefully across installations.
-        if (!preg_match('/^[a-z0-9.\-]+$/', $host) || !str_contains($host, '.')) {
-            return null;
-        }
-
-        return $host;
     }
 
     private function generateUuid(): string {

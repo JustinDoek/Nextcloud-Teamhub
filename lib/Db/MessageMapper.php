@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace OCA\TeamHub\Db;
 
 use OCP\DB\QueryBuilder\IQueryBuilder;
+use OCP\DB\QueryBuilder\IQueryFunction;
 use OCP\IDBConnection;
 
 class MessageMapper {
@@ -14,14 +15,16 @@ class MessageMapper {
     }
 
     /**
-     * Count non-pinned messages for a team (for pagination total).
+     * Count the messages of a team's stream (for pagination total): not
+     * pinned, and not a direct proposal (v4.20.26, see notDirectProposal()).
      */
     public function countByTeamId(string $teamId): int {
         $qb = $this->db->getQueryBuilder();
         $qb->select($qb->createFunction('COUNT(*) AS cnt'))
-            ->from('teamhub_messages')
-            ->where($qb->expr()->eq('team_id', $qb->createNamedParameter($teamId)))
-            ->andWhere($qb->expr()->eq('pinned', $qb->createNamedParameter(0, IQueryBuilder::PARAM_INT)));
+            ->from('teamhub_messages', 'm')
+            ->where($qb->expr()->eq('m.team_id', $qb->createNamedParameter($teamId)))
+            ->andWhere($qb->expr()->eq('m.pinned', $qb->createNamedParameter(0, IQueryBuilder::PARAM_INT)))
+            ->andWhere($this->notDirectProposal($qb));
 
         $result = $qb->executeQuery();
         $row    = $result->fetch();
@@ -58,6 +61,10 @@ class MessageMapper {
             ->leftJoin('m', $qb->createFunction($this->commentCountSubquery()), 'c', 'm.id = c.message_id')
             ->where($qb->expr()->eq('m.team_id', $qb->createNamedParameter($teamId)))
             ->andWhere($qb->expr()->eq('m.pinned', $qb->createNamedParameter(0, IQueryBuilder::PARAM_INT)))
+            // v4.20.26 — a direct proposal lives only in the Decisions tab.
+            // The stream used to drop it in the browser, after paging, so a
+            // page of them came out blank (Marketing's page 1).
+            ->andWhere($this->notDirectProposal($qb))
             ->orderBy('m.created_at', 'DESC')
             // v4.5.26 — tie-break. Two messages written in the same second had
             // no defined order, so paging could repeat or skip one; and
@@ -93,10 +100,12 @@ class MessageMapper {
      */
     public function findStreamPosition(string $teamId, int $messageId): int {
         $qb = $this->db->getQueryBuilder();
-        $qb->select('created_at', 'pinned')
-            ->from('teamhub_messages')
-            ->where($qb->expr()->eq('id', $qb->createNamedParameter($messageId, IQueryBuilder::PARAM_INT)))
-            ->andWhere($qb->expr()->eq('team_id', $qb->createNamedParameter($teamId)))
+        $qb->select('m.created_at', 'm.pinned')
+            ->from('teamhub_messages', 'm')
+            ->where($qb->expr()->eq('m.id', $qb->createNamedParameter($messageId, IQueryBuilder::PARAM_INT)))
+            ->andWhere($qb->expr()->eq('m.team_id', $qb->createNamedParameter($teamId)))
+            // v4.20.26 — a direct proposal has no place in the stream.
+            ->andWhere($this->notDirectProposal($qb))
             ->setMaxResults(1);
         $res = $qb->executeQuery();
         $row = $res->fetch();
@@ -111,14 +120,15 @@ class MessageMapper {
         // anything newer, plus anything from the same second with a higher id.
         $cQb = $this->db->getQueryBuilder();
         $cQb->select($cQb->createFunction('COUNT(*) AS cnt'))
-            ->from('teamhub_messages')
-            ->where($cQb->expr()->eq('team_id', $cQb->createNamedParameter($teamId)))
-            ->andWhere($cQb->expr()->eq('pinned', $cQb->createNamedParameter(0, IQueryBuilder::PARAM_INT)))
+            ->from('teamhub_messages', 'm')
+            ->where($cQb->expr()->eq('m.team_id', $cQb->createNamedParameter($teamId)))
+            ->andWhere($cQb->expr()->eq('m.pinned', $cQb->createNamedParameter(0, IQueryBuilder::PARAM_INT)))
+            ->andWhere($this->notDirectProposal($cQb))
             ->andWhere($cQb->expr()->orX(
-                $cQb->expr()->gt('created_at', $cQb->createNamedParameter($createdAt, IQueryBuilder::PARAM_INT)),
+                $cQb->expr()->gt('m.created_at', $cQb->createNamedParameter($createdAt, IQueryBuilder::PARAM_INT)),
                 $cQb->expr()->andX(
-                    $cQb->expr()->eq('created_at', $cQb->createNamedParameter($createdAt, IQueryBuilder::PARAM_INT)),
-                    $cQb->expr()->gt('id', $cQb->createNamedParameter($messageId, IQueryBuilder::PARAM_INT)),
+                    $cQb->expr()->eq('m.created_at', $cQb->createNamedParameter($createdAt, IQueryBuilder::PARAM_INT)),
+                    $cQb->expr()->gt('m.id', $cQb->createNamedParameter($messageId, IQueryBuilder::PARAM_INT)),
                 ),
             ));
         $cRes = $cQb->executeQuery();
@@ -160,6 +170,29 @@ class MessageMapper {
      * found". `from()` emits the `*PREFIX*` placeholder, and the connection
      * expands it over the whole statement at execute time, subquery included.
      */
+    /**
+     * v4.20.26 — `NOT EXISTS (a decision with source_type 'direct' on m.id)`.
+     *
+     * A proposal made from Compose decision or Propose decision is stored
+     * as a message with a decision whose source_type is 'direct', and lives
+     * only in the Decisions tab. The stream's page, its total and a deep
+     * link's position must all leave it out, or the pages stop adding up: a
+     * page whose rows were all direct proposals rendered blank, because the
+     * browser removed them after the server had paged.
+     *
+     * The outer query must alias teamhub_messages as `m`. The value is bound
+     * on the outer builder, which executes the statement; `from()` emits the
+     * `*PREFIX*` placeholder as in commentCountSubquery().
+     */
+    private function notDirectProposal(IQueryBuilder $qb): IQueryFunction {
+        $sub = $this->db->getQueryBuilder();
+        $sub->select('d.id')
+            ->from('teamhub_decisions', 'd')
+            ->where($sub->expr()->eq('d.message_id', 'm.id'))
+            ->andWhere($sub->expr()->eq('d.source_type', $qb->createNamedParameter('direct')));
+        return $qb->createFunction('NOT EXISTS (' . $sub->getSQL() . ')');
+    }
+
     private function commentCountSubquery(): string {
         $sub = $this->db->getQueryBuilder();
         $sub->select('message_id')
@@ -729,7 +762,7 @@ class MessageMapper {
     }
 
     /**
-     * Full-text search across message subject and body.
+     * Full-text search across message subject and body, inside `$teamIds`.
      *
      * Also JOINs circles_circle to include the team display_name in each row,
      * so the search provider can show "Team Name" in the result subline without
@@ -738,14 +771,24 @@ class MessageMapper {
      * Returns raw rows (not run through rowToArray) because the search provider
      * only needs a subset of fields and also needs team_name from the JOIN.
      *
-     * @param string $term  The search term (LIKE %term%)
-     * @param int    $limit Maximum rows to return from the DB
-     * @param int    $offset Pagination offset (for cursor-based paging)
+     * v4.20.27 — the team list is part of the query. It used to be applied by
+     * the provider after the fetch, so a page of matches from other teams
+     * came back empty with no cursor. `%` and `_` in the term are escaped:
+     * they matched anything before.
+     *
+     * @param string   $term    The search term (LIKE %term%)
+     * @param string[] $teamIds Teams the searcher may read; empty returns nothing
+     * @param int      $limit   Maximum rows to return from the DB
+     * @param int      $offset  Pagination offset (for cursor-based paging)
      * @return array<int, array{id:int, team_id:string, author_id:string, subject:string, message:string, team_name:string}>
      */
-    public function search(string $term, int $limit = 30, int $offset = 0): array {
+    public function search(string $term, array $teamIds, int $limit = 30, int $offset = 0): array {
+        if ($teamIds === []) {
+            return [];
+        }
 
-        $qb = $this->db->getQueryBuilder();
+        $qb   = $this->db->getQueryBuilder();
+        $like = '%' . $this->db->escapeLikeParameter(mb_strtolower($term)) . '%';
 
         $qb->select('m.id', 'm.team_id', 'm.author_id', 'm.subject', 'm.message', 'm.created_at')
             ->addSelect($qb->createFunction("COALESCE(cc.display_name, '') AS team_name"))
@@ -756,15 +799,19 @@ class MessageMapper {
                 'cc',
                 $qb->expr()->eq('m.team_id', 'cc.unique_id')
             )
-            ->where(
+            ->where($qb->expr()->in(
+                'm.team_id',
+                $qb->createNamedParameter(array_values($teamIds), IQueryBuilder::PARAM_STR_ARRAY)
+            ))
+            ->andWhere(
                 $qb->expr()->orX(
                     $qb->expr()->like(
                         $qb->createFunction('LOWER(m.subject)'),
-                        $qb->createNamedParameter('%' . strtolower($term) . '%')
+                        $qb->createNamedParameter($like)
                     ),
                     $qb->expr()->like(
                         $qb->createFunction('LOWER(m.message)'),
-                        $qb->createNamedParameter('%' . strtolower($term) . '%')
+                        $qb->createNamedParameter($like)
                     )
                 )
             )
@@ -774,7 +821,11 @@ class MessageMapper {
             // row here would be a duplicate whose `?message=` link scrolls to
             // nothing (seen on the instance, 2026-09-20).
             ->andWhere($qb->expr()->neq('m.message_type', $qb->createNamedParameter('decision')))
+            // v4.20.27 — and a direct proposal, which the stream also leaves
+            // out (v4.20.26), whatever its message_type.
+            ->andWhere($this->notDirectProposal($qb))
             ->orderBy('m.created_at', 'DESC')
+            ->addOrderBy('m.id', 'DESC')
             ->setMaxResults($limit)
             ->setFirstResult($offset);
 

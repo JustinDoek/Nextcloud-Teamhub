@@ -2785,13 +2785,11 @@ export default {
 
 .ctv__done-warn {
     color: var(--color-warning-text);
-    border-inline-start: 3px solid var(--color-warning-text);
-    background: var(--color-background-hover);
+    background: var(--color-warning);
 }
 
 .ctv__done-note {
     color: var(--color-main-text);
-    border-inline-start: 3px solid var(--color-success-text);
     background: var(--color-background-hover);
 }
 
@@ -2799,7 +2797,6 @@ export default {
     max-width: 70ch;
     margin-top: 4px;
     padding: 8px 12px;
-    border-inline-start: 3px solid var(--color-primary-element);
     background: var(--color-background-hover);
     border-radius: var(--th-radius-control);
     font-size: var(--th-font-body);

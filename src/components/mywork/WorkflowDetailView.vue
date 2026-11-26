@@ -59,7 +59,14 @@
 					<p v-if="focus" class="wf-detail__step-meta">
 						<span>{{ stepStateLabel(focus) }}</span>
 						<span v-if="taskHolder(focus)">{{ taskHolder(focus) }}</span>
+						<!-- v4.20.68 — its deadline. -->
+						<span v-if="dueOf(focus)" :class="{ 'wf-detail__overdue': dueOf(focus).overdue }">{{ dueOf(focus).text }}</span>
 					</p>
+					<!-- v4.20.58 — what somebody is asked to approve, and that a task waits for it. -->
+					<p v-if="focus && focus.question" class="wf-detail__question">{{ focus.question }}</p>
+					<p v-if="waitsForApproval" class="wf-detail__step-meta">{{ t('teamhub', 'Waiting for the approval you asked for.') }}</p>
+					<!-- v4.20.54 — a service may confirm a request by itself. -->
+					<p v-if="confirmNote" class="wf-detail__step-meta">{{ confirmNote }}</p>
 					<WorkflowStepLinks
 						v-if="focus"
 						:step="focus"
@@ -90,7 +97,7 @@
 						<NcButton
 							v-for="(a, i) in actions"
 							:key="a"
-							:variant="i === 0 && !claimable ? 'primary' : 'secondary'"
+							:variant="a === primary && !claimable ? 'primary' : 'secondary'"
 							:disabled="busy"
 							@click="$emit('action', { workflow, action: a })">
 							<template v-if="busy && i === 0 && !claimable" #icon><NcLoadingIcon :size="iconBody" /></template>
@@ -123,7 +130,9 @@
 				</section>
 
 				<section v-if="tab === 'request'" class="wf-detail__section" :aria-label="t('teamhub', 'Request')">
-					<p v-if="workflow.description" class="wf-detail__description">{{ workflow.description }}</p>
+					<!-- v4.20.54 — what the service asked and what was answered. -->
+					<WorkflowAnswers v-if="hasAnswers" :workflow="workflow" />
+					<p v-else-if="workflow.description" class="wf-detail__description">{{ workflow.description }}</p>
 					<p v-else class="wf-detail__muted">{{ t('teamhub', 'No description.') }}</p>
 				</section>
 
@@ -168,10 +177,13 @@
 									<span class="wf-detail__step-meta">
 										<span>{{ stepStateLabel(stage.tasks[0]) }}</span>
 										<span v-if="trackerState(stage.tasks[0]) !== 'done'">{{ taskHolder(stage.tasks[0]) }}</span>
+										<span v-if="dueOf(stage.tasks[0])" :class="{ 'wf-detail__overdue': dueOf(stage.tasks[0]).overdue }">{{ dueOf(stage.tasks[0]).text }}</span>
 										<span v-else-if="stage.tasks[0].completedBy">{{ t('teamhub', 'by {name}', { name: displayName(stage.tasks[0].completedBy) }) }}</span>
 										<time v-if="stage.tasks[0].completedAt" :datetime="isoInstant(stage.tasks[0].completedAt)" :title="formatAbsolute(stage.tasks[0].completedAt)">{{ formatStamp(stage.tasks[0].completedAt) }}</time>
 									</span>
 									<span v-if="stage.tasks[0].reason" class="wf-detail__step-reason">{{ stage.tasks[0].reason }}</span>
+									<!-- v4.20.71 — what was filled in on the task. -->
+									<WorkflowAnswers v-if="(stage.tasks[0].answers || []).length" :entries="stage.tasks[0].answers" class="wf-detail__step-answers" />
 									<!-- v4.10.36 — the step's links; v4.10.37 — on the
 									     requester's own open task, pressing one does it. -->
 									<WorkflowStepLinks
@@ -185,8 +197,7 @@
 									<li
 										v-for="task in stage.tasks"
 										:key="task.key"
-										class="wf-detail__task"
-										:class="'wf-detail__task--' + trackerState(task)">
+										class="wf-detail__task">
 										<span class="wf-detail__task-label">{{ task.label }}</span>
 										<span class="wf-detail__step-meta">
 											<span v-if="stepRoleText(task)">{{ stepRoleText(task) }}</span>
@@ -197,6 +208,7 @@
 											<span v-if="task.nonBlocking">{{ t('teamhub', 'Does not hold up the request') }}</span>
 										</span>
 										<span v-if="task.reason" class="wf-detail__step-reason">{{ task.reason }}</span>
+										<WorkflowAnswers v-if="(task.answers || []).length" :entries="task.answers" class="wf-detail__step-answers" />
 										<WorkflowStepLinks
 											:step="task"
 											:completes="completesByLink(task)"
@@ -266,7 +278,7 @@
 							<span class="wf-detail__event-dot" aria-hidden="true" />
 							<div class="wf-detail__event-body">
 								<div class="wf-detail__event-head">
-									<span class="wf-detail__event-label">{{ eventLabel(e) }}</span>
+									<span class="wf-detail__event-label">{{ eventLabel(named(e)) }}</span>
 									<span v-if="e.actorUid" class="wf-detail__event-actor">{{ displayName(e.actorUid) }}</span>
 									<time
 										class="wf-detail__event-when"
@@ -339,6 +351,7 @@ import RadioboxMarked from 'vue-material-design-icons/RadioboxMarked.vue'
 import CircleOutline from 'vue-material-design-icons/CircleOutline.vue'
 import FileOutline from 'vue-material-design-icons/FileOutline.vue'
 import OpenInApp from 'vue-material-design-icons/OpenInApp.vue'
+import WorkflowAnswers from './WorkflowAnswers.vue'
 import WorkflowTaskMeta from './WorkflowTaskMeta.vue'
 import { generateUrl } from '@nextcloud/router'
 import WorkflowStepLinks from './WorkflowStepLinks.vue'
@@ -346,6 +359,7 @@ import WorkflowConversation from './WorkflowConversation.vue'
 import WorkflowDetailShell from './WorkflowDetailShell.vue'
 import {
 	conversation,
+	isApprovalStep,
 	isOpen as workflowIsOpen,
 	actionLabel,
 	actorDescription,
@@ -354,6 +368,7 @@ import {
 	hasStepDetail,
 	responsibleActor,
 	participantRoleLabel,
+	primaryAction,
 	progressLabel,
 	statusLabel,
 	statusTone,
@@ -368,13 +383,17 @@ import {
 	isoInstant,
 	eventTone,
 	formatAbsolute,
+	dueState,
 } from '../../constants/workflows.js'
 import { AGENT_ACTION, agentActionLabel, internalNotes } from '../../constants/serviceTeams.js'
+import { noticeDetail } from '../../constants/notices.js'
+import { answersOf, confirmsItselfAt } from '../../constants/requestForm.js'
+import { formatDate } from '../../lib/localDate.js'
 import { ICON_BODY, ICON_INLINE, ICON_TOOLBAR, ICON_LARGE, AVATAR_MD } from '../../constants/uiTokens.js'
 
 export default {
 	name: 'WorkflowDetailView',
-	components: { WorkflowDetailShell, NcAvatar, NcButton, NcChip, NcLoadingIcon, NcNoteCard, AccountGroupOutline, SourceBranch, CheckCircle, RadioboxMarked, CircleOutline, FileOutline, OpenInApp, WorkflowStepLinks, WorkflowTaskMeta, WorkflowConversation },
+	components: { WorkflowDetailShell, NcAvatar, NcButton, NcChip, NcLoadingIcon, NcNoteCard, AccountGroupOutline, SourceBranch, CheckCircle, RadioboxMarked, CircleOutline, FileOutline, OpenInApp, WorkflowStepLinks, WorkflowTaskMeta, WorkflowConversation, WorkflowAnswers },
 	props: {
 		/** The server's view with `history`, or null while loading. */
 		workflow: { type: Object, default: null },
@@ -435,6 +454,19 @@ export default {
 		stages() { return stagesOf(this.workflow) },
 		/** v4.10.39 — the task this view answers for (`viewer.stepKey`). */
 		focus() { return activeStep(this.workflow) },
+		/** v4.20.59 — the button that stands out; none when all that is left refuses. */
+		primary() { return primaryAction(this.actions) },
+		/** v4.20.58 — the viewer's task waits for an approval. */
+		waitsForApproval() { return this.isOpen && !!this.workflow?.viewer?.waitsForApproval },
+		/** v4.20.54 — the request keeps its answers; one made before forms has a description. */
+		hasAnswers() { return answersOf(this.workflow).length > 0 },
+		/** v4.20.54 — when the confirmation this request waits for happens by itself. */
+		confirmNote() {
+			const at = this.isOpen ? confirmsItselfAt(this.workflow) : 0
+			return at
+				? t('teamhub', 'Confirmed automatically from {date}.', { date: formatDate(at * 1000, { year: 'numeric', month: 'short', day: 'numeric' }) })
+				: ''
+		},
 		/** v4.10.39 — an open team task nobody has claimed: claiming is the one thing to do. */
 		claimable() { return this.isOpen && !!this.workflow?.internal?.claimable },
 		claimLabel() { return agentActionLabel(AGENT_ACTION.CLAIM) },
@@ -466,6 +498,11 @@ export default {
 		 * conversation; any other workflow shows no Messages tab.
 		 */
 		hasConversation() {
+			// v4.20.59 — an approver is not in the conversation: only a question
+			// of their own gives them something to read here.
+			if (this.workflow?.viewer?.approverOnly) {
+				return this.messages.length > 0
+			}
 			return !!this.workflow?.viewer?.canMessage
 				|| !!this.workflow?.internal
 				|| (this.workflow?.steps || []).some(s => s?.actor?.type === 'service_agent')
@@ -543,7 +580,20 @@ export default {
 		fileUrl(f) {
 			return generateUrl('/f/{id}', { id: Number(f.fileId) })
 		},
+		/** v4.20.58 — the event with the name of whoever it names. */
+		named(e) {
+			const to = e?.payload?.to
+			return to ? { ...e, toName: this.displayName(to) } : e
+		},
+		/** v4.20.68 — the deadline of a task that is still open; null otherwise. */
+		dueOf(task) {
+			return this.isOpen && trackerState(task) === 'current' ? dueState(task?.dueAt, Date.now() / 1000, task?.dueDate) : null
+		},
 		eventNote(e) {
+			// v4.20.62 — whom a notice went to, for the service team.
+			if (e?.type === 'notice_sent' || e?.type === 'notice_failed') {
+				return noticeDetail(e, uid => this.displayName(uid))
+			}
 			return e?.payload?.note || e?.payload?.reason || ''
 		},
 		/** v4.10.37 — a step is done when all its tasks are, current while any is open. */
@@ -567,7 +617,9 @@ export default {
 		},
 		/** v4.10.37 — the requester's own open task: its links complete it. */
 		completesByLink(task) {
-			return this.isOpen && !!task?.canAct && task?.actor?.type === 'user'
+			// v4.20.58 — never an approval: opening a link is not approving.
+			// v4.20.71 — nor a task with fields: it is completed by filling them in.
+			return this.isOpen && !!task?.canAct && task?.actor?.type === 'user' && !isApprovalStep(task) && !(task?.fields || []).length
 		},
 		/**
 		 * The requester pressed a task's link: complete *that* task, whichever
@@ -779,16 +831,17 @@ export default {
 	list-style: none;
 }
 
+.wf-detail__question {
+	margin: 0;
+	overflow-wrap: anywhere;
+	white-space: pre-wrap;
+}
+
 .wf-detail__task {
 	display: flex;
 	flex-direction: column;
 	gap: var(--th-space-xs, 4px);
 	padding-inline-start: var(--th-space-sm, 8px);
-	border-inline-start: 1px solid var(--color-border);
-}
-
-.wf-detail__task--current {
-	border-inline-start-color: var(--color-primary-element);
 }
 
 .wf-detail__task-label {
@@ -797,6 +850,11 @@ export default {
 
 .wf-detail__step-links {
 	margin-block-start: var(--th-space-xs, 4px);
+}
+
+/* v4.20.68 — a task past its deadline: text on the canvas (/ui-standards). */
+.wf-detail__overdue {
+	color: var(--color-text-error);
 }
 
 .wf-detail__responsible {

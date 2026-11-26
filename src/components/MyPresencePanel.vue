@@ -24,6 +24,20 @@
                 <p class="my-presence-section__desc">
                     {{ t('teamhub', 'Your workplace pattern is separate from your hours. Use morning and afternoon only when your location changes during the day.') }}
                 </p>
+                <!-- v4.20.12 (DESIGN §2.265) — somebody who never set a
+                     workplace reads as the office, Monday to Friday, to
+                     everybody who plans around them. Saying so here is the
+                     point of the default: it is the nudge to correct it. -->
+                <NcNoteCard v-if="isDefaultTemplate" type="info">
+                    {{ t('teamhub', 'You have not set your workplace yet, so colleagues see you at the office Monday to Friday, all day. Change any day that does not match your week.') }}
+                    <!-- For the person whose week really is that: saving it
+                         unchanged makes it theirs and the note goes. -->
+                    <template #action>
+                        <NcButton variant="secondary" :disabled="savingTemplate" @click="saver.now()">
+                            {{ t('teamhub', 'Keep this workplace') }}
+                        </NcButton>
+                    </template>
+                </NcNoteCard>
 
                 <div class="presence-grid" role="grid" :aria-label="t('teamhub', 'Week presence template')">
                     <div class="presence-grid__header" role="row">
@@ -102,27 +116,23 @@
                     <NcButton variant="tertiary" @click="showSplitDays = !showSplitDays">
                         {{ showSplitDays ? t('teamhub', 'Hide morning/afternoon') : t('teamhub', 'Split morning/afternoon') }}
                     </NcButton>
+                    <!-- v4.20.12 — no Save button: a workplace applied in the
+                         picker is written at once. A failed write keeps the
+                         choice on screen with Retry, and Discard changes puts
+                         back what the server has. -->
                     <NcButton
-                        variant="primary"
-                        :disabled="!hasDirty || savingTemplate"
-                        @click="saveTemplate">
-                        <template #icon>
-                            <NcLoadingIcon v-if="savingTemplate" :size="ICON_BODY" />
-                            <ContentSaveIcon v-else :size="ICON_BODY" />
-                        </template>
-                        {{ t('teamhub', 'Save') }}
-                    </NcButton>
-                    <NcButton
-                        v-if="hasDirty"
+                        v-if="templateError && hasDirty"
                         variant="tertiary"
                         :disabled="savingTemplate"
                         @click="discardDraft">
                         {{ t('teamhub', 'Discard changes') }}
                     </NcButton>
-                    <span v-if="hasDirty" class="presence-grid__unsaved-hint" aria-live="polite">
-                        {{ t('teamhub', 'You have unsaved changes') }}
-                    </span>
                 </div>
+                <AutosaveStatus
+                    :saving="savingTemplate"
+                    :saved="templateSaved"
+                    :error="templateError"
+                    @retry="saver.now()" />
             </section>
 
             <!-- Section 2: Legend -->
@@ -260,16 +270,18 @@ import { generateUrl } from '@nextcloud/router'
 import { showError, showSuccess } from '@nextcloud/dialogs'
 import { translate as t, translatePlural as n } from '@nextcloud/l10n'
 import { todayIso, toIsoDate, formatIsoDate } from '../lib/localDate.js'
-import { NcButton, NcLoadingIcon, NcDialog, NcSelect } from '@nextcloud/vue'
+import { NcButton, NcLoadingIcon, NcDialog, NcNoteCard, NcSelect } from '@nextcloud/vue'
 import CheckIcon            from 'vue-material-design-icons/Check.vue'
-import ContentSaveIcon      from 'vue-material-design-icons/ContentSave.vue'
+import AutosaveStatus       from './AutosaveStatus.vue'
 import PresenceCell         from './PresenceCell.vue'
 import PresenceCalendarView from './PresenceCalendarView.vue'
 import { ICON_BODY, ICON_LARGE } from '../constants/uiTokens.js'
+import { createAutosaver } from '../lib/autosave.js'
+import { buildTemplatePayload, isDefaultTemplate } from '../lib/presenceTemplate.js'
 
 export default {
     name: 'MyPresencePanel',
-    components: { NcButton, NcLoadingIcon, NcDialog, NcSelect, CheckIcon, ContentSaveIcon, PresenceCell, PresenceCalendarView },
+    components: { NcButton, NcLoadingIcon, NcDialog, NcNoteCard, NcSelect, CheckIcon, AutosaveStatus, PresenceCell, PresenceCalendarView },
     data() {
         return {
             ICON_BODY,
@@ -279,6 +291,10 @@ export default {
             loadingSlots: true,
             loadError: null,
             savingTemplate: false,
+            templateSaved: false,
+            templateError: '',
+            saver: null,
+            savedTimer: null,
             showSplitDays: false,
             cells: {},   // server-confirmed
             draft: {},   // local edits
@@ -339,6 +355,10 @@ export default {
             const days = Math.round((Date.parse(this.range.to) - Date.parse(this.range.from)) / 86400000) + 1
             return days >= 1 && days <= 120
         },
+        /** The server sent the read-time default, not a saved template. */
+        isDefaultTemplate() {
+            return isDefaultTemplate(Object.values(this.cells))
+        },
         hasDirty() {
             for (let day = 0; day <= 6; day++) {
                 for (const half of [0, 1]) {
@@ -367,7 +387,14 @@ export default {
             return this.types.find(tp => tp.id === this.picker.currentTypeId)?.requires_location || false
         },
     },
+    created() {
+        this.saver = createAutosaver({ save: () => this.saveTemplate(), delay: 0 })
+    },
     mounted() { this.load() },
+    beforeUnmount() {
+        this.saver.flush()
+        clearTimeout(this.savedTimer)
+    },
     methods: {
         t, n,
 
@@ -475,36 +502,45 @@ export default {
 
         discardDraft() {
             this.draft = JSON.parse(JSON.stringify(this.cells))
+            this.templateError = ''
         },
 
+        /**
+         * Write the whole week. Called by the autosaver only (straight after
+         * a workplace is applied in the picker), which never runs two at
+         * once: a pick made while this is in flight is written by the
+         * follow-up run.
+         */
         async saveTemplate() {
+            // Nothing changed is nothing to write, except on the default:
+            // writing it unchanged is how somebody keeps it (the note's
+            // button), and it ends the default for good.
+            if (!this.hasDirty && !this.isDefaultTemplate) return
+            // The bulk endpoint saves all cells then materialises once,
+            // avoiding the duplicate-key race from concurrent rematerialisation.
+            const cells = buildTemplatePayload(this.getDraftCell)
+            const sent = JSON.stringify(cells)
             this.savingTemplate = true
+            this.templateError = ''
+            this.templateSaved = false
             try {
-                // Build the full 14-cell payload and send in one request.
-                // The bulk endpoint saves all cells then materialises once,
-                // avoiding the duplicate-key race from concurrent rematerialisation.
-                const cells = []
-                for (let day = 0; day <= 6; day++) {
-                    for (const half of [0, 1]) {
-                        const cell = this.getDraftCell(day, half)
-                        cells.push({
-                            day_of_week:      day,
-                            half_day:         half,
-                            presence_type_id: cell.presence_type_id,
-                            location_room_id: cell.presence_type_id !== null ? cell.location_room_id : null,
-                        })
-                    }
-                }
                 const { data } = await axios.put(
                     generateUrl('/apps/teamhub/api/v1/presence/template/bulk'),
                     { cells }
                 )
-                // Server returns the full template; sync confirmed state.
-                this.applyTemplate(data)
-                showSuccess(t('teamhub', 'Workplace pattern saved'))
+                // Server returns the full template. Take it as the draft too
+                // unless another workplace was picked meanwhile; that pick
+                // stays on screen and the follow-up save carries it.
+                const unchanged = JSON.stringify(buildTemplatePayload(this.getDraftCell)) === sent
+                const draft = this.draft
+                this.applyTemplate(data || [])
+                if (!unchanged) this.draft = draft
+                this.templateSaved = true
+                clearTimeout(this.savedTimer)
+                this.savedTimer = setTimeout(() => { this.templateSaved = false }, 2000)
                 this.loadSlots()
             } catch (err) {
-                showError(err?.response?.data?.error || t('teamhub', 'Failed to save template'))
+                this.templateError = err?.response?.data?.error || t('teamhub', 'Failed to save template')
             } finally {
                 this.savingTemplate = false
             }
@@ -554,6 +590,7 @@ export default {
                     }
                 }
                 this.closePicker()
+                this.saver.now()
             } else {
                 const { iso, overrideHalf, currentTypeId, roomId } = this.picker
                 this.closePicker()
@@ -660,7 +697,6 @@ export default {
 .presence-split-day:focus-visible { outline: 2px solid var(--color-primary-element); }
 .my-presence-panel__availability-link { display: inline-block; margin-bottom: 12px; }
 .presence-grid__actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
-.presence-grid__unsaved-hint { font-size: var(--th-font-meta); color: var(--color-warning-text); }
 
 .presence-legend__list { display: flex; flex-wrap: wrap; gap: 12px; }
 .presence-legend__item { display: flex; align-items: center; gap: 6px; font-size: var(--th-font-meta); }

@@ -138,17 +138,18 @@ Whether TeamHub reports anonymous usage statistics is **derived from your licenc
 | Paid licence expired, within its 14-day grace window | **Never** |
 | Paid licence expired beyond the grace window, or trial expired (no grace) | Yes |
 
-When an instance does report, `TelemetryReportJob` sends one aggregate payload per day to `https://tldr.host/teamhub/report/`:
+When an instance does report, `TelemetryReportJob` sends one aggregate payload per day to `https://teleserv.doekworks.eu/`:
 
 - TeamHub and Nextcloud versions
 - An anonymous instance UUID, generated locally and never linked to an account
 - Team, user, member and message counts
 - Which built-in integrations are in use, and which third-party integrations are registered
-- Whether the Presence and Decisions modules are enabled, plus aggregate Decisions counts by status
-- Bare hostnames of custom team links — no paths, query strings, ports or fragments
+- Which instance-wide modules are enabled (People, Decisions)
+- A count of meeting-suggestion wizard runs
+- Whether an administrator has turned off an announcement popup (yes or no)
 
 No user identifiers, no message content, no file names, and no instance URL or hostname are ever sent. You can see the exact field list on **NC Admin Settings → TeamHub → Reporting**.
 
 ### Blocking it entirely
 
-The report is a single outbound HTTPS POST once every 24 hours. Blocking `tldr.host` at the firewall, or running the instance air-gapped, causes the request to fail and be logged at warning level — nothing in TeamHub degrades. Licensing itself is fully manual and never contacts a licence server.
+The report is a single outbound HTTPS POST once every 24 hours. Blocking `teleserv.doekworks.eu` at the firewall, or running the instance air-gapped, causes the request to fail and be logged at warning level — nothing in TeamHub degrades. Licensing itself is fully manual and never contacts a licence server.

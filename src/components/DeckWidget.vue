@@ -732,7 +732,6 @@ export default {
     cursor: pointer;
     background: var(--color-warning);
     border: none;
-    border-bottom: 1px solid var(--color-warning-text);
     color: var(--color-warning-text);
     font-size: var(--th-widget-row-meta-size);
     font-family: inherit;

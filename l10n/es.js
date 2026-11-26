@@ -1,6 +1,22 @@
     OC.L10N.register(
     "teamhub",
     {
+    "Show why %n person is not available": [
+        "Mostrar por qué %n persona no está disponible",
+        "Mostrar por qué %n personas no están disponibles"
+    ],
+    "Cannot check the calendar for {name}.": "No se puede comprobar el calendario de {name}.",
+    "{name} is not working at that time.": "{name} no trabaja en ese momento.",
+    "{name} has a calendar conflict.": "{name} tiene un conflicto en el calendario.",
+    "Nextcloud checks a calendar through the account's email address. An account without one cannot be checked.": "Nextcloud comprueba un calendario a través de la dirección de correo electrónico de la cuenta. Una cuenta sin ella no se puede comprobar.",
+    "_%n is not working_::_%n are not working_": [
+        "%n no trabaja",
+        "%n no trabajan"
+    ],
+    "_%n cannot be checked_::_%n cannot be checked_": [
+        "%n no se puede comprobar",
+        "%n no se pueden comprobar"
+    ],
     "{count} public holiday days were skipped": "Se omitieron {count} días festivos",
     "Change a workplace or mark vacation, sickness or other non-working time. Your usual workplace remains unchanged. Public holidays are managed by administrators.": "Cambia el lugar de trabajo o registra vacaciones, enfermedad u otra ausencia. Tu lugar habitual no cambia. Los festivos los gestionan los administradores.",
     "Set a day or date range": "Establecer un día o período",
@@ -14,14 +30,14 @@
     "Temporary change saved": "Cambio temporal guardado",
     "Failed to save temporary change": "No se pudo guardar el cambio temporal",
     "Birthdays are unavailable while People or this widget is disabled.": "Birthdays are unavailable while People or this widget is disabled.",
-    "People profile": "People profile",
+    "People profile": "Perfil de People",
     "View collaboration profile": "View collaboration profile",
-    "Collaboration profile unavailable": "Collaboration profile unavailable",
-    "This collaboration profile is not available. Sign in, or ask your administrator whether the People module is enabled.": "This collaboration profile is not available. Sign in, or ask your administrator whether the People module is enabled.",
-    "No collaboration details have been shared yet.": "No collaboration details have been shared yet.",
-    "Expertise": "Expertise",
-    "Preferred contact": "Preferred contact",
-    "Fun fact": "Fun fact",
+    "Collaboration profile unavailable": "Perfil de colaboración no disponible",
+    "This collaboration profile is not available. Sign in, or ask your administrator whether the People module is enabled.": "Este perfil de colaboración no está disponible. Inicie sesión o pregunte a su administrador si el módulo People está habilitado.",
+    "No collaboration details have been shared yet.": "Todavía no se han compartido datos de colaboración.",
+    "Expertise": "Conocimientos",
+    "Preferred contact": "Contacto preferido",
+    "Fun fact": "Dato curioso",
     "%1$s still has %2$d service. Move it to another category first.": [
         "%1$s todavía tiene %2$d servicio. Muévelo primero a otra categoría.",
         "%1$s todavía tiene %2$d servicios. Muévelos primero a otra categoría."
@@ -114,8 +130,8 @@
     "Archive box": "Caja de archivo",
     "Calendar with a clock": "Calendario con reloj",
     "Clock": "Reloj",
-    "Email": "Email",
-    "Phone": "Phone",
+    "Email": "Correo electrónico",
+    "Phone": "Teléfono",
     "Mobile phone": "Teléfono móvil",
     "Laptop": "Portátil",
     "Printer": "Impresora",
@@ -161,7 +177,7 @@
     "Fold step": "Contraer paso",
     "Unfold step": "Expandir paso",
     "Step {n}": "Paso {n}",
-    "{n} task": [
+    "_{n} task_::_{n} tasks_": [
         "{n} tarea",
         "{n} tareas"
     ],
@@ -201,19 +217,19 @@
     "The file settings could not be read.": "No se han podido leer los ajustes de archivos.",
     "Share files for a whole number of days.": "Comparte los archivos durante un número entero de días.",
     "Share files for 1 to %s days.": "Comparte los archivos de 1 a %s días.",
-    "Files are shared with {who} for {n} day, to view and edit.": [
+    "_Files are shared with {who} for {n} day, to view and edit._::_Files are shared with {who} for {n} days, to view and edit._": [
         "Los archivos se comparten con {who} durante {n} día, para ver y editar.",
         "Los archivos se comparten con {who} durante {n} días, para ver y editar."
     ],
-    "Files are shared with {who} for {n} day, to view only.": [
+    "_Files are shared with {who} for {n} day, to view only._::_Files are shared with {who} for {n} days, to view only._": [
         "Los archivos se comparten con {who} durante {n} día, solo para ver.",
         "Los archivos se comparten con {who} durante {n} días, solo para ver."
     ],
-    "You can attach at most {n} file.": [
+    "_You can attach at most {n} file._::_You can attach at most {n} files._": [
         "Puedes adjuntar como máximo {n} archivo.",
         "Puedes adjuntar como máximo {n} archivos."
     ],
-    "You can attach at most %n file.": [
+    "_You can attach at most %n file._::_You can attach at most %n files._": [
         "Puedes adjuntar como máximo %n archivo.",
         "Puedes adjuntar como máximo %n archivos."
     ],
@@ -240,7 +256,7 @@
     "The name of a task is at most %s characters.": "El nombre de una tarea tiene como máximo %s caracteres.",
     "This task is no longer open.": "Esta tarea ya no está abierta.",
     "This request cannot end while \"%s\" is still open.": "Esta solicitud no puede terminar mientras \"%s\" siga abierta.",
-    "A step has at most %n task.": [
+    "_A step has at most %n task._::_A step has at most %n tasks._": [
         "Un paso tiene como máximo %n tarea.",
         "Un paso tiene como máximo %n tareas."
     ],
@@ -264,7 +280,7 @@
     "A link opens a page or a form.": "Un enlace abre una página o un formulario.",
     "The name of a link is at most %s characters.": "El nombre de un enlace tiene como máximo %s caracteres.",
     "An address is at most %s characters.": "Una dirección tiene como máximo %s caracteres.",
-    "A step has at most %n link.": [
+    "_A step has at most %n link._::_A step has at most %n links._": [
         "Un paso tiene como máximo %n enlace.",
         "Un paso tiene como máximo %n enlaces."
     ],
@@ -321,15 +337,15 @@
     "Published": "Publicado",
     "Unpublished": "No publicado",
     "Unpublished changes": "Cambios sin publicar",
-    "Usually within %n working day": [
+    "_Usually within %n working day_::_Usually within %n working days_": [
         "Normalmente en %n día laborable",
         "Normalmente en %n días laborables"
     ],
-    "A team can offer at most %n service.": [
+    "_A team can offer at most %n service._::_A team can offer at most %n services._": [
         "Un equipo puede ofrecer como máximo %n servicio.",
         "Un equipo puede ofrecer como máximo %n servicios."
     ],
-    "A service has at most %n step.": [
+    "_A service has at most %n step._::_A service has at most %n steps._": [
         "Un servicio tiene como máximo %n paso.",
         "Un servicio tiene como máximo %n pasos."
     ],
@@ -338,7 +354,7 @@
     "Give the service a name.": "Ponle un nombre al servicio.",
     "TeamHub services": "Servicios de TeamHub",
     "My TeamHub requests": "Mis solicitudes de TeamHub",
-    "%n request": [
+    "_%n request_::_%n requests_": [
         "%n solicitud",
         "%n solicitudes"
     ],
@@ -446,19 +462,19 @@
     "Requests": "Solicitudes",
     "Only an admin of the service team can reassign a request.": "Solo un administrador del equipo de servicio puede reasignar una solicitud.",
     "Choose a period of 7, 30 or 90 days.": "Elige un periodo de 7, 30 o 90 días.",
-    "Last {n} day": [
+    "_Last {n} day_::_Last {n} days_": [
         "Último {n} día",
         "Últimos {n} días"
     ],
-    "{n} hour": [
+    "_{n} hour_::_{n} hours_": [
         "{n} hora",
         "{n} horas"
     ],
-    "{n} minute": [
+    "_{n} minute_::_{n} minutes_": [
         "{n} minuto",
         "{n} minutos"
     ],
-    "{n} unclaimed request": [
+    "_{n} unclaimed request_::_{n} unclaimed requests_": [
         "{n} solicitud sin asignar",
         "{n} solicitudes sin asignar"
     ],
@@ -584,7 +600,7 @@
     "These people are members through a group or team. Giving someone a higher role adds them to this team directly as well. They keep their group membership.": "Estas personas son miembros a través de un grupo o equipo. Al dar a alguien un rol superior también se le añade directamente a este equipo, conserva su pertenencia al grupo.",
     "via {source}": "vía {source}",
     "%1$s needs review": "%1$s necesita revisión",
-    "%n event in this period": [
+    "_%n event in this period_::_%n events in this period_": [
         "%n evento en este periodo",
         "%n eventos en este periodo"
     ],
@@ -727,31 +743,31 @@
     "{name} (unavailable)": "{name} (no disponible)",
     "{action}: {title}": "{action}: {title}",
     "%1$s · %2$s": "%1$s · %2$s",
-    "%n attendee": [
+    "_%n attendee_::_%n attendees_": [
         "%n asistente",
         "%n asistentes"
     ],
-    "%n attendee will be invited": [
+    "_%n attendee will be invited_::_%n attendees will be invited_": [
         "Se invitará a %n asistente",
         "Se invitará a %n asistentes"
     ],
-    "%n could join online": [
+    "_%n could join online_::_%n could join online_": [
         "%n podría unirse en línea",
         "%n podrían unirse en línea"
     ],
-    "%n has a calendar conflict": [
+    "_%n has a calendar conflict_::_%n have a calendar conflict_": [
         "%n tiene un conflicto en el calendario",
         "%n tienen un conflicto en el calendario"
     ],
-    "%n has a conflict": [
+    "_%n has a conflict_::_%n have a conflict_": [
         "%n tiene un conflicto",
         "%n tienen un conflicto"
     ],
-    "%n member selected": [
+    "_%n member selected_::_%n members selected_": [
         "%n miembro seleccionado",
         "%n miembros seleccionados"
     ],
-    "%n resource needs review.": [
+    "_%n resource needs review._::_%n resources need review._": [
         "%n recurso necesita revisión.",
         "%n recursos necesitan revisión."
     ],
@@ -766,7 +782,7 @@
     "+ Connect team folder": "+ Conectar carpeta de equipo",
     "+ Create new": "+ Crear nuevo",
     "+ Create new team folder": "+ Crear nueva carpeta de equipo",
-    "+{n} other team": [
+    "_+{n} other team_::_+{n} other teams_": [
         "+{n} equipo más",
         "+{n} equipos más"
     ],
@@ -789,11 +805,11 @@
     "A team folder is now connected to this team": "Se ha conectado una carpeta de equipo a este equipo",
     "A kickoff meeting to align the team on scope, timeline, and roles. Mark as done once it's on the calendar.": "Una reunión de inicio para alinear al equipo sobre alcance, cronograma y roles. Marca como hecho una vez que esté en el calendario.",
     "A message with a link to the meeting notes will be posted in the Talk room asking team members to add agenda items.": "Se publicará un mensaje en la sala de Talk con un enlace a las notas de la reunión, pidiendo a los miembros del equipo que añadan puntos a la agenda.",
-    "A new message from TeamHub": [
+    "_A new message from TeamHub_::_{n} new messages from TeamHub_": [
         "Un mensaje nuevo de TeamHub",
         "{n} mensajes nuevos de TeamHub"
     ],
-    "A new message from TeamHub is waiting for you.": [
+    "_A new message from TeamHub is waiting for you._::_{n} new messages from TeamHub are waiting for you._": [
         "Tienes un mensaje nuevo de TeamHub esperándote.",
         "Tienes {n} mensajes nuevos de TeamHub esperándote."
     ],
@@ -1353,7 +1369,7 @@
     "Delete time entry": "Eliminar entrada de tiempo",
     "Delete {label}?": "¿Eliminar {label}?",
     "Delete {name}": "Eliminar {name}",
-    "Delete {n} event": [
+    "_Delete {n} event_::_Delete {n} events_": [
         "Eliminar {n} evento",
         "Eliminar {n} eventos"
     ],
@@ -1603,7 +1619,7 @@
     "Loading the request…": "Cargando la solicitud…",
     "Request extension": "Solicitar prórroga",
     "This request is no longer waiting for a decision. Refresh to update the list.": "Esta solicitud ya no está pendiente de decisión. Actualiza para refrescar la lista.",
-    "{n} team is waiting for a decision on its expiration date:": [
+    "_{n} team is waiting for a decision on its expiration date:_::_{n} teams are waiting for a decision on their expiration date:_": [
         "{n} equipo espera una decisión sobre su fecha de caducidad:",
         "{n} equipos esperan una decisión sobre su fecha de caducidad:"
     ],
@@ -1803,7 +1819,7 @@
     "Ignore resource {id}": "Ignorar recurso {id}",
     "Image URL (https://…)": "URL de imagen (https://…)",
     "Image attachment": "Imagen adjunta",
-    "Image cache cleared (%n file removed)": [
+    "_Image cache cleared (%n file removed)_::_Image cache cleared (%n files removed)_": [
         "Caché de imágenes vaciada (%n archivo eliminado)",
         "Caché de imágenes vaciada (%n archivos eliminados)"
     ],
@@ -2171,7 +2187,7 @@
     "Not installed": "No instalado",
     "not readable: requester and timing are unknown, so Waiting for others falls back to rule membership": "no legible: se desconocen el solicitante y las fechas, por lo que Esperando a otros recurre a la pertenencia a la regla",
     "not readable": "no legible",
-    "Not set": "Not set",
+    "Not set": "Sin definir",
     "Not user-selectable": "No seleccionable por el usuario",
     "Note": "Nota",
     "Note (optional)": "Nota (opcional)",
@@ -2207,7 +2223,7 @@
     "Team name cannot consist only of dots.": "El nombre del equipo no puede estar formado solo por puntos.",
     "A team with this name already exists. Team names must be unique.": "Ya existe un equipo con este nombre. Los nombres de equipo deben ser únicos.",
     "Only members of the selected groups can create teams. Leave empty to allow all users.": "Solo los miembros de los grupos seleccionados pueden crear equipos. Deje vacío para permitir todos los usuarios.",
-    "Only proposals in the %n selected category will be added.": [
+    "_Only proposals in the %n selected category will be added._::_Only proposals in the %n selected categories will be added._": [
         "Solo se añadirán propuestas en la %n categoría seleccionada.",
         "Solo se añadirán propuestas en las %n categorías seleccionadas."
     ],
@@ -2252,7 +2268,7 @@
     "Other": "Otro",
     "Over your licensed seats: {used} of {cap} used.": "Por encima de tus licencias: {used} de {cap} en uso.",
     "Overdue": "Vencido",
-    "Overdue by {n} day": [
+    "_Overdue by {n} day_::_Overdue by {n} days_": [
         "{n} día de retraso",
         "{n} días de retraso"
     ],
@@ -2443,7 +2459,7 @@
     "Remove {name} from the project time budget? Their existing logs are kept for the audit trail.": "¿Quitar a {name} del presupuesto de tiempo del proyecto? Sus registros existentes se conservan como pista de auditoría.",
     "Remove {user} from all teams": "Eliminar {user} de todos los equipos",
     "Remove {user} from {team}": "Eliminar {user} de {team}",
-    "Removed from {n} team": [
+    "_Removed from {n} team_::_Removed from {n} teams_": [
         "Eliminado de {n} equipo",
         "Eliminado de {n} equipos"
     ],
@@ -2486,7 +2502,7 @@
     "Resources pending review": "Recursos pendientes de revisión",
     "Restore": "Restaurar",
     "Restore team {name}": "Restaurar equipo {name}",
-    "Restricted to {n} group": [
+    "_Restricted to {n} group_::_Restricted to {n} groups_": [
         "Restringido a {n} grupo",
         "Restringido a {n} grupos"
     ],
@@ -2624,7 +2640,7 @@
     "Short note": "Nota corta",
     "Short summary of the feedback": "Resumen breve de los comentarios",
     "Show": "Mostrar",
-    "Show %n ignored resource": [
+    "_Show %n ignored resource_::_Show %n ignored resources_": [
         "Mostrar %n recurso ignorado",
         "Mostrar %n recursos ignorados"
     ],
@@ -2849,13 +2865,13 @@
     "The team itself and every other resource are unaffected. Only Collectives is being removed.": "El equipo en sí y el resto de recursos no se ven afectados. Solo se elimina Collectives.",
     "The team will be hidden immediately and permanently deleted in 30 days. An administrator can restore it before then. No archive will be produced.": "El equipo se ocultará inmediatamente y se eliminará permanentemente en 30 días. Un administrador puede restaurarlo antes de eso. No se producirá ningún archivo.",
     "The team will be hidden immediately and permanently deleted in 60 days. An administrator can restore it before then. No archive will be produced.": "El equipo se ocultará inmediatamente y se eliminará permanentemente en 60 días. Un administrador puede restaurarlo antes de eso. No se producirá ningún archivo.",
-    "The team will be hidden immediately and permanently deleted in {n} day. Administrators can restore it before that deadline.": [
+    "_The team will be hidden immediately and permanently deleted in {n} day. Administrators can restore it before that deadline._::_The team will be hidden immediately and permanently deleted in {n} days. Administrators can restore it before that deadline._": [
         "El equipo se ocultará de inmediato y se eliminará definitivamente en {n} día. Los administradores pueden restaurarlo antes de esa fecha.",
         "El equipo se ocultará de inmediato y se eliminará definitivamente en {n} días. Los administradores pueden restaurarlo antes de esa fecha."
     ],
     "The team will be permanently deleted immediately after the archive is produced. This cannot be undone.": "El equipo será eliminado permanentemente inmediatamente después de producirse el archivo. Esta acción no se puede deshacer.",
     "The team will be permanently deleted immediately. No archive bundle is produced.": "El equipo se eliminará permanentemente de inmediato. No se produce paquete de archivo.",
-    "The team will be permanently deleted in {n} day. Administrators can restore it.": [
+    "_The team will be permanently deleted in {n} day. Administrators can restore it._::_The team will be permanently deleted in {n} days. Administrators can restore it._": [
         "El equipo se eliminará definitivamente en {n} día. Los administradores pueden restaurarlo.",
         "El equipo se eliminará definitivamente en {n} días. Los administradores pueden restaurarlo."
     ],
@@ -2875,7 +2891,7 @@
     "Third-party integrations": "Integraciones de terceros",
     "This action cannot be easily undone.": "Esta acción no se puede deshacer fácilmente.",
     "This action cannot be undone.": "Esta acción no se puede deshacer.",
-    "This building has {n} floor": [
+    "_This building has {n} floor_::_This building has {n} floors_": [
         "Este edificio tiene {n} planta",
         "Este edificio tiene {n} plantas"
     ],
@@ -2888,7 +2904,7 @@
     "This feature requires a license: ask your admin.": "Esta función requiere una licencia: pide a tu administrador.",
     "This file no longer exists.": "Este archivo ya no existe.",
     "This file type cannot be previewed read-only in the browser. Download it to view its contents.": "Este tipo de archivo no se puede previsualizar en modo de solo lectura en el navegador. Descárguelo para ver su contenido.",
-    "This floor has {n} room": [
+    "_This floor has {n} room_::_This floor has {n} rooms_": [
         "Esta planta tiene {n} sala",
         "Esta planta tiene {n} salas"
     ],
@@ -3138,12 +3154,12 @@
     "Yesterday": "Ayer",
     "You approved this decision": "Aprobaste esta decisión",
     "You approved this file": "Aprobaste este archivo",
-    "You are about to remove {user} from {n} team. This cannot be undone.": [
+    "_You are about to remove {user} from {n} team. This cannot be undone._::_You are about to remove {user} from {n} teams. This cannot be undone._": [
         "Vas a eliminar a {user} de {n} equipo. Esta acción no se puede deshacer.",
         "Vas a eliminar a {user} de {n} equipos. Esta acción no se puede deshacer."
     ],
     "You are about to withdraw this decision and open a new proposal in its place.": "Está a punto de retirar esta decisión y abrir una nueva propuesta en su lugar.",
-    "You are an approver and this request has been waiting %n day": [
+    "_You are an approver and this request has been waiting %n day_::_You are an approver and this request has been waiting %n days_": [
         "Eres aprobador y esta solicitud lleva %n día esperando",
         "Eres aprobador y esta solicitud lleva %n días esperando"
     ],
@@ -3179,7 +3195,7 @@
     "You’re all caught up": "Estás al día",
     "You're getting the project off the ground. Here's what to focus on:": "Estás poniendo el proyecto en marcha. En qué centrarte:",
     "You're setting up your project. Here's what to focus on:": "Estás configurando tu proyecto. Esto es en lo que debes centrarte:",
-    "Your approval request has been waiting %n day": [
+    "_Your approval request has been waiting %n day_::_Your approval request has been waiting %n days_": [
         "Tu solicitud de aprobación lleva %n día esperando",
         "Tu solicitud de aprobación lleva %n días esperando"
     ],
@@ -3245,7 +3261,7 @@
     "e.g. Weekly sync": "ej. Sincronización semanal",
     "e.g. en/teamhub": "ej. es/teamhub",
     "email address": "dirección de correo electrónico",
-    "grace: {n} day left": [
+    "_grace: {n} day left_::_grace: {n} days left_": [
         "gracia: {n} día restante",
         "gracia: {n} días restantes"
     ],
@@ -3289,7 +3305,7 @@
     "{available} of {total} available": "{available} de {total} disponibles",
     "{available} of {total} available, {count} at {building}": "{available} de {total} disponibles, {count} en {building}",
     "{cell}: {type}. Click to change.": "{cell}: {type}. Haga clic para cambiar.",
-    "{count} project member": [
+    "_{count} project member_::_{count} project members_": [
         "{count} miembro del proyecto",
         "{count} miembros del proyecto"
     ],
@@ -3307,7 +3323,7 @@
     "{name} has been approved": "{name} ha sido aprobado",
     "{name} is now the team owner. You are now a moderator.": "{name} es ahora el propietario del equipo. Ahora eres moderador.",
     "{name} saved": "{name} guardado",
-    "{n} altered file": [
+    "_{n} altered file_::_{n} altered files_": [
         "{n} archivo modificado",
         "{n} archivos modificados"
     ],
@@ -3317,71 +3333,71 @@
     ],
     "{n} boards": "{n} tableros",
     "{n} calendars": "{n} calendarios",
-    "{n} comment": [
+    "_{n} comment_::_{n} comments_": [
         "{n} comentario",
         "{n} comentarios"
     ],
-    "{n} day": [
+    "_{n} day_::_{n} days_": [
         "{n} día",
         "{n} días"
     ],
-    "{n} day ago": [
+    "_{n} day ago_::_{n} days ago_": [
         "hace {n} día",
         "hace {n} días"
     ],
-    "{n} day left": [
+    "_{n} day left_::_{n} days left_": [
         "{n} día restante",
         "{n} días restantes"
     ],
-    "{n} decision": [
+    "_{n} decision_::_{n} decisions_": [
         "{n} decisión",
         "{n} decisiones"
     ],
-    "{n} deleted user found in team memberships.": [
+    "_{n} deleted user found in team memberships._::_{n} deleted users found in team memberships._": [
         "{n} usuario eliminado encontrado en las membresías de equipo.",
         "{n} usuarios eliminados encontrados en las membresías de equipo."
     ],
-    "{n} event could not be deleted": [
+    "_{n} event could not be deleted_::_{n} events could not be deleted_": [
         "No se pudo eliminar {n} evento",
         "No se pudieron eliminar {n} eventos"
     ],
-    "{n} event deleted": [
+    "_{n} event deleted_::_{n} events deleted_": [
         "{n} evento eliminado",
         "{n} eventos eliminados"
     ],
-    "{n} event selected": [
+    "_{n} event selected_::_{n} events selected_": [
         "{n} evento seleccionado",
         "{n} eventos seleccionados"
     ],
     "{n} hour ago": "hace {n} hora",
     "{n} hours ago": "hace {n} horas",
-    "{n} item awaiting your approval": [
+    "_{n} item awaiting your approval_::_{n} items awaiting your approval_": [
         "{n} elemento pendiente de tu aprobación",
         "{n} elementos pendientes de tu aprobación"
     ],
-    "{n} lane over budget": [
+    "_{n} lane over budget_::_{n} lanes over budget_": [
         "{n} carril por encima del presupuesto",
         "{n} carriles por encima del presupuesto"
     ],
-    "{n} member invited": [
+    "_{n} member invited_::_{n} members invited_": [
         "{n} miembro invitado",
         "{n} miembros invitados"
     ],
-    "{n} member over hours": [
+    "_{n} member over hours_::_{n} members over hours_": [
         "{n} miembro por encima de horas",
         "{n} miembros por encima de horas"
     ],
     "{n} min ago": "hace {n} min",
-    "{n} missing file": [
+    "_{n} missing file_::_{n} missing files_": [
         "{n} archivo faltante",
         "{n} archivos faltantes"
     ],
     "{n} of {total} votes": "{n} de {total} votos",
-    "{n} open decision": [
+    "_{n} open decision_::_{n} open decisions_": [
         "{n} decisión abierta",
         "{n} decisiones abiertas"
     ],
-    "{n} over": [
+    "_{n} over_::_{n} over_": [
         "{n} sobrepasado",
         "{n} sobrepasado"
     ],
@@ -3390,35 +3406,35 @@
         "{n} respuesta: abrir chat",
         "{n} respuestas: abrir chat"
     ],
-    "{n} team": [
+    "_{n} team_::_{n} teams_": [
         "{n} equipo",
         "{n} equipos"
     ],
-    "{n} team selected": [
+    "_{n} team selected_::_{n} teams selected_": [
         "{n} equipo seleccionado",
         "{n} equipos seleccionados"
     ],
-    "{n} type allowed": [
+    "_{n} type allowed_::_{n} types allowed_": [
         "{n} tipo permitido",
         "{n} tipos permitidos"
     ],
-    "{n} unassigned card": [
+    "_{n} unassigned card_::_{n} unassigned cards_": [
         "{n} tarjeta sin asignar",
         "{n} tarjetas sin asignar"
     ],
-    "{n} unassigned card in {board}: open board": [
+    "_{n} unassigned card in {board}: open board_::_{n} unassigned cards in {board}: open board_": [
         "{n} tarjeta sin asignar en {board}: abrir tablero",
         "{n} tarjetas sin asignar en {board}: abrir tablero"
     ],
-    "{n} unexpected file": [
+    "_{n} unexpected file_::_{n} unexpected files_": [
         "{n} archivo inesperado",
         "{n} archivos inesperados"
     ],
-    "{n} unsolved question": [
+    "_{n} unsolved question_::_{n} unsolved questions_": [
         "{n} pregunta sin resolver",
         "{n} preguntas sin resolver"
     ],
-    "{n} user": [
+    "_{n} user_::_{n} users_": [
         "{n} usuario",
         "{n} usuarios"
     ],
@@ -3442,11 +3458,11 @@
     "{team} is ready": "{team} está listo",
     "{title} disabled for this team": "{title} deshabilitado para este equipo",
     "{title} enabled for this team": "{title} habilitado para este equipo",
-    "{total} total vote": [
+    "_{total} total vote_::_{total} total votes_": [
         "{total} voto total",
         "{total} votos totales"
     ],
-    "{total} total vote: Poll closed": [
+    "_{total} total vote: Poll closed_::_{total} total votes: Poll closed_": [
         "{total} voto total \\u2013 Encuesta cerrada",
         "{total} votos totales \\u2013 Encuesta cerrada"
     ],
@@ -3548,7 +3564,7 @@
     "Write a reply…": "Escribe una respuesta…",
     "You cannot post in this conversation.": "No puedes publicar en esta conversación.",
     "This role does not allow commenting in this team.": "Este rol no permite comentar en este equipo.",
-    "{n} reply": [
+    "_{n} reply_::_{n} replies_": [
         "{n} respuesta",
         "{n} respuestas"
     ],
@@ -3566,7 +3582,7 @@
     "Try widening the period, or clearing a team or type selection.": "Prueba a ampliar el periodo o a borrar una selección de equipo o tipo.",
     "Turn on at least one row under Show in the Feed control panel.": "Activa al menos una fila en Mostrar dentro del panel Control del feed.",
     "You’ve reached the end": "Has llegado al final",
-    "{n} item shown": [
+    "_{n} item shown_::_{n} items shown_": [
         "{n} elemento mostrado",
         "{n} elementos mostrados"
     ],
@@ -3592,7 +3608,7 @@
     "Scans every user-created team for system bits that should never appear on a user team (CFG_SINGLE, CFG_PERSONAL, CFG_SYSTEM, CFG_NO_OWNER, CFG_HIDDEN, CFG_BACKEND). Nextcloud Circles refuses any config update on a team carrying one of these, so apps can no longer change it. Use Repair to reset a team's config to clean defaults.": "Analiza cada equipo creado por usuarios en busca de bits de sistema que nunca deberían aparecer en un equipo de usuario (CFG_SINGLE, CFG_PERSONAL, CFG_SYSTEM, CFG_NO_OWNER, CFG_HIDDEN, CFG_BACKEND). Nextcloud Circles rechaza cualquier actualización de configuración en un equipo que tenga uno de estos bits, por lo que las aplicaciones ya no pueden cambiarlo. Usa Reparar para restablecer la configuración de un equipo a valores predeterminados limpios.",
     "These teams carry the CFG_APP flag, which a Nextcloud app sets to mark the team as managed by it: enabling a Collective does this. It is not corruption and needs no repair. The flag stays behind if the app that set it is later removed.": "Estos equipos llevan la marca CFG_APP, que una aplicación de Nextcloud establece para indicar que el equipo está gestionado por ella; activar un Collective hace esto. No es una corrupción y no necesita reparación. La marca permanece si la aplicación que la estableció se elimina más adelante.",
     "Current config: {config}. App flag: {appBits}": "Configuración actual: {config}. Marca de aplicación: {appBits}",
-    "{n} team is claimed by another app": [
+    "_{n} team is claimed by another app_::_{n} teams are claimed by another app_": [
         "{n} equipo está reclamado por otra aplicación",
         "{n} equipos están reclamados por otra aplicación"
     ],
@@ -3655,27 +3671,27 @@
     "{message} ({error})": "{message} ({error})",
     "Bulk team import": "Importación masiva de equipos",
     "Create many teams at once from a CSV file, each with its own owner and team admins.": "Cree muchos equipos a la vez desde un archivo CSV, cada uno con su propio propietario y sus propios administradores de equipo.",
-    "{n} team ready": [
+    "_{n} team ready_::_{n} teams ready_": [
         "{n} equipo listo",
         "{n} equipos listos"
     ],
-    "{n} created": [
+    "_{n} created_::_{n} created_": [
         "{n} creado",
         "{n} creados"
     ],
-    "{n} skipped": [
+    "_{n} skipped_::_{n} skipped_": [
         "{n} omitido",
         "{n} omitidos"
     ],
-    "{n} error": [
+    "_{n} error_::_{n} errors_": [
         "{n} error",
         "{n} errores"
     ],
-    "Create {n} team": [
+    "_Create {n} team_::_Create {n} teams_": [
         "Crear {n} equipo",
         "Crear {n} equipos"
     ],
-    "{n} team will be created, with its apps, privacy settings and modules. This cannot be undone from here. A team created by mistake has to be deleted individually.": [
+    "_{n} team will be created, with its apps, privacy settings and modules. This cannot be undone from here. A team created by mistake has to be deleted individually._::_{n} teams will be created, each with its apps, privacy settings and modules. This cannot be undone from here. A team created by mistake has to be deleted individually._": [
         "Se creará {n} equipo, con sus aplicaciones, su configuración de privacidad y sus módulos. Esto no se puede deshacer desde aquí: un equipo creado por error debe eliminarse individualmente.",
         "Se crearán {n} equipos, cada uno con sus aplicaciones, su configuración de privacidad y sus módulos. Esto no se puede deshacer desde aquí: un equipo creado por error debe eliminarse individualmente."
     ],
@@ -3797,7 +3813,7 @@
     "Audit log retention details": "Detalles de la retención del registro de auditoría",
     "Audit log:": "Registro de auditoría:",
     "Events are appended and purged in bulk after the retention window. No code path updates or deletes an individual row, so a record cannot be rewritten before it expires.": "Los eventos se añaden y se purgan en bloque tras el periodo de retención. Ningún camino de código actualiza o elimina una fila individual, por lo que un registro no puede reescribirse antes de caducar.",
-    "{n} day retention": [
+    "_{n} day retention_::_{n} days retention_": [
         "Retención de {n} día",
         "Retención de {n} días"
     ],
@@ -3879,7 +3895,7 @@
         "%n bloqueado",
         "%n bloqueados"
     ],
-    "%n setting": [
+    "_%n setting_::_%n settings_": [
         "%n ajuste",
         "%n ajustes"
     ],
@@ -3890,7 +3906,7 @@
     "Profiles": "Perfiles",
     "Team expiration": "Caducidad del equipo",
     "The date the picker opens on when someone creates this kind of team. 0 leaves it on the standard six months.": "La fecha en la que se abre el selector cuando alguien crea este tipo de equipo. Con 0 se mantienen los seis meses habituales.",
-    "Default %n day": [
+    "_Default %n day_::_Default %n days_": [
         "%n día por defecto",
         "%n días por defecto"
     ],
@@ -3931,7 +3947,7 @@
     "No pages yet": "Aún no hay páginas",
     "Expand {title}": "Expandir {title}",
     "Collapse {title}": "Contraer {title}",
-    "Only the first %n page is listed": [
+    "_Only the first %n page is listed_::_Only the first %n pages are listed_": [
         "Solo se muestra %n página",
         "Solo se muestran las primeras %n páginas"
     ],
@@ -3968,35 +3984,35 @@
     "Teams to create": "Equipos que se van a crear",
     "This template does not allow an expiration date.": "Esta plantilla no permite una fecha de caducidad.",
     "{done} of {total}": "{done} de {total}",
-    "%n created": [
+    "_%n created_::_%n created_": [
         "%n creado",
         "%n creados"
     ],
-    "%n failed": [
+    "_%n failed_::_%n failed_": [
         "%n fallido",
         "%n fallidos"
     ],
-    "%n row ready": [
+    "_%n row ready_::_%n rows ready_": [
         "%n fila lista",
         "%n filas listas"
     ],
-    "%n skipped": [
+    "_%n skipped_::_%n skipped_": [
         "%n omitida",
         "%n omitidas"
     ],
-    "%n team": [
+    "_%n team_::_%n teams_": [
         "%n equipo",
         "%n equipos"
     ],
-    "%n with a warning": [
+    "_%n with a warning_::_%n with warnings_": [
         "%n con una advertencia",
         "%n con advertencias"
     ],
-    "%n with an error": [
+    "_%n with an error_::_%n with errors_": [
         "%n con un error",
         "%n con errores"
     ],
-    "Create %n team": [
+    "_Create %n team_::_Create %n teams_": [
         "Crear %n equipo",
         "Crear %n equipos"
     ],
@@ -4011,7 +4027,7 @@
     "One row per team. Apps and settings come from the template and policy you pick, and can be changed per team afterwards. Rows without a name are ignored, so you can leave spare rows empty.": "Una fila por equipo. Las aplicaciones y los ajustes provienen de la plantilla y la política que elijas, y se pueden cambiar por equipo después. Las filas sin nombre se omiten, así que puedes dejar filas vacías.",
     "Search a person…": "Buscar una persona…",
     "This row cannot be created.": "Esta fila no se puede crear.",
-    "%n row needs attention before these teams can be created.": [
+    "_%n row needs attention before these teams can be created._::_%n rows need attention before these teams can be created._": [
         "%n fila necesita atención antes de poder crear estos equipos.",
         "%n filas necesitan atención antes de poder crear estos equipos."
     ],
@@ -4019,17 +4035,17 @@
     "Creating several teams at once requires a license.": "Crear varios equipos a la vez requiere una licencia.",
     "Templates and policy profiles": "Plantillas y perfiles de política",
     "{n} of {total} adjusted": "{n} de {total} ajustadas",
-    "{n} template, none adjusted": [
+    "_{n} template, none adjusted_::_{n} templates, none adjusted_": [
         "{n} plantilla, ninguna ajustada",
         "{n} plantillas, ninguna ajustada"
     ],
     "Templates decide which apps and modules a new team is given, and how long it may live. Adjust them under Policy → Team templates.": "Las plantillas deciden qué aplicaciones y módulos recibe un equipo nuevo y cuánto tiempo puede existir. Ajústalas en Política → Plantillas de equipo.",
     "Policy profiles": "Perfiles de política",
-    "{total} defined, {n} team classified": [
+    "_{total} defined, {n} team classified_::_{total} defined, {n} teams classified_": [
         "{total} definidos, {n} equipo clasificado",
         "{total} definidos, {n} equipos clasificados"
     ],
-    "{n} profile, no team classified": [
+    "_{n} profile, no team classified_::_{n} profiles, no team classified_": [
         "{n} perfil, ningún equipo clasificado",
         "{n} perfiles, ningún equipo clasificado"
     ],
@@ -4039,7 +4055,7 @@
     "Team profiles:": "Perfiles de equipo:",
     "No teams classified": "Ningún equipo clasificado",
     "Team profile compliance details": "Detalles del cumplimiento del perfil de equipo",
-    "{n} team classified, {ok} still matching": [
+    "_{n} team classified, {ok} still matching_::_{n} teams classified, {ok} still matching_": [
         "{n} equipo clasificado, {ok} aún coincide",
         "{n} equipos clasificados, {ok} aún coinciden"
     ],
@@ -4069,7 +4085,7 @@
     "This team already matches the profile. Applying it changes no setting.": "Este equipo ya coincide con el perfil. Aplicarlo no cambia ningún ajuste.",
     "Not changed by applying: existing members are never removed. The team will be reported as non-compliant until they are.": "No se cambia al aplicar: los miembros existentes nunca se eliminan. El equipo se informará como no conforme hasta que lo sean.",
     "These integrations are switched off for the team: {apps}. Their own data is not deleted.": "Estas integraciones se desactivan para el equipo: {apps}. Sus propios datos no se eliminan.",
-    "The profile also governs {n} setting this team already matches.": [
+    "_The profile also governs {n} setting this team already matches._::_The profile also governs {n} settings this team already matches._": [
         "El perfil también regula {n} ajuste que este equipo ya cumple.",
         "El perfil también regula {n} ajustes que este equipo ya cumple."
     ],
@@ -4078,7 +4094,7 @@
     "The team keeps its current settings and stops being checked against a profile.": "El equipo conserva su configuración actual y deja de compararse con un perfil.",
     "Apply the profile": "Aplicar el perfil",
     "Profile applied to {team}.": "Perfil aplicado a {team}.",
-    "Profile applied. {n} setting could not be changed and is reported instead. See the team’s profile chip.": [
+    "_Profile applied. {n} setting could not be changed and is reported instead. See the team’s profile chip._::_Profile applied. {n} settings could not be changed and are reported instead. See the team’s profile chip._": [
         "Perfil aplicado. {n} ajuste no se pudo cambiar y se informa en su lugar: consulta la etiqueta de perfil del equipo.",
         "Perfil aplicado. {n} ajustes no se pudieron cambiar y se informan en su lugar: consulta la etiqueta de perfil del equipo."
     ],
@@ -4133,11 +4149,11 @@
     "This review is already closed.": "Esta revisión ya está cerrada.",
     "This review no longer exists.": "Esta revisión ya no existe.",
     "That did not work. Try again.": "Eso no funcionó. Inténtalo de nuevo.",
-    "There is already %n open review on this file.": [
+    "_There is already %n open review on this file._::_There are already %n open reviews on this file._": [
         "Ya hay %n revisión abierta sobre este archivo.",
         "Ya hay %n revisiones abiertas sobre este archivo."
     ],
-    "%n team member will be asked.": [
+    "_%n team member will be asked._::_%n team members will be asked._": [
         "Se preguntará a %n miembro del equipo.",
         "Se preguntará a %n miembros del equipo."
     ],
@@ -4186,23 +4202,23 @@
     "failed": "ha fallado",
     "needs {apps} added by hand": "necesita añadir {apps} a mano",
     "no longer uses this": "ya no usa esto",
-    "Apply to all {n} team": [
+    "_Apply to all {n} team_::_Apply to all {n} teams_": [
         "Aplicar a los {n} equipo",
         "Aplicar a los {n} equipos"
     ],
-    "Apply to {n} team": [
+    "_Apply to {n} team_::_Apply to {n} teams_": [
         "Aplicar a {n} equipo",
         "Aplicar a {n} equipos"
     ],
-    "{eligible} of {total} team still matches what this said before the change.": [
+    "_{eligible} of {total} team still matches what this said before the change._::_{eligible} of {total} teams still match what this said before the change._": [
         "{eligible} de {total} equipo aún coincide con lo que esto decía antes del cambio.",
         "{eligible} de {total} equipos aún coinciden con lo que esto decía antes del cambio."
     ],
-    "{n} more team was not processed in this run. Save the change again to continue.": [
+    "_{n} more team was not processed in this run. Save the change again to continue._::_{n} more teams were not processed in this run. Save the change again to continue._": [
         "{n} equipo más no se procesó en esta ejecución. Guarde el cambio de nuevo para continuar.",
         "{n} equipos más no se procesaron en esta ejecución. Guarde el cambio de nuevo para continuar."
     ],
-    "{n} team updated.": [
+    "_{n} team updated._::_{n} teams updated._": [
         "{n} equipo actualizado.",
         "{n} equipos actualizados."
     ],
@@ -4218,11 +4234,11 @@
     "left for you: {apps}": "queda para usted: {apps}",
     "not applied: {fields}": "no aplicado: {fields}",
     "removed {apps}": "se quitó {apps}",
-    "{n} needs attention.": [
+    "_{n} needs attention._::_{n} need attention._": [
         "{n} requiere atención.",
         "{n} requieren atención."
     ],
-    "{n} setting applied": [
+    "_{n} setting applied_::_{n} settings applied_": [
         "{n} ajuste aplicado",
         "{n} ajustes aplicados"
     ],
@@ -4343,7 +4359,7 @@
     "OpenProject data could not be loaded.": "No se pudieron cargar los datos de OpenProject.",
     "Project info": "Información del proyecto",
     "Work package": "Paquete de trabajo",
-    "Show {n} more work package": [
+    "_Show {n} more work package_::_Show {n} more work packages_": [
         "Mostrar {n} paquete de trabajo más",
         "Mostrar {n} paquetes de trabajo más"
     ],
@@ -4369,7 +4385,7 @@
     "My OpenProject work": "Mi trabajo en OpenProject",
     "OpenProject project": "Proyecto de OpenProject",
     "My work": "Mi trabajo",
-    "Due in {n} day": [
+    "_Due in {n} day_::_Due in {n} days_": [
         "Vence en {n} día",
         "Vencen en {n} días"
     ],
@@ -4377,7 +4393,7 @@
         "{shown} de {n} paquete de trabajo",
         "{shown} de {n} paquetes de trabajo"
     ],
-    "Showing the first {n} match. Narrow the search to find others.": [
+    "_Showing the first {n} match. Narrow the search to find others._::_Showing the first {n} matches. Narrow the search to find others._": [
         "Solo se muestra el primer resultado. Acota la búsqueda para encontrar otros.",
         "Solo se muestran los primeros {n} resultados. Acota la búsqueda para encontrar otros."
     ],
@@ -4511,12 +4527,12 @@
     "Setup stopped": "Configuración detenida",
     "Setup rolled back": "Configuración revertida",
     "Existing, will be linked": "Existente, se enlazará",
-    "Not available": "Not available",
+    "Not available": "No disponible",
     "Required, not installed": "Obligatorio, no instalado",
     "TeamHub dashboard": "Panel de TeamHub",
     "Guest": "Invitado",
     "Open project in OpenProject": "Abrir el proyecto en OpenProject",
-    "{n} member has no OpenProject account. Decide what to do with them before continuing.": [
+    "_{n} member has no OpenProject account. Decide what to do with them before continuing._::_{n} members have no OpenProject account. Decide what to do with them before continuing._": [
         "{n} miembro no tiene cuenta de OpenProject. Decida qué hacer antes de continuar.",
         "{n} miembros no tienen cuenta de OpenProject. Decida qué hacer antes de continuar."
     ],
@@ -4534,15 +4550,15 @@
     "Add to the team only": "Añadir solo al equipo",
     "Leave out": "Dejar fuera",
     "Team page, {apps}": "Página del equipo, {apps}",
-    "{n} attempt": [
+    "_{n} attempt_::_{n} attempts_": [
         "{n} intento",
         "{n} intentos"
     ],
-    "{n} member could not be added in OpenProject": [
+    "_{n} member could not be added in OpenProject_::_{n} members could not be added in OpenProject_": [
         "{n} miembro no se pudo añadir en OpenProject",
         "{n} miembros no se pudieron añadir en OpenProject"
     ],
-    "{n} member added in OpenProject": [
+    "_{n} member added in OpenProject_::_{n} members added in OpenProject_": [
         "{n} miembro añadido en OpenProject",
         "{n} miembros añadidos en OpenProject"
     ],
@@ -4560,19 +4576,19 @@
     "Created {name}": "{name} creado",
     "The project folder OpenProject manages is linked": "La carpeta de proyecto que gestiona OpenProject está enlazada",
     "Existing resource kept": "Recurso existente conservado",
-    "Add {n} missing member to OpenProject": [
+    "_Add {n} missing member to OpenProject_::_Add {n} missing members to OpenProject_": [
         "Añadir {n} miembro que falta a OpenProject",
         "Añadir {n} miembros que faltan a OpenProject"
     ],
-    "{n} member is in step on both sides.": [
+    "_{n} member is in step on both sides._::_{n} members are in step on both sides._": [
         "{n} miembro coincide en ambos lados.",
         "{n} miembros coinciden en ambos lados."
     ],
-    "OpenProject refused {n} member.": [
+    "_OpenProject refused {n} member._::_OpenProject refused {n} members._": [
         "OpenProject rechazó {n} miembro.",
         "OpenProject rechazó {n} miembros."
     ],
-    "Added {n} member to the project.": [
+    "_Added {n} member to the project._::_Added {n} members to the project._": [
         "{n} miembro añadido al proyecto.",
         "{n} miembros añadidos al proyecto."
     ],
@@ -4646,22 +4662,22 @@
     "{source} answered slowly, so not every project was read this time. Refresh to try again.": "{source} respondió con lentitud, así que esta vez no se leyeron todos los proyectos. Actualiza para volver a intentarlo.",
     "{source} no longer accepts your connection. Reconnect your account in your personal settings.": "{source} ya no acepta tu conexión. Vuelve a conectar tu cuenta en tus ajustes personales.",
     "Opens in {app}, in a new tab": "Se abre en {app}, en una pestaña nueva",
-    "Milestone in {n} day: {subject}": [
+    "_Milestone in {n} day: {subject}_::_Milestone in {n} days: {subject}_": [
         "Hito en {n} día: {subject}",
         "Hito en {n} días: {subject}"
     ],
     "Milestone today: {subject}": "Hito hoy: {subject}",
     "Your attention": "Para ti",
     "{n} of your work packages due within {days} days, {today} today": "{n} de tus paquetes de trabajo vencen en {days} días, {today} hoy",
-    "{n} of your work packages is due within {days} days": [
+    "_{n} of your work packages is due within {days} days_::_{n} of your work packages are due within {days} days_": [
         "{n} de tus paquetes de trabajo vence en {days} días",
         "{n} de tus paquetes de trabajo vencen en {days} días"
     ],
-    "{n} of your work packages is overdue": [
+    "_{n} of your work packages is overdue_::_{n} of your work packages are overdue_": [
         "{n} de tus paquetes de trabajo está atrasado",
         "{n} de tus paquetes de trabajo están atrasados"
     ],
-    "{n} work package changed in the last 7 days": [
+    "_{n} work package changed in the last 7 days_::_{n} work packages changed in the last 7 days_": [
         "{n} paquete de trabajo modificado en los últimos 7 días",
         "{n} paquetes de trabajo modificados en los últimos 7 días"
     ],
@@ -4674,12 +4690,12 @@
     "All projects": "Todos los proyectos",
     "All work types": "Todos los tipos",
     "Work type": "Tipo de trabajo",
-    "Overdue by %n day": [
+    "_Overdue by %n day_::_Overdue by %n days_": [
         "%n día de retraso",
         "%n días de retraso"
     ],
     "Due tomorrow": "Vence mañana",
-    "Due in %n day": [
+    "_Due in %n day_::_Due in %n days_": [
         "Vence en %n día",
         "Vence en %n días"
     ],
@@ -4688,7 +4704,7 @@
     "Completed in OpenProject": "Completado en OpenProject",
     "Milestone today": "Hito hoy",
     "Milestone tomorrow": "Hito mañana",
-    "Milestone in %n day": [
+    "_Milestone in %n day_::_Milestone in %n days_": [
         "Hito en %n día",
         "Hito en %n días"
     ],
@@ -4938,7 +4954,7 @@
     "This workflow is blocked; lift the block first.": "Este flujo de trabajo está bloqueado; primero levanta el bloqueo.",
     "You are not part of this workflow.": "No formas parte de este flujo de trabajo.",
     "Workflow not found.": "Flujo de trabajo no encontrado.",
-    "You already asked for an update on this step; you can ask again in %n hour.": [
+    "_You already asked for an update on this step; you can ask again in %n hour._::_You already asked for an update on this step; you can ask again in %n hours._": [
         "Ya has pedido una actualización sobre este paso; puedes volver a pedirla en %n hora.",
         "Ya has pedido una actualización sobre este paso; puedes volver a pedirla en %n horas."
     ],
@@ -5085,15 +5101,15 @@
     "That team does not answer requests.": "Ese equipo no atiende solicitudes.",
     "The service team creates the team": "El equipo de servicio crea el equipo",
     "The owner or a moderator of the team you ask from approves the request; the service team then creates the team and you confirm it.": "El propietario o un moderador del equipo desde el que solicitas aprueba la solicitud; después el equipo de servicio crea el equipo y tú lo confirmas.",
-    "%n person can work the queue.": [
+    "_%n person can work the queue._::_%n people can work the queue._": [
         "%n persona puede atender la cola.",
         "%n personas pueden atender la cola."
     ],
-    "%n person can work the queue right now.": [
+    "_%n person can work the queue right now._::_%n people can work the queue right now._": [
         "%n persona puede atender la cola ahora mismo.",
         "%n personas pueden atender la cola ahora mismo."
     ],
-    "{n} person can work the queue.": [
+    "_{n} person can work the queue._::_{n} people can work the queue._": [
         "{n} persona puede atender la cola.",
         "{n} personas pueden atender la cola."
     ],
@@ -5150,7 +5166,7 @@
     "%s is now in TeamHub": "%s ya está en TeamHub",
     "{team} was not added to TeamHub": "{team} no se añadió a TeamHub",
     "%s was not added to TeamHub": "%s no se añadió a TeamHub",
-    "{n} to review": [
+    "_{n} to review_::_{n} to review_": [
         "{n} por revisar",
         "{n} por revisar"
     ],
@@ -5331,7 +5347,7 @@
     "%s answered your review request": "%s ha respondido a tu solicitud de revisión",
     "%s has been archived.": "%s se ha archivado.",
     "%s still stands.": "%s sigue en vigor.",
-    "Reviewed every month": [
+    "_Reviewed every month_::_Reviewed every {n} months_": [
         "Revisada cada mes",
         "Revisada cada {n} meses"
     ],
@@ -5476,7 +5492,7 @@
     "The team was created, but not everything finished: {error}": "El equipo se ha creado, pero no todo ha terminado: {error}",
     "Could not create the team. Try again.": "No se ha podido crear el equipo. Vuelva a intentarlo.",
     "Could not decline the group. Try again.": "No se ha podido rechazar el grupo. Vuelva a intentarlo.",
-    "%n person": [
+    "_%n person_::_%n people_": [
         "%n persona",
         "%n personas"
     ],
@@ -5598,7 +5614,7 @@
     "Only its own members and this team's administrators know it exists.": "Solo sus propios miembros y los administradores de este equipo saben que existe.",
     "Members are picked from this team. You can invite people from outside once the sub-team exists.": "Los miembros se eligen de este equipo. Puedes invitar a personas de fuera cuando el subequipo exista.",
     "A sub-team is a smaller group inside this team, with its own files and its own members. You pick who is in it from this team, and you can invite people from outside. Everything about a sub-team is managed from here.": "Un subequipo es un grupo más pequeño dentro de este equipo, con sus propios archivos y sus propios miembros. Eliges a sus miembros de este equipo y puedes invitar a personas de fuera. Todo lo relativo a un subequipo se gestiona aquí.",
-    "{n} member": [
+    "_{n} member_::_{n} members_": [
         "{n} miembro",
         "{n} miembros"
     ],
@@ -5668,7 +5684,7 @@
     "Failed to remove banner: {error}": "Error al eliminar el banner: {error}",
     "Open team maintenance to request an extension": "Abrir mantenimiento del equipo para solicitar una prórroga",
     "This team passed its expiration date on {date}.": "Este equipo superó su fecha de caducidad el {date}.",
-    "This team expires in %n day.": [
+    "_This team expires in %n day._::_This team expires in %n days._": [
         "Este equipo caduca en %n día.",
         "Este equipo caduca en %n días."
     ],
@@ -5676,7 +5692,7 @@
     "Compliment {name}": "Felicitar a {name}",
     "They will see this the next time they open TeamHub.": "Lo verá la próxima vez que abra TeamHub.",
     "Say what they did well": "Cuenta qué hizo bien",
-    "%n character left": [
+    "_%n character left_::_%n characters left_": [
         "Queda %n carácter",
         "Quedan %n caracteres"
     ],
@@ -5684,12 +5700,12 @@
     "Compliment sent to {name}": "Felicitación enviada a {name}",
     "Could not send the compliment": "No se pudo enviar la felicitación",
     "Could not send the compliment: {error}": "No se pudo enviar la felicitación: {error}",
-    "A compliment for you": [
+    "_A compliment for you_::_%n compliments for you_": [
         "Una felicitación para ti",
         "%n felicitaciones para ti"
     ],
     "{name} sent you a compliment.": "{name} te ha enviado una felicitación.",
-    "%n person sent you a compliment.": [
+    "_%n person sent you a compliment._::_%n people sent you a compliment._": [
         "%n persona te ha enviado una felicitación.",
         "%n personas te han enviado una felicitación."
     ],
@@ -5787,7 +5803,7 @@
     "Review became due": "La revisión venció",
     "Team admin confirms the list": "El administrador del equipo confirma la lista",
     "Membership confirmed. The review is recorded with your name and today's date.": "Miembros confirmados. La revisión queda registrada con tu nombre y la fecha de hoy.",
-    "Reviewed every %n month. This team has not been reviewed yet.": [
+    "_Reviewed every %n month. This team has not been reviewed yet._::_Reviewed every %n months. This team has not been reviewed yet._": [
         "Se revisa cada %n mes. Este equipo aún no se ha revisado.",
         "Se revisa cada %n meses. Este equipo aún no se ha revisado."
     ],
@@ -5818,11 +5834,11 @@
     "Teams using it": "Equipos que la usan",
     "Show the teams using {app}": "Mostrar los equipos que usan {app}",
     "Could not build the integrations register.": "No se pudo crear el registro de integraciones.",
-    "{n} row written since the last hourly pass is not chained yet": [
+    "_{n} row written since the last hourly pass is not chained yet_::_{n} rows written since the last hourly pass are not chained yet_": [
         "{n} fila escrita desde la última pasada horaria aún no está encadenada",
         "{n} filas escritas desde la última pasada horaria aún no están encadenadas"
     ],
-    "{n} row predates this feature and can never be verified": [
+    "_{n} row predates this feature and can never be verified_::_{n} rows predate this feature and can never be verified_": [
         "{n} fila es anterior a esta función y nunca podrá verificarse",
         "{n} filas son anteriores a esta función y nunca podrán verificarse"
     ],
@@ -5918,32 +5934,32 @@
     "{title} is included in {template}.": "{title} está incluida en {template}.",
     "{title} is no longer included in {template}. Nothing was deleted.": "{title} ya no está incluida en {template}. No se eliminó nada.",
     "{title} is shown in this team.": "{title} se muestra en este equipo.",
-    "%n team has previously hidden one of these and will keep it hidden.": [
+    "_%n team has previously hidden one of these and will keep it hidden._::_%n teams have previously hidden one of these and will keep them hidden._": [
         "%n equipo ya ocultó uno de estos y lo mantendrá oculto.",
         "%n equipos ya ocultaron uno de estos y lo mantendrán oculto."
     ],
-    "%n widget": [
+    "_%n widget_::_%n widgets_": [
         "%n widget",
         "%n widgets"
     ],
-    "%n team tab": [
+    "_%n team tab_::_%n team tabs_": [
         "%n pestaña de equipo",
         "%n pestañas de equipo"
     ],
-    "%n My Work source": [
+    "_%n My Work source_::_%n My Work sources_": [
         "%n fuente para Mi trabajo",
         "%n fuentes para Mi trabajo"
     ],
-    "The integration was notified about every team but one, which reported a problem.": [
+    "_The integration was notified about every team but one, which reported a problem._::_The integration was notified, but {failed} teams reported a problem._": [
         "Se notificó a la integración sobre todos los equipos menos uno, que informó de un problema.",
         "Se notificó a la integración, pero {failed} equipos informaron de un problema."
     ],
-    "{n} integration enabled": [
+    "_{n} integration enabled_::_{n} integrations enabled_": [
         "{n} integración activada",
         "{n} integraciones activadas"
     ],
     "\"{name}\" will no longer be offered when someone creates a team.": "\"{name}\" ya no se ofrecerá cuando alguien cree un equipo.",
-    "%n team was created from it. It keeps every app, module and setting it was created with.": [
+    "_%n team was created from it. It keeps every app, module and setting it was created with._::_%n teams were created from it. They keep every app, module and setting they were created with._": [
         "Se creó %n equipo a partir de ella. Conserva todas las aplicaciones, módulos y ajustes con los que se creó.",
         "Se crearon %n equipos a partir de ella. Conservan todas las aplicaciones, módulos y ajustes con los que se crearon."
     ],
@@ -5960,7 +5976,7 @@
     "New template": "Nueva plantilla",
     "Template created. Its integrations can be included below.": "Plantilla creada. Sus integraciones pueden incluirse más abajo.",
     "Template deleted.": "Plantilla eliminada.",
-    "Template deleted. %n existing team keeps what it was created with.": [
+    "_Template deleted. %n existing team keeps what it was created with._::_Template deleted. %n existing teams keep what they were created with._": [
         "Plantilla eliminada. %n equipo existente conserva aquello con lo que se creó.",
         "Plantilla eliminada. %n equipos existentes conservan aquello con lo que se crearon."
     ],
@@ -5974,15 +5990,15 @@
     "This widget has no address to load.": "Este widget no tiene ninguna dirección que cargar.",
     "Created from the {template} template.": "Creado desde la plantilla {template}.",
     "The team was created, but its template could not be saved. Integrations and the expiration date that come with the template will not apply until an administrator sets the template again.": "El equipo se creó, pero no se pudo guardar su plantilla. Las integraciones y la fecha de caducidad que acompañan a la plantilla no se aplicarán hasta que un administrador vuelva a establecerla.",
-    "No member report has reached the licensing service for {n} day.": [
+    "_No member report has reached the licensing service for {n} day._::_No member report has reached the licensing service for {n} days._": [
         "No ha llegado ningún informe de miembros al servicio de licencias desde hace {n} día.",
         "No ha llegado ningún informe de miembros al servicio de licencias desde hace {n} días."
     ],
-    "No member report for {n} day. Action needed.": [
+    "_No member report for {n} day. Action needed._::_No member report for {n} days. Action needed._": [
         "Sin informe de miembros desde hace {n} día. Se requiere una acción.",
         "Sin informe de miembros desde hace {n} días. Se requiere una acción."
     ],
-    "Advanced features are locked: no member report for {n} day.": [
+    "_Advanced features are locked: no member report for {n} day._::_Advanced features are locked: no member report for {n} days._": [
         "Las funciones avanzadas están bloqueadas: sin informe de miembros desde hace {n} día.",
         "Las funciones avanzadas están bloqueadas: sin informe de miembros desde hace {n} días."
     ],
@@ -6107,148 +6123,148 @@
     "Home layout removed. Teams of this template open with the layout TeamHub ships.": "Diseño del inicio quitado. Los equipos de esta plantilla se abren con el diseño que incluye TeamHub.",
     "Could not save the home layout.": "No se pudo guardar el diseño del inicio.",
     "Teams of this template open with the layout TeamHub ships.": "Los equipos de esta plantilla se abren con el diseño que incluye TeamHub.",
-    "Teams of this template open with a layout of %n card.": [
+    "_Teams of this template open with a layout of %n card._::_Teams of this template open with a layout of %n cards._": [
         "Los equipos de esta plantilla se abren con un diseño de %n tarjeta.",
         "Los equipos de esta plantilla se abren con un diseño de %n tarjetas."
     ],
-    "No member of this team has an email address on their account.": "No member of this team has an email address on their account.",
-    "{n} team member has no email address and will not receive this.": [
-        "{n} team member has no email address and will not receive this.",
-        "{n} team members have no email address and will not receive this."
+    "No member of this team has an email address on their account.": "Ningún miembro de este equipo tiene una dirección de correo en su cuenta.",
+    "_{n} team member has no email address and will not receive this._::_{n} team members have no email address and will not receive this._": [
+        "{n} miembro del equipo no tiene dirección de correo y no recibirá este mensaje.",
+        "{n} miembros del equipo no tienen dirección de correo y no recibirán este mensaje."
     ],
-    "Workstream name": "Workstream name",
-    "Allocated budget for {lane}": "Allocated budget for {lane}",
-    "Available hours for {name}": "Available hours for {name}",
-    "Search team members": "Search team members",
-    "Bulk team export": "Bulk team export",
-    "Write teams out to a CSV file in the importer’s own format, either all of them or a selection.": "Write teams out to a CSV file in the importer’s own format, either all of them or a selection.",
-    "Expiration date for {name}": "Expiration date for {name}",
-    "Remove the expiration date entirely": "Remove the expiration date entirely",
-    "Change the expiration date for {name}": "Change the expiration date for {name}",
-    "Set an expiration date for {name}": "Set an expiration date for {name}",
-    "Requested by": "Requested by",
-    "Requested until": "Requested until",
-    "Note to the requester": "Note to the requester",
-    "Optional: required reading if you deny": "Optional: required reading if you deny",
-    "Set date": "Set date",
-    "Expired {date}": "Expired {date}",
-    "No expiration date. Click to set one.": "No expiration date. Click to set one.",
-    "This date has passed. The team still works normally. Nothing is deleted automatically. Click to set a new date.": "This date has passed. The team still works normally. Nothing is deleted automatically. Click to set a new date.",
-    "Expires in {n} day. Click to change or clear the date.": [
-        "Expires in {n} day. Click to change or clear the date.",
-        "Expires in {n} days. Click to change or clear the date."
+    "Workstream name": "Nombre del flujo de trabajo",
+    "Allocated budget for {lane}": "Presupuesto asignado a {lane}",
+    "Available hours for {name}": "Horas disponibles de {name}",
+    "Search team members": "Buscar miembros del equipo",
+    "Bulk team export": "Exportación masiva de equipos",
+    "Write teams out to a CSV file in the importer’s own format, either all of them or a selection.": "Escriba los equipos en un archivo CSV con el formato del importador, todos o una selección.",
+    "Expiration date for {name}": "Fecha de caducidad de {name}",
+    "Remove the expiration date entirely": "Quitar por completo la fecha de caducidad",
+    "Change the expiration date for {name}": "Cambiar la fecha de caducidad de {name}",
+    "Set an expiration date for {name}": "Definir una fecha de caducidad para {name}",
+    "Requested by": "Solicitado por",
+    "Requested until": "Solicitado hasta",
+    "Note to the requester": "Nota para el solicitante",
+    "Optional: required reading if you deny": "Opcional: el solicitante lo leerá si lo deniega",
+    "Set date": "Definir fecha",
+    "Expired {date}": "Caducó el {date}",
+    "No expiration date. Click to set one.": "Sin fecha de caducidad. Haga clic para definir una.",
+    "This date has passed. The team still works normally. Nothing is deleted automatically. Click to set a new date.": "Esta fecha ha pasado. El equipo sigue funcionando con normalidad. No se elimina nada automáticamente. Haga clic para definir una fecha nueva.",
+    "_Expires in {n} day. Click to change or clear the date._::_Expires in {n} days. Click to change or clear the date._": [
+        "Caduca en {n} día. Haga clic para cambiar o quitar la fecha.",
+        "Caduca en {n} días. Haga clic para cambiar o quitar la fecha."
     ],
-    "Pick a date, or use Clear to remove the expiration date.": "Pick a date, or use Clear to remove the expiration date.",
-    "Expiration date saved.": "Expiration date saved.",
-    "Expiration date removed.": "Expiration date removed.",
-    "Failed to save the expiration date: {error}": "Failed to save the expiration date: {error}",
-    "Failed to save the expiration date": "Failed to save the expiration date",
-    "Failed to load extension requests": "Failed to load extension requests",
-    "Extension approved. {team} now expires on {date}.": "Extension approved. {team} now expires on {date}.",
-    "Failed to approve the request: {error}": "Failed to approve the request: {error}",
-    "Failed to approve the request": "Failed to approve the request",
-    "Extension denied. {name} has been notified.": "Extension denied. {name} has been notified.",
-    "Failed to deny the request: {error}": "Failed to deny the request: {error}",
-    "Failed to deny the request": "Failed to deny the request",
-    "Importing this file back into the same server creates nothing: every team in it already exists, and the importer skips a name it already knows. Use it to move teams to another server, to build new teams by editing the rows first, or as a record of how things are set up today.": "Importing this file back into the same server creates nothing: every team in it already exists, and the importer skips a name it already knows. Use it to move teams to another server, to build new teams by editing the rows first, or as a record of how things are set up today.",
-    "What to export": "What to export",
-    "Every team on this server": "Every team on this server",
-    "Only the teams I pick": "Only the teams I pick",
-    "Search teams…": "Search teams…",
-    "Teams to export": "Teams to export",
-    "Check what will be exported": "Check what will be exported",
-    "Download CSV": "Download CSV",
-    "What the file will contain": "What the file will contain",
-    "{n} team will be written.": [
-        "{n} team will be written.",
-        "{n} teams will be written."
+    "Pick a date, or use Clear to remove the expiration date.": "Elija una fecha o use Limpiar para quitar la fecha de caducidad.",
+    "Expiration date saved.": "Fecha de caducidad guardada.",
+    "Expiration date removed.": "Fecha de caducidad quitada.",
+    "Failed to save the expiration date: {error}": "Error al guardar la fecha de caducidad: {error}",
+    "Failed to save the expiration date": "Error al guardar la fecha de caducidad",
+    "Failed to load extension requests": "Error al cargar las solicitudes de prórroga",
+    "Extension approved. {team} now expires on {date}.": "Prórroga aprobada. {team} caduca ahora el {date}.",
+    "Failed to approve the request: {error}": "Error al aprobar la solicitud: {error}",
+    "Failed to approve the request": "Error al aprobar la solicitud",
+    "Extension denied. {name} has been notified.": "Prórroga denegada. Se ha notificado a {name}.",
+    "Failed to deny the request: {error}": "Error al denegar la solicitud: {error}",
+    "Failed to deny the request": "Error al denegar la solicitud",
+    "Importing this file back into the same server creates nothing: every team in it already exists, and the importer skips a name it already knows. Use it to move teams to another server, to build new teams by editing the rows first, or as a record of how things are set up today.": "Importar de nuevo este archivo en el mismo servidor no crea nada: todos sus equipos ya existen y el importador omite los nombres que ya conoce. Úselo para trasladar equipos a otro servidor, para crear equipos nuevos editando antes las filas o para dejar constancia de la configuración actual.",
+    "What to export": "Qué exportar",
+    "Every team on this server": "Todos los equipos de este servidor",
+    "Only the teams I pick": "Solo los equipos que elija",
+    "Search teams…": "Buscar equipos…",
+    "Teams to export": "Equipos para exportar",
+    "Check what will be exported": "Comprobar qué se exportará",
+    "Download CSV": "Descargar CSV",
+    "What the file will contain": "Qué contendrá el archivo",
+    "_{n} team will be written._::_{n} teams will be written._": [
+        "Se escribirá {n} equipo.",
+        "Se escribirán {n} equipos."
     ],
-    "{n} of them cannot be imported again as-is: see below.": [
-        "{n} of them cannot be imported again as-is: see below.",
-        "{n} of them cannot be imported again as-is: see below."
+    "_{n} of them cannot be imported again as-is: see below._::_{n} of them cannot be imported again as-is: see below._": [
+        "{n} de ellos no se puede volver a importar tal cual: véase más abajo.",
+        "{n} de ellos no se pueden volver a importar tal cual: véase más abajo."
     ],
-    "All of them can be imported again without editing.": "All of them can be imported again without editing.",
-    "What is missing": "What is missing",
-    "The file is written anyway: it is a faithful picture of what is on this server. A row that cannot be imported again is reported when you try, and the other rows are unaffected.": "The file is written anyway: it is a faithful picture of what is on this server. A row that cannot be imported again is reported when you try, and the other rows are unaffected.",
-    "The file lists the account names of every member of every exported team. Downloading one is recorded in the audit log, per team.": "The file lists the account names of every member of every exported team. Downloading one is recorded in the audit log, per team.",
-    "Checking the selection…": "Checking the selection…",
-    "Failed to load the team list": "Failed to load the team list",
-    "Failed to check the selection": "Failed to check the selection",
-    "Building the file. Your browser will save it when it is ready.": "Building the file. Your browser will save it when it is ready.",
-    "Remove this team?": "Remove this team?",
-    "Remove team": "Remove team",
+    "All of them can be imported again without editing.": "Todos se pueden volver a importar sin editar.",
+    "What is missing": "Qué falta",
+    "The file is written anyway: it is a faithful picture of what is on this server. A row that cannot be imported again is reported when you try, and the other rows are unaffected.": "El archivo se escribe de todos modos: refleja fielmente lo que hay en este servidor. Una fila que no se pueda volver a importar se notifica al intentarlo, y las demás filas no se ven afectadas.",
+    "The file lists the account names of every member of every exported team. Downloading one is recorded in the audit log, per team.": "El archivo contiene los nombres de cuenta de todos los miembros de cada equipo exportado. Cada descarga queda registrada en el registro de auditoría, por equipo.",
+    "Checking the selection…": "Comprobando la selección…",
+    "Failed to load the team list": "Error al cargar la lista de equipos",
+    "Failed to check the selection": "Error al comprobar la selección",
+    "Building the file. Your browser will save it when it is ready.": "Creando el archivo. Su navegador lo guardará cuando esté listo.",
+    "Remove this team?": "¿Quitar este equipo?",
+    "Remove team": "Quitar equipo",
     "Edit team layout": "Editar diseño del equipo",
     "Publish team layout": "Publicar diseño del equipo",
     "Team layout published": "Diseño del equipo publicado",
     "Team layout saved.": "Diseño del equipo guardado.",
-    "Layout controls": "Layout controls",
+    "Layout controls": "Opciones de diseño",
     "Unlock to let members arrange their own widgets, or restore the template layout.": "Unlock to let members arrange their own widgets, or restore the template layout.",
     "Lock layout": "Bloquear diseño",
-    "Unlock layout": "Unlock layout",
-    "Unlocking will discard unpublished layout changes. Continue?": "Unlocking will discard unpublished layout changes. Continue?",
-    "Reset to template": "Reset to template",
-    "A fun fact about me": "A fun fact about me",
-    "Allow colleagues to see my interests in a future people directory": "Allow colleagues to see my interests in a future people directory",
-    "Allow my birthday in a department birthday widget": "Allow my birthday in a department birthday widget",
-    "Allow my work anniversary celebration": "Allow my work anniversary celebration",
-    "Ask me about": "Ask me about",
-    "Choose a department": "Choose a department",
-    "Choose a room": "Choose a room",
+    "Unlock layout": "Desbloquear diseño",
+    "Unlocking will discard unpublished layout changes. Continue?": "Al desbloquear se descartarán los cambios de diseño sin publicar. ¿Continuar?",
+    "Reset to template": "Restablecer según la plantilla",
+    "A fun fact about me": "Un dato curioso sobre mí",
+    "Allow colleagues to see my interests in a future people directory": "Permitir que mis compañeros vean mis intereses en un futuro directorio de personas",
+    "Allow my birthday in a department birthday widget": "Permitir que mi cumpleaños aparezca en el widget de cumpleaños del departamento",
+    "Allow my work anniversary celebration": "Permitir la celebración de mi aniversario laboral",
+    "Ask me about": "Pregúnteme sobre",
+    "Choose a department": "Elegir un departamento",
+    "Choose a room": "Elegir una sala",
     "Collaboration profile saved": "Collaboration profile saved",
-    "Company start date": "Company start date",
-    "Could not load your collaboration profile.": "Could not load your collaboration profile.",
-    "Could not save the collaboration profile. Try again.": "Could not save the collaboration profile. Try again.",
-    "Default department": "Default department",
-    "Department start date": "Department start date",
-    "Enable People module for all teams": "Enable People module for all teams",
-    "Enable People tab for this team": "Enable People tab for this team",
-    "Enable the People module for date/time suggestions.": "Enable the People module for date/time suggestions.",
-    "Expertise and skills": "Expertise and skills",
+    "Company start date": "Fecha de inicio en la empresa",
+    "Could not load your collaboration profile.": "No se pudo cargar su perfil de colaboración.",
+    "Could not save the collaboration profile. Try again.": "No se pudo guardar el perfil de colaboración. Inténtelo de nuevo.",
+    "Default department": "Departamento predeterminado",
+    "Department start date": "Fecha de inicio en el departamento",
+    "Enable People module for all teams": "Habilitar módulo People para todos los equipos",
+    "Enable People tab for this team": "Habilitar la pestaña People para este equipo",
+    "Enable the People module for date/time suggestions.": "Habilite el módulo People para obtener sugerencias de fecha y hora.",
+    "Expertise and skills": "Conocimientos y habilidades",
     "Help colleagues get to know you and find you. These details are private to you until TeamHub adds a colleagues directory. Sharing options are off by default.": "Help colleagues get to know you and find you. These details are private to you until TeamHub adds a colleagues directory. Sharing options are off by default.",
-    "Hobbies and interests": "Hobbies and interests",
-    "Languages": "Languages",
-    "My collaboration profile": "My collaboration profile",
+    "Hobbies and interests": "Aficiones e intereses",
+    "Languages": "Idiomas",
+    "My collaboration profile": "Mi perfil de colaboración",
     "My usual office days": "My usual office days",
-    "Only Department teams you belong to are available.": "Only Department teams you belong to are available.",
+    "Only Department teams you belong to are available.": "Solo están disponibles los equipos de departamento a los que pertenece.",
     "People": "People",
-    "People and celebrations privacy": "People and celebrations privacy",
+    "People and celebrations privacy": "Privacidad de People y celebraciones",
     "People includes collaboration profiles and the existing presence schedules. Enabled by default; team admins can turn off the People tab.": "People includes collaboration profiles and the existing presence schedules. Enabled by default; team admins can turn off the People tab.",
-    "People module": "People module",
+    "People module": "Módulo People",
     "Preferred contact method": "Preferred contact method",
-    "Rooms are grouped by building and floor. Your scheduled presence may differ.": "Rooms are grouped by building and floor. Your scheduled presence may differ.",
+    "Rooms are grouped by building and floor. Your scheduled presence may differ.": "Las salas están agrupadas por edificio y planta. Su presencia planificada puede ser distinta.",
     "Save collaboration profile": "Save collaboration profile",
     "Saved separately for each department you select.": "Saved separately for each department you select.",
     "Self-reported; not verified by HR.": "Self-reported; not verified by HR.",
-    "Show the People tab with colleagues and their presence schedules.": "Show the People tab with colleagues and their presence schedules.",
+    "Show the People tab with colleagues and their presence schedules.": "Muestra la pestaña People con los compañeros y sus horarios de presencia.",
     "These preferences prepare for future birthday, work anniversary and people-directory features. They do not publish any data yet.": "These preferences prepare for future birthday, work anniversary and people-directory features. They do not publish any data yet.",
-    "Usual workplace": "Usual workplace",
-    "Your work, your colleagues, your connections": "Your work, your colleagues, your connections",
-    "Help colleagues get to know you and find you. Your profile details stay private until People sharing features are available. You can change sharing preferences below.": "Help colleagues get to know you and find you. Your profile details stay private until People sharing features are available. You can change sharing preferences below.",
-    "Preferred contact methods": "Preferred contact methods",
-    "In person": "In person",
+    "Usual workplace": "Lugar de trabajo habitual",
+    "Your work, your colleagues, your connections": "Su trabajo, sus compañeros, sus contactos",
+    "Help colleagues get to know you and find you. Your profile details stay private until People sharing features are available. You can change sharing preferences below.": "Ayude a sus compañeros a conocerle y encontrarle. Los datos de su perfil seguirán siendo privados hasta que las funciones para compartir de People estén disponibles. Puede cambiar sus preferencias más abajo.",
+    "Preferred contact methods": "Medios de contacto preferidos",
+    "In person": "En persona",
     "Based on your Nextcloud account creation date, when available. Not an HR employment date.": "Based on your Nextcloud account creation date, when available. Not an HR employment date.",
-    "Based on your direct membership join date in the selected department.": "Based on your direct membership join date in the selected department.",
-    "Birthdays": "Birthdays",
+    "Based on your direct membership join date in the selected department.": "Según la fecha en la que se unió directamente al departamento seleccionado.",
+    "Birthdays": "Cumpleaños",
     "Loading birthdays…": "Loading birthdays…",
     "Could not load birthdays.": "Could not load birthdays.",
     "No upcoming birthdays to show.": "No upcoming birthdays to show.",
-    "Happy birthday, {name}!": "Happy birthday, {name}!",
-    "Wishing you a wonderful day from everyone at TeamHub!": "Wishing you a wonderful day from everyone at TeamHub!",
+    "Happy birthday, {name}!": "¡Feliz cumpleaños, {name}!",
+    "Wishing you a wonderful day from all your colleagues.": "Todos sus compañeros le desean un día estupendo.",
     "Birthday sharing controls the Department birthday widget and birthday celebration. Work anniversary and people-directory sharing will be used by future features.": "Birthday sharing controls the Department birthday widget and birthday celebration. Work anniversary and people-directory sharing will be used by future features.",
     "Nextcloud account start date": "Nextcloud account start date",
-    "Account creation date when recorded; otherwise first login if known. This is not your employment start date.": "Account creation date when recorded; otherwise first login if known. This is not your employment start date.",
-    "Birthday and anniversary sharing control personal celebrations. People-directory sharing will be used by future features.": "Birthday and anniversary sharing control personal celebrations. People-directory sharing will be used by future features.",
-    "Work anniversary celebrations": "Work anniversary celebrations",
-    "Celebrate 1, 5, 10 and 25 years in this department when a member opens TeamHub.": "Celebrate 1, 5, 10 and 25 years in this department when a member opens TeamHub.",
-    "Enable work anniversary celebrations": "Enable work anniversary celebrations",
-    "Congratulations, {name}!": "Congratulations, {name}!",
-    "{years} years with {team}!": "{years} years with {team}!",
-    "Today marks {years} years since you joined {team}. Thank you for everything you bring to your colleagues!": "Today marks {years} years since you joined {team}. Thank you for everything you bring to your colleagues!",
+    "Account creation date when recorded; otherwise first login if known. This is not your employment start date.": "Fecha de creación de la cuenta si consta; si no, el primer inicio de sesión si se conoce. No es su fecha de contratación.",
+    "Birthday and anniversary sharing control personal celebrations. People-directory sharing will be used by future features.": "Compartir el cumpleaños y el aniversario determina las celebraciones personales. Compartir en el directorio de personas se usará en funciones futuras.",
+    "Work anniversary celebrations": "Celebraciones de aniversarios laborales",
+    "Celebrate 1, 5, 10 and 25 years in this department when a member opens TeamHub.": "Celebra 1, 5, 10 y 25 años en este departamento cuando un miembro abre TeamHub.",
+    "Enable work anniversary celebrations": "Habilitar celebraciones de aniversarios laborales",
+    "Congratulations, {name}!": "¡Enhorabuena, {name}!",
+    "{years} years with {team}!": "¡Años en {team}: {years}!",
+    "Today marks {years} years since you joined {team}. Thank you for everything you bring to your colleagues!": "Hoy celebra su aniversario en {team} (años: {years}). ¡Gracias por todo lo que aporta a sus compañeros!",
     "No shared birthdays to show. Members must allow birthday sharing in their People profile and Nextcloud profile visibility.": "No shared birthdays to show. Members must allow birthday sharing in their People profile and Nextcloud profile visibility.",
     "Your birthday sharing is disabled in Personal settings → TeamHub → People.": "Your birthday sharing is disabled in Personal settings → TeamHub → People.",
     "Your Nextcloud birthday visibility prevents it from appearing to colleagues.": "Your Nextcloud birthday visibility prevents it from appearing to colleagues.",
     "Your Nextcloud profile does not have a valid birthday set.": "Your Nextcloud profile does not have a valid birthday set.",
-    "Collaboration profile": "Collaboration profile",
+    "Collaboration profile": "Perfil de colaboración",
     "No shared birthdays to show.": "No shared birthdays to show.",
     "Buildings and floors marked as shared come from the room directory this instance uses. Change them there. Here you add the rooms people sit in.": "Los edificios y las plantas marcados como compartidos proceden del directorio de salas de esta instancia. Modifíquelos allí. Aquí añade las salas en las que se sienta la gente.",
     "Maintained in the room directory": "Se gestiona en el directorio de salas",
@@ -6295,7 +6311,7 @@
     "Clear list": "Limpiar la lista",
     "Clear the list of recent imports": "Limpiar la lista de importaciones recientes",
     "The list could not be cleared.": "No se pudo limpiar la lista.",
-    "{n} import removed from the list": ["{n} importación eliminada de la lista", "{n} importaciones eliminadas de la lista"],
+    "_{n} import removed from the list_::_{n} imports removed from the list_": ["{n} importación eliminada de la lista", "{n} importaciones eliminadas de la lista"],
     "Off disables Nextcloud’s own Teams app: its navigation entry, its pages and its dashboard widget stop answering, so a team is managed in TeamHub only. Leave it on if you use the Collectives app, which manages a collective’s members through that same frontend.": "Desactivado apaga la propia aplicación Equipos de Nextcloud: su entrada de navegación, sus páginas y su widget del panel dejan de responder, por lo que un equipo se gestiona solo en TeamHub. Déjala activada si usas la aplicación Collectives, que gestiona los miembros de un colectivo a través de ese mismo frontend.",
     "Give every category a name of its own to save the list.": "Dale a cada categoría un nombre propio para guardar la lista.",
     "Full": "Completa",
@@ -6306,7 +6322,7 @@
     "All statuses": "Todos los estados",
     "Clear the status filter": "Borrar el filtro de estado",
     "No member has the selected status this week.": "Ningún miembro tiene el estado seleccionado esta semana.",
-    "Showing {shown} of {total} member": ["Mostrando {shown} de {total} miembro", "Mostrando {shown} de {total} miembros"],
+    "_Showing {shown} of {total} member_::_Showing {shown} of {total} members_": ["Mostrando {shown} de {total} miembro", "Mostrando {shown} de {total} miembros"],
     "TeamHub people": "Personas de TeamHub",
     "Filter members by status": "Filtrar miembros por estado",
     "No member has the selected status anywhere this week.": "Ningún miembro tiene el estado seleccionado esta semana.",
@@ -6314,7 +6330,7 @@
     "{count} member has one of the selected statuses on {day}": ["{count} miembro tiene uno de los estados seleccionados el {day}", "{count} miembros tienen uno de los estados seleccionados el {day}"],
     "{count} member in {status} on {day}": ["{count} miembro en {status} el {day}", "{count} miembros en {status} el {day}"],
     "Show the selected statuses for {day}": "Mostrar los estados seleccionados para {day}",
-    "{status}, {count} member on {day}": ["{status}, {count} miembro el {day}", "{status}, {count} miembros el {day}"],
+    "_{status}, {count} member on {day}_::_{status}, {count} members on {day}_": ["{status}, {count} miembro el {day}", "{status}, {count} miembros el {day}"],
     "Roster": "Cuadrante",
     "Roster controls": "Controles del cuadrante",
     "Roster: week view": "Cuadrante: vista semanal",
@@ -6340,9 +6356,9 @@
     "Could not remove the shift.": "No se pudo eliminar el turno.",
     "Could not take the shift.": "No se pudo tomar el turno.",
     "Could not publish the roster.": "No se pudo publicar el cuadrante.",
-    "{count} shift is still a draft": ["{count} turno sigue siendo un borrador", "{count} turnos siguen siendo borradores"],
-    "{count} place still open on {day}": ["{count} plaza libre el {day}", "{count} plazas libres el {day}"],
-    "{count} more person needed": ["{count} persona más necesaria", "{count} personas más necesarias"],
+    "_{count} shift is still a draft_::_{count} shifts are still a draft_": ["{count} turno sigue siendo un borrador", "{count} turnos siguen siendo borradores"],
+    "_{count} place still open on {day}_::_{count} places still open on {day}_": ["{count} plaza libre el {day}", "{count} plazas libres el {day}"],
+    "_{count} more person needed_::_{count} more people needed_": ["{count} persona más necesaria", "{count} personas más necesarias"],
     "Shifts": "Turnos",
     "Shift types": "Tipos de turno",
     "Add shift type": "Añadir tipo de turno",
@@ -6377,7 +6393,7 @@
     "Could not save the schedule.": "No se pudo guardar la plantilla.",
     "Could not delete the schedule.": "No se pudo eliminar la plantilla.",
     "Delete the schedule {name}? Rosters already planned from it stay as they are.": "¿Eliminar la plantilla {name}? Los cuadrantes ya planificados con ella se mantienen.",
-    "{count} shift a week": ["{count} turno a la semana", "{count} turnos a la semana"],
+    "_{count} shift a week_::_{count} shifts a week_": ["{count} turno a la semana", "{count} turnos a la semana"],
     "Enable Shifts for this team": "Activar turnos para este equipo",
     "Licensed": "Con licencia",
     "Plan who works when, in shifts an administrator defines. Adds the Roster tab and a planning section under Module settings.": "Planifique quién trabaja cuándo, en turnos que define un administrador. Añade la pestaña Cuadrante y una sección de planificación en Ajustes de módulos.",
@@ -6439,7 +6455,7 @@
     "{name} is asking to be replaced. Show why.": "{name} pide sustitución. Mostrar por qué.",
     "Take the {shift} shift over from {name}": "Asumir el turno {shift} de {name}",
     "Could not invite {names}": "No se ha podido invitar a {names}",
-    "{n} person already had an invite": [
+    "_{n} person already had an invite_::_{n} people already had an invite_": [
         "{n} persona ya tenía una invitación",
         "{n} personas ya tenían una invitación"
     ],
@@ -6464,7 +6480,7 @@
     "Build one under Manage team, Module settings. A template says which roles you need on which days.": "Crea una en Gestionar equipo, Ajustes de módulos. Una plantilla dice qué roles necesitas y en qué días.",
     "Pick a template": "Elegir una plantilla",
     "{name} ({count}), set by an administrator": "{name} ({count}), definida por un administrador",
-    "{count} person": [
+    "_{count} person_::_{count} people_": [
         "{count} persona",
         "{count} personas"
     ],
@@ -6485,20 +6501,20 @@
     "Failed to repair member ids: {error}": "No se pudieron reparar los identificadores de miembro: {error}",
     "Repair member ids": "Reparar identificadores de miembro",
     "Repairing": "Reparando",
-    "The owner row of this team carries a member id Nextcloud Teams refuses, so the team cannot be shared with another server. {n} row will be given a valid id.": [
+    "_The owner row of this team carries a member id Nextcloud Teams refuses, so the team cannot be shared with another server. {n} row will be given a valid id._::_The owner row of this team carries a member id Nextcloud Teams refuses, so the team cannot be shared with another server. {n} rows will be given a valid id._": [
         "La fila del propietario de este equipo tiene un identificador de miembro que Nextcloud Teams rechaza, así que el equipo no se puede compartir con otro servidor. {n} fila recibirá un identificador válido.",
         "La fila del propietario de este equipo tiene un identificador de miembro que Nextcloud Teams rechaza, así que el equipo no se puede compartir con otro servidor. {n} filas recibirán un identificador válido."
     ],
-    "{n} member row of this team carries a member id Nextcloud Teams refuses.": [
+    "_{n} member row of this team carries a member id Nextcloud Teams refuses._::_{n} member rows of this team carry a member id Nextcloud Teams refuses._": [
         "{n} fila de miembro de este equipo tiene un identificador de miembro que Nextcloud Teams rechaza.",
         "{n} filas de miembro de este equipo tienen un identificador de miembro que Nextcloud Teams rechaza."
     ],
-    "{n} member row repaired. The team can be shared with another server again.": [
+    "_{n} member row repaired. The team can be shared with another server again._::_{n} member rows repaired. The team can be shared with another server again._": [
         "{n} fila de miembro reparada. El equipo se puede volver a compartir con otro servidor.",
         "{n} filas de miembro reparadas. El equipo se puede volver a compartir con otro servidor."
     ],
     "Add my shifts to my calendar": "Añadir mis turnos a mi calendario",
-    "Add {count} shift": ["Añadir {count} turno", "Añadir {count} turnos"],
+    "_Add {count} shift_::_Add {count} shifts_": ["Añadir {count} turno", "Añadir {count} turnos"],
     "Already in a calendar, will be updated": "Ya está en un calendario, se actualizará",
     "Could not add your shifts to the calendar.": "No se pudieron añadir tus turnos al calendario.",
     "Could not load your shifts.": "No se pudieron cargar tus turnos.",
@@ -6508,8 +6524,8 @@
     "Show these hours as": "Mostrar estas horas como",
     "Somebody planning a meeting sees you are not available.": "Quien planifique una reunión verá que no estás disponible.",
     "You have no calendar of your own to add shifts to. Create one in Calendar first.": "No tienes un calendario propio al que añadir turnos. Crea uno primero en Calendario.",
-    "{count} shift could not be added to your calendar.": ["No se pudo añadir {count} turno a tu calendario.", "No se pudieron añadir {count} turnos a tu calendario."],
-    "{count} shift is in your calendar": ["{count} turno está en tu calendario", "{count} turnos están en tu calendario"],
+    "_{count} shift could not be added to your calendar._::_{count} shifts could not be added to your calendar._": ["No se pudo añadir {count} turno a tu calendario.", "No se pudieron añadir {count} turnos a tu calendario."],
+    "_{count} shift is in your calendar_::_{count} shifts are in your calendar_": ["{count} turno está en tu calendario", "{count} turnos están en tu calendario"],
     "You are already working another shift at that time.": "Ya trabajas otro turno a esa hora.",
     "That person is already working another shift at that time.": "Esa persona ya trabaja otro turno a esa hora.",
     "Already working at this time": "Ya trabaja a esta hora",
@@ -6555,7 +6571,7 @@
     "Intended TeamHub seats": "Puestos de TeamHub previstos",
     "Enter a number of seats between 1 and {max}.": "Introduce un número de puestos entre 1 y {max}.",
     "The number of people you expect to use TeamHub. An estimate is fine.": "El número de personas que esperas que usen TeamHub. Basta con una estimación.",
-    "Keep the comment under {n} character.": ["Mantén el comentario por debajo de {n} carácter.", "Mantén el comentario por debajo de {n} caracteres."],
+    "_Keep the comment under {n} character._::_Keep the comment under {n} characters._": ["Mantén el comentario por debajo de {n} carácter.", "Mantén el comentario por debajo de {n} caracteres."],
     "Billing preference, a deadline, an existing Nextcloud provider, or a question.": "Preferencia de facturación, un plazo, un proveedor de Nextcloud actual o una pregunta.",
     "The request also carries this server’s instance UUID and its number of unique team members, so the quotation can be bound to this server. No names and no team content are sent.": "La solicitud incluye también el UUID de instancia de este servidor y su número de miembros únicos de equipo, para que el presupuesto pueda vincularse a este servidor. No se envían nombres ni contenido de los equipos.",
     "Too many requests from this server. Try again later, or send the request by email.": "Demasiadas solicitudes desde este servidor. Inténtalo más tarde o envía la solicitud por correo.",
@@ -6618,5 +6634,572 @@
     "Allow emailing all members of this team": "Permitir enviar correo a todos los miembros de este equipo",
     "Could not save the email setting. Try again.": "No se pudo guardar el ajuste de correo. Inténtalo de nuevo.",
     "Emailing all members is switched off for this team.": "El envío de correo a todos los miembros está desactivado para este equipo.",
+    "Expand banner": "Expandir banner",
+    "Collapse banner": "Contraer banner",
+    "You are not a participant in the team conversation.": "No eres participante de la conversación del equipo.",
+    "Could not load the team conversation.": "No se pudo cargar la conversación del equipo.",
+    "Open polls": "Encuestas abiertas",
+    "_Choose up to {n} option_::_Choose up to {n} options_": ["Elige hasta {n} opción", "Elige hasta {n} opciones"],
+    "Vote": "Votar",
+    "Your vote": "Tu voto",
+    "You are up to date": "Estás al día",
+    "_{n} unread message, you were mentioned_::_{n} unread messages, you were mentioned_": ["{n} mensaje sin leer, te han mencionado", "{n} mensajes sin leer, te han mencionado"],
+    "_{n} unread message_::_{n} unread messages_": ["{n} mensaje sin leer", "{n} mensajes sin leer"],
+    "Call in progress": "Llamada en curso",
+    "Call in progress since {time}": "Llamada en curso desde las {time}",
+    "Could not send your vote.": "No se pudo enviar tu voto.",
+    "Chat views": "Vistas del chat",
+    "_{n} poll awaits your vote_::_{n} polls await your vote_": ["{n} encuesta espera tu voto", "{n} encuestas esperan tu voto"],
+    "No open polls": "No hay encuestas abiertas",
+    "Thread": "Hilo",
+    "{name}: {message}": "{name}: {message}",
+    "Threads": "Hilos",
+    "No threads yet": "Aún no hay hilos",
+    "Communication": "Comunicación",
+    "Meet now": "Reunirse ahora",
+    "_%n room booked at this time_::_%n rooms booked at this time_": ["%n sala reservada a esta hora", "%n salas reservadas a esta hora"],
+    "_%n room is free and fits everyone_::_%n rooms are free and fit everyone_": ["%n sala está libre y caben todos", "%n salas están libres y caben todos"],
+    "_%n room is too small_::_%n rooms are too small_": ["%n sala es demasiado pequeña", "%n salas son demasiado pequeñas"],
+    "_%n seat_::_%n seats_": ["%n plaza", "%n plazas"],
+    "Availability unknown": "Disponibilidad desconocida",
+    "Best fit": "Mejor opción",
+    "Booked": "Reservada",
+    "Booked for the rest of the day": "Reservada el resto del día",
+    "Bookings for {room} between {start} and {end}": "Reservas de {room} entre las {start} y las {end}",
+    "Building": "Edificio",
+    "Capacity not set": "Capacidad no definida",
+    "Checking availability": "Comprobando disponibilidad",
+    "Choose a building": "Elegir un edificio",
+    "Choose a building to see which rooms are free.": "Elige un edificio para ver qué salas están libres.",
+    "Could not check room availability": "No se pudo comprobar la disponibilidad de las salas",
+    "Free again at {time}": "Libre de nuevo a las {time}",
+    "_No free room fits %n person at this time_::_No free room fits %n people at this time_": ["Ninguna sala libre para %n persona a esta hora", "Ninguna sala libre para %n personas a esta hora"],
+    "No rooms match the search.": "Ninguna sala coincide con la búsqueda.",
+    "Other rooms": "Otras salas",
+    "Pick a date and time first to see which rooms are free.": "Elige primero una fecha y una hora para ver qué salas están libres.",
+    "Search rooms": "Buscar salas",
+    "Show %n more room": ["Mostrar %n sala más", "Mostrar %n salas más"],
+    "Video conferencing": "Videoconferencia",
+    "{room} is booked at this time. Pick another room or time.": "{room} está reservada a esta hora. Elige otra sala u otra hora.",
+    "_%n room fits everyone_::_%n rooms fit everyone_": ["En %n sala caben todos", "En %n salas caben todos"],
+    "_Show all %n room_::_Show all %n rooms_": ["Mostrar %n sala", "Mostrar las %n salas"],
+    "All floors": "Todas las plantas",
+    "Floor": "Planta",
+    "Free for the rest of the day": "Libre el resto del día",
+    "Free until {time}": "Libre hasta las {time}",
+    "Picking a room on this day also moves the meeting to {date}.": "Al elegir una sala en este día, la reunión también se mueve al {date}.",
+    "Remove room": "Quitar sala",
+    "Select the room to book it, or choose another one.": "Selecciona la sala para reservarla o elige otra.",
+    "{date} from {start} to {end}": "{date} de {start} a {end}",
+    "After": "Después de",
+    "Choose the last date of the series.": "Elige la última fecha de la serie.",
+    "Daily": "Diariamente",
+    "Does not repeat": "No se repite",
+    "Enter a number between 1 and 99.": "Introduce un número entre 1 y 99.",
+    "Enter a number of times between 1 and 500.": "Introduce un número de veces entre 1 y 500.",
+    "Every": "Cada",
+    "Last date": "Última fecha",
+    "Monthly": "Mensualmente",
+    "Number of times": "Número de veces",
+    "On date": "En una fecha",
+    "On day {day}": "El día {day}",
+    "On the first {weekday}": "El primer {weekday}",
+    "On the second {weekday}": "El segundo {weekday}",
+    "On the third {weekday}": "El tercer {weekday}",
+    "On the fourth {weekday}": "El cuarto {weekday}",
+    "On the last {weekday}": "El último {weekday}",
+    "Repeat": "Repetir",
+    "Repeat on": "Repetir el",
+    "The last date is before the first meeting.": "La última fecha es anterior a la primera reunión.",
+    "Weekly": "Semanalmente",
+    "Yearly": "Anualmente",
+    "_day_::_days_": ["día", "días"],
+    "_week_::_weeks_": ["semana", "semanas"],
+    "_month_::_months_": ["mes", "meses"],
+    "_year_::_years_": ["año", "años"],
+    "_time_::_times_": ["vez", "veces"],
+    "_%n room is free for the next {minutes} minutes_::_%n rooms are free for the next {minutes} minutes_": ["%n sala está libre durante los próximos {minutes} minutos", "%n salas están libres durante los próximos {minutes} minutos"],
+    "Book": "Reservar",
+    "Book {room}": "Reservar {room}",
+    "Failed to book the room": "No se pudo reservar la sala",
+    "Failed to book the room: {error}": "No se pudo reservar la sala: {error}",
+    "For": "Durante",
+    "Free room now": "Sala libre ahora",
+    "No bookable rooms": "No hay salas reservables",
+    "_No room is free for the next %n minute._::_No room is free for the next %n minutes._": ["Ninguna sala está libre durante el próximo %n minuto.", "Ninguna sala está libre durante los próximos %n minutos."],
+    "Quick meeting": "Reunión rápida",
+    "Rooms you can walk into now. Book one in a click.": "Salas en las que puedes entrar ahora. Reserva una con un clic.",
+    "Your Nextcloud has no meeting rooms you can book.": "Tu Nextcloud no tiene salas de reuniones que puedas reservar.",
+    "{room} is booked until {time}": "{room} está reservada hasta las {time}",
+    "{room} was just booked by someone else. Pick another room.": "{room} acaba de ser reservada por otra persona. Elige otra sala.",
+    "_%n of {total} accepted_::_%n of {total} accepted_": ["%n de {total} aceptó", "%n de {total} aceptaron"],
+    "Details of {room}": "Detalles de {room}",
+    "Equipment": "Equipamiento",
+    "Organizer": "Organizador",
+    "Projector": "Proyector",
+    "Room number": "Número de sala",
+    "Screen": "Pantalla",
+    "Wheelchair accessible": "Accesible en silla de ruedas",
+    "Whiteboard": "Pizarra blanca",
+    "Booked on {count} of {total} dates": "Reservada en {count} de {total} fechas",
+    "Free on all {total} dates": "Libre en las {total} fechas",
+    "Partly booked": "Parcialmente reservada",
+    "_{room} is booked on %n date of this series. Pick another room._::_{room} is booked on %n dates of this series. Pick another room._": ["{room} está reservada en %n fecha de esta serie. Elige otra sala.", "{room} está reservada en %n fechas de esta serie. Elige otra sala."],
+    "_{room} is booked on %n date of this series ({dates}). Pick another room._::_{room} is booked on %n dates of this series ({dates}). Pick another room._": ["{room} está reservada en %n fecha de esta serie ({dates}). Elige otra sala.", "{room} está reservada en %n fechas de esta serie ({dates}). Elige otra sala."],
+    "Check the repeat settings first.": "Revisa primero la configuración de repetición.",
+    "Recurring meetings need an active TeamHub licence.": "Las reuniones periódicas requieren una licencia de TeamHub activa.",
+    "You accepted the meeting.": "Has aceptado la reunión.",
+    "You answered maybe.": "Has respondido quizás.",
+    "You declined the meeting.": "Has rechazado la reunión.",
+    "Your reply": "Tu respuesta",
+    "Your reply could not be saved. Try again, or reply in Calendar.": "No se pudo guardar tu respuesta. Inténtalo de nuevo o responde en Calendario.",
+    "_%n day before_::_%n days before_": ["%n día antes", "%n días antes"],
+    "Each meeting gets its own notes file, and the attendees are mentioned in the team chat with a link to it.": "Cada reunión tiene su propio archivo de notas, y se menciona a los asistentes en el chat del equipo con un enlace a él.",
+    "Notes and chat reminder": "Notas y recordatorio en el chat",
+    "📅 Coming up: **%1$s** on %2$s at %3$s.\nAdd your agenda items to the meeting notes: %4$s": "📅 Próximamente: **%1$s** el %2$s a las %3$s.\nAñade tus puntos del orden del día a las notas de la reunión: %4$s",
+    "You have not set your workplace yet, so colleagues see you at the office Monday to Friday, all day. Change any day that does not match your week.": "Aún no ha configurado su lugar de trabajo, así que sus compañeros le ven en la oficina de lunes a viernes, todo el día. Cambie cualquier día que no coincida con su semana.",
+    "Keep this workplace": "Mantener este lugar de trabajo",
+    "Show busy times": "Mostrar horas ocupadas",
+    "People whose busy times are shown": "Personas cuyas horas ocupadas se muestran",
+    "Choose people": "Elegir personas",
+    "_Busy times can be shown for %n person at a time._::_Busy times can be shown for %n people at a time._": [
+        "Las horas ocupadas se pueden mostrar para %n persona a la vez.",
+        "Las horas ocupadas se pueden mostrar para %n personas a la vez."
+    ],
+    "Nobody on this team shows busy times here. Busy times need an email address on the account.": "Nadie en este equipo muestra aquí sus horas ocupadas. Para ello se necesita una dirección de correo en la cuenta.",
+    "_%n member is not shown: they switched busy times off, keep their email private or have none._::_%n members are not shown: they switched busy times off, keep their email private or have none._": [
+        "%n miembro no se muestra: desactivó las horas ocupadas, mantiene su correo privado o no tiene ninguno.",
+        "%n miembros no se muestran: desactivaron las horas ocupadas, mantienen su correo privado o no tienen ninguno."
+    ],
+    "The busy times could not be loaded.": "No se pudieron cargar las horas ocupadas.",
+    "Team calendars": "Calendarios de equipo",
+    "The people on your teams can see when you are busy on the team calendar. Only the times are shown, never what the event is. Events you show as free in Calendar do not count.": "Las personas de tus equipos pueden ver en el calendario del equipo cuándo estás ocupado. Solo se muestran las horas, nunca de qué trata el evento. Los eventos que muestras como libres en Calendario no cuentan.",
+    "Show my busy times on team calendars": "Mostrar mis horas ocupadas en los calendarios de equipo",
+    "This only affects TeamHub. Anyone who adds you to an event in Calendar can still see when you are busy, as Nextcloud always allows.": "Esto solo afecta a TeamHub. Quien te añada a un evento en Calendario puede seguir viendo cuándo estás ocupado, como Nextcloud siempre permite.",
+    "Could not load the setting.": "No se pudo cargar el ajuste.",
+    "Busy times": "Horas ocupadas",
+    "Busy, {when}": "Ocupado, {when}",
+    "Not confirmed": "Sin confirmar",
+    "Not confirmed, {when}": "Sin confirmar, {when}",
+    "Work week": "Semana laboral",
+    "{name}: no busy times in this period": "{name}: sin horas ocupadas en este periodo",
+    "{name}: {times}": "{name}: {times}",
+    "Any equipment": "Cualquier equipamiento",
+    "No room in this building has all of this equipment.": "Ninguna sala de este edificio tiene todo este equipamiento.",
+    "Select a room to book it.": "Selecciona una sala para reservarla.",
+    "_%n of {total} accepted, your reply is needed_::_%n of {total} accepted, your reply is needed_": ["%n de {total} han aceptado, falta tu respuesta", "%n de {total} han aceptado, falta tu respuesta"],
+    "_%n action item was found in the notes. Check who does it and by when._::_%n action items were found in the notes. Check who does each and by when._": ["Se encontró %n acción en las notas. Comprueba quién la hace y para cuándo.", "Se encontraron %n acciones en las notas. Comprueba quién hace cada una y para cuándo."],
+    "_%n task could not be created: {titles}_::_%n tasks could not be created: {titles}_": ["No se pudo crear %n tarea: {titles}", "No se pudieron crear %n tareas: {titles}"],
+    "Action items": "Acciones",
+    "Action items become tasks, which need the Tasks app. Ask your administrator to install it.": "Las acciones se convierten en tareas, que necesitan la aplicación Tareas. Pide a tu administrador que la instale.",
+    "Add action item": "Añadir acción",
+    "By when": "Para cuándo",
+    "Each one becomes a team task for the person named, in their My Work.": "Cada una se convierte en una tarea del equipo para la persona indicada, en su Mi trabajo.",
+    "Each proposal you tick gets a link to these notes in its history. The approvers still decide in Decisions.": "Cada propuesta que marques recibe un enlace a estas notas en su historial. Los aprobadores siguen decidiendo en Decisiones.",
+    "Meeting wrapped up": "Reunión cerrada",
+    "No action items were written in the notes. Add them below, or leave this empty.": "No hay acciones escritas en las notas. Añádelas abajo o déjalo vacío.",
+    "On the agenda": "En el orden del día",
+    "Open the notes": "Abrir las notas",
+    "Proposals discussed": "Propuestas tratadas",
+    "Reading the meeting notes": "Leyendo las notas de la reunión",
+    "Remove action item {n}": "Quitar la acción {n}",
+    "The meeting could not be wrapped up. Try again.": "No se pudo cerrar la reunión. Inténtalo de nuevo.",
+    "The notes file could not be found. Add the action items below; nothing is written back.": "No se encontró el archivo de notas. Añade las acciones abajo; no se escribe nada en él.",
+    "The wrap-up could not be loaded.": "No se pudo cargar el cierre.",
+    "This meeting has no wrap-up for you. Only its organiser can wrap it up, after it has ended.": "Esta reunión no tiene cierre para ti. Solo su organizador puede cerrarla, una vez terminada.",
+    "This meeting is already wrapped up.": "Esta reunión ya está cerrada.",
+    "This meeting was marked as needing no wrap-up.": "Esta reunión se marcó como sin cierre.",
+    "What": "Qué",
+    "Wrap up meeting": "Cerrar la reunión",
+    "Discussed in a meeting": "Tratada en una reunión",
+    "Meeting: {title}": "Reunión: {title}",
+    "Open the meeting notes": "Abrir las notas de la reunión",
+    "Meetings to wrap up": "Reuniones por cerrar",
+    "Wrapped up meetings": "Reuniones cerradas",
+    "Wrap up": "Cerrar",
+    "Wrap up %1$s": "Cerrar %1$s",
+    "The meeting is over. Hand out the action items and link the proposals you discussed.": "La reunión ha terminado. Reparte las acciones y vincula las propuestas tratadas.",
+    "Marked as needing no wrap-up": "Marcada como sin cierre",
+    "Marked as needing no wrap-up.": "Marcada como sin cierre.",
+    "_Wrapped up with %n task_::_Wrapped up with %n tasks_": ["Cerrada con %n tarea", "Cerrada con %n tareas"],
+    "No wrap-up needed": "No hace falta cierre",
+    "No tasks are handed out and no proposals are linked to the notes. You can still do that by hand.": "No se reparten tareas ni se vinculan propuestas a las notas. Aún puedes hacerlo a mano.",
+    "Meeting held": "Reunión celebrada",
+    "Organiser wraps up": "El organizador cierra",
+    "Tasks are with the people named": "Las tareas están con las personas indicadas",
+    "Only the organiser can wrap up this meeting.": "Solo el organizador puede cerrar esta reunión.",
+    "This meeting was already wrapped up.": "Esta reunión ya se había cerrado.",
+    "From the meeting %1$s on %2$s.": "De la reunión %1$s del %2$s.",
+    "Meeting notes: %1$s": "Notas de la reunión: %1$s",
+    "Wrap-up": "Cierre",
+    "Wrapped up by %1$s on %2$s.": "Cerrada por %1$s el %2$s.",
+    "No tasks were handed out.": "No se repartieron tareas.",
+    "the team": "el equipo",
+    "%1$s (%2$s, due %3$s)": "%1$s (%2$s, para el %3$s)",
+    "%1$s (%2$s)": "%1$s (%2$s)",
+    "The approvers decide on these in Decisions.": "Los aprobadores deciden sobre ellas en Decisiones.",
+    "Could not send your reply.": "No se pudo enviar tu respuesta.",
+    "Pinned by {name}": "Fijado por {name}",
+    "Reply sent": "Respuesta enviada",
+    "Reply to {title}": "Responder a {title}",
+    "Send reply": "Enviar respuesta",
+    "This reply is too long.": "Esta respuesta es demasiado larga.",
+    "Could not end the poll.": "No se pudo cerrar la encuesta.",
+    "End poll": "Cerrar encuesta",
+    "End this poll?": "¿Cerrar esta encuesta?",
+    "Nobody can vote after this, and everyone in the conversation sees the results.": "Después nadie podrá votar, y todos en la conversación verán los resultados.",
+    "Poll ended": "Encuesta cerrada",
+    "Add reaction": "Añadir reacción",
+    "_Remove your {emoji} reaction. %n person reacted_::_Remove your {emoji} reaction. %n people reacted_": [
+        "Quitar tu reacción {emoji}. %n persona ha reaccionado",
+        "Quitar tu reacción {emoji}. %n personas han reaccionado"
+    ],
+    "_React with {emoji}. %n person reacted_::_React with {emoji}. %n people reacted_": [
+        "Reaccionar con {emoji}. %n persona ha reaccionado",
+        "Reaccionar con {emoji}. %n personas han reaccionado"
+    ],
+    "_{names} and %n other reacted with {emoji}_::_{names} and %n others reacted with {emoji}_": [
+        "{names} y %n persona más han reaccionado con {emoji}",
+        "{names} y %n personas más han reaccionado con {emoji}"
+    ],
+    "{names} reacted with {emoji}": "Reacción {emoji}: {names}",
+    "Could not add the reaction": "No se pudo añadir la reacción",
+    "Could not remove the reaction": "No se pudo quitar la reacción",
+    "Current config: {config}. Bad bits: {badBits}": "Configuración actual: {config}. Bits incorrectos: {badBits}",
+    "Team config reset: {oldConfig} → {newConfig}": "Configuración del equipo restablecida: {oldConfig} → {newConfig}",
+    "Failed to link attachment {name}: {error}": "No se pudo vincular el adjunto {name}: {error}",
+    "_Cannot delete: in use by {n} entry_::_Cannot delete: in use by {n} entries_": [
+        "No se puede eliminar: lo usa {n} entrada",
+        "No se puede eliminar: lo usan {n} entradas"
+    ],
+    "_Cannot delete: status type is in use by {n} entry_::_Cannot delete: status type is in use by {n} entries_": [
+        "No se puede eliminar: el tipo de estado lo usa {n} entrada",
+        "No se puede eliminar: el tipo de estado lo usan {n} entradas"
+    ],
+    "_Expired %n day ago_::_Expired %n days ago_": [
+        "Caducó hace %n día",
+        "Caducó hace %n días"
+    ],
+    "_Expires in %n day_::_Expires in %n days_": [
+        "Caduca en %n día",
+        "Caduca en %n días"
+    ],
+    "_The roster for %s to %s is published. %n place is still open._::_The roster for %s to %s is published. %n places are still open._": [
+        "El cuadrante del %s al %s está publicado. Queda %n plaza libre.",
+        "El cuadrante del %s al %s está publicado. Quedan %n plazas libres."
+    ],
+    "_No member count has reached the licensing service for %n day, so this licence cannot be honoured. Existing Advanced teams still work read-only._::_No member count has reached the licensing service for %n days, so this licence cannot be honoured. Existing Advanced teams still work read-only._": [
+        "Ningún recuento de miembros ha llegado al servicio de licencias desde hace %n día, así que esta licencia no se puede respetar. Los equipos avanzados existentes siguen funcionando en solo lectura.",
+        "Ningún recuento de miembros ha llegado al servicio de licencias desde hace %n días, así que esta licencia no se puede respetar. Los equipos avanzados existentes siguen funcionando en solo lectura."
+    ],
+    "_No member count has reached the licensing service for %n day._::_No member count has reached the licensing service for %n days._": [
+        "Ningún recuento de miembros ha llegado al servicio de licencias desde hace %n día.",
+        "Ningún recuento de miembros ha llegado al servicio de licencias desde hace %n días."
+    ],
+    "_No member count has reached the licensing service for %n day. Check that this server can reach it, then send a report from the License tab._::_No member count has reached the licensing service for %n days. Check that this server can reach it, then send a report from the License tab._": [
+        "Ningún recuento de miembros ha llegado al servicio de licencias desde hace %n día. Comprueba que este servidor puede alcanzarlo y luego envía un informe desde la pestaña Licencia.",
+        "Ningún recuento de miembros ha llegado al servicio de licencias desde hace %n días. Comprueba que este servidor puede alcanzarlo y luego envía un informe desde la pestaña Licencia."
+    ],
+    "Links to {page}": "Enlaza a {page}",
+    "this page": "esta página",
+    "{tab} in {team}": "{tab} en {team}",
+    "Open the page this task was made on": "Abrir la página en la que se creó esta tarea",
+    "Open page": "Abrir página",
+    "Create follow-up task": "Crear tarea de seguimiento",
+    "this message": "este mensaje",
+    "this comment": "este comentario",
+    "this decision": "esta decisión",
+    "My Work views": "Vistas de Mi trabajo",
+    "Nothing is waiting on others": "Nada está esperando a otros",
+    "Nothing completed recently": "Nada completado recientemente",
+    "Work you handed to someone else, and requests waiting on another person, appear here.": "Aquí aparece el trabajo que has pasado a otra persona y las solicitudes que esperan a alguien más.",
+    "Work that was finished in the last few days appears here, yours and what others did for you.": "Aquí aparece el trabajo terminado en los últimos días, el tuyo y lo que otros hicieron por ti.",
+    "Team backlog": "Pendientes del equipo",
+    "\"{name}\" was unlinked from this team. TeamHub did not create it, so it was not deleted.": "\"{name}\" se ha desconectado de este equipo. TeamHub no lo creó, así que no se ha eliminado.",
+    "\"{name}\" was removed from this team. Another team still uses it, so it was not deleted.": "\"{name}\" se ha quitado de este equipo. Otro equipo todavía lo usa, así que no se ha eliminado.",
+    "Shared with team": "Compartido con el equipo",
+    "Could not load what is shared with this team.": "No se pudo cargar lo que se ha compartido con este equipo.",
+    "This Nextcloud cannot list what is shared with teams.": "Este Nextcloud no puede mostrar lo que se comparte con los equipos.",
+    "Nothing else is shared with this team.": "No hay nada más compartido con este equipo.",
+    "Opens in a new tab": "Se abre en una pestaña nueva",
+    "Show fewer": "Mostrar menos",
+    "No answer from {apps}. This list may be incomplete.": "Sin respuesta de {apps}. Es posible que esta lista esté incompleta.",
+    "_Show %n more_::_Show %n more_": [
+        "Mostrar %n más",
+        "Mostrar %n más"
+    ],
+    "Apps that list team resources through Nextcloud's Teams API appear in the Shared with team card on every team home. Switch one off to stop its resources appearing in TeamHub. Nextcloud's own Teams page is not affected.": "Las aplicaciones que muestran recursos de equipo a través de la API Teams de Nextcloud aparecen en la tarjeta Compartido con el equipo de la página de inicio de cada equipo. Desactiva una para que sus recursos dejen de aparecer en TeamHub. La página Teams de Nextcloud no se ve afectada.",
+    "The saved list of switched off apps cannot be read, so every app is switched off. Changing any switch saves a new list, with every other app switched on.": "No se puede leer la lista guardada de aplicaciones desactivadas, así que todas las aplicaciones están desactivadas. Al cambiar cualquier interruptor se guarda una lista nueva en la que todas las demás aplicaciones están activadas.",
+    "No app shares team resources": "Ninguna aplicación comparte recursos de equipo",
+    "An installed app appears here when it lists resources for teams through Nextcloud's Teams API.": "Una aplicación instalada aparece aquí cuando muestra recursos para equipos a través de la API Teams de Nextcloud.",
+    "Stop showing {name} in TeamHub": "Dejar de mostrar {name} en TeamHub",
+    "Show {name} in TeamHub": "Mostrar {name} en TeamHub",
+    "Shown in TeamHub": "Se muestra en TeamHub",
+    "Not shown in TeamHub": "No se muestra en TeamHub",
+    "Could not load the apps that share team resources.": "No se pudieron cargar las aplicaciones que comparten recursos de equipo.",
+    "{name} is shown in Shared with team again.": "{name} vuelve a mostrarse en Compartido con el equipo.",
+    "{name} no longer appears in Shared with team.": "{name} ya no aparece en Compartido con el equipo.",
+    "Could not save the setting.": "No se pudo guardar el ajuste.",
+    "Modules enabled": "Módulos activados",
+    "Announcement popup": "Ventana de anuncios",
+    "Turned off by an administrator": "Desactivada por un administrador",
+    "Not turned off": "No desactivada",
+    "Folders managed by other apps": "Carpetas gestionadas por otras aplicaciones",
+    "These apps give teams access to Team folders of their own. Team admins see such a folder as managed by the app and are not asked to review it. Switch an app off to send its folders back to the team admins' review.": "Estas aplicaciones dan a los equipos acceso a sus propias carpetas de equipo. Los administradores de equipo ven una carpeta así como gestionada por la aplicación y no tienen que revisarla. Desactive una aplicación para que los administradores de equipo vuelvan a revisar sus carpetas.",
+    "Let team admins review the folders of {name}": "Permitir que los administradores de equipo revisen las carpetas de {name}",
+    "Let {name} manage its own folders": "Permitir que {name} gestione sus propias carpetas",
+    "Managed by the app": "Gestionada por la aplicación",
+    "Reviewed by team admins": "Revisada por los administradores de equipo",
+    "{name} manages its own folders again.": "{name} vuelve a gestionar sus propias carpetas.",
+    "Team admins review the folders of {name}. The folders appear in the review within an hour.": "Los administradores de equipo revisan las carpetas de {name}. Las carpetas aparecen en la revisión en el plazo de una hora.",
+    "Another app decides who can open these folders, so there is nothing to review here. Change the access in that app.": "Otra aplicación decide quién puede abrir estas carpetas, así que aquí no hay nada que revisar. Cambie el acceso en esa aplicación.",
+    "Managed by {app}": "Gestionada por {app}",
+    "_Show %n folder managed by another app_::_Show %n folders managed by other apps_": ["Mostrar %n carpeta gestionada por otra aplicación", "Mostrar %n carpetas gestionadas por otras aplicaciones"],
+    "Add field": "Añadir campo",
+    "Ask which team the request is for": "Preguntar para qué equipo es la solicitud",
+    "Enter at most {max} options of at most 100 characters.": "Escribe como máximo {max} opciones de 100 caracteres como máximo.",
+    "Every request is personal: only the requester and this team can follow it.": "Cada solicitud es personal: solo el solicitante y este equipo pueden seguirla.",
+    "Explanation (optional)": "Explicación (opcional)",
+    "Explanation of field {n} (optional)": "Explicación del campo {n} (opcional)",
+    "Field name": "Nombre del campo",
+    "Fields of the request form": "Campos del formulario de solicitud",
+    "Move field {n} down": "Bajar el campo {n}",
+    "Move field {n} up": "Subir el campo {n}",
+    "Must be filled in": "Debe rellenarse",
+    "Name of field {n}": "Nombre del campo {n}",
+    "Options of field {n}, one per line": "Opciones del campo {n}, una por línea",
+    "Options, one per line": "Opciones, una por línea",
+    "Remove field": "Quitar campo",
+    "Remove field {n}": "Quitar el campo {n}",
+    "Request form": "Formulario de solicitud",
+    "The name of the service": "El nombre del servicio",
+    "The request is named after": "La solicitud toma el nombre de",
+    "The requester may leave it empty. The members of the team they pick can follow the request.": "El solicitante puede dejarlo vacío. Los miembros del equipo elegido pueden seguir la solicitud.",
+    "Type of field {n}": "Tipo del campo {n}",
+    "What somebody fills in to make a request. Without fields they only read the description and send the request.": "Lo que se rellena para hacer una solicitud. Sin campos, solo se lee la descripción y se envía la solicitud.",
+    "An admin of the team can close the request instead.": "Un administrador del equipo puede cerrar la solicitud en su lugar.",
+    "Automatic": "Automática",
+    "Confirm automatically after (days)": "Confirmar automáticamente después de (días)",
+    "Confirmation": "Confirmación",
+    "No confirmation": "Sin confirmación",
+    "The request ends without a confirmation": "La solicitud termina sin confirmación",
+    "The requester confirms the result": "El solicitante confirma el resultado",
+    "The requester confirms, or it is confirmed automatically": "El solicitante confirma, o se confirma automáticamente",
+    "When the last step is done": "Cuando se termina el último paso",
+    "Give every field of the request form a name.": "Ponle un nombre a cada campo del formulario de solicitud.",
+    "Give every field with choices at least two options.": "Pon al menos dos opciones en cada campo de elección.",
+    "Short text": "Texto corto",
+    "Long text": "Texto largo",
+    "One option": "Una opción",
+    "Several options": "Varias opciones",
+    "Number": "Número",
+    "Yes or no": "Sí o no",
+    "Person": "Persona",
+    "Choose an option": "Elegir una opción",
+    "Search for a person": "Buscar una persona",
+    "{field} (optional)": "{field} (opcional)",
+    "{name} ({detail})": "{name} ({detail})",
+    "Confirmed automatically from {date}.": "Se confirma automáticamente a partir del {date}.",
+    "Confirmed automatically": "Confirmado automáticamente",
+    "The name of a field is at most %s characters.": "El nombre de un campo tiene como máximo %s caracteres.",
+    "The explanation of a field is at most %s characters.": "La explicación de un campo tiene como máximo %s caracteres.",
+    "The request form could not be read.": "No se pudo leer el formulario de solicitud.",
+    "Pick one of the field types.": "Elige uno de los tipos de campo.",
+    "Fill in \"%s\".": "Rellena «%s».",
+    "This service has changed. Check your answers and send the request again.": "Este servicio ha cambiado. Revisa tus respuestas y envía la solicitud de nuevo.",
+    "The answers could not be read.": "No se pudieron leer las respuestas.",
+    "\"%s\" contains characters that are not allowed.": "«%s» contiene caracteres no permitidos.",
+    "\"%1$s\" is at most %2$s characters.": "«%1$s» tiene como máximo %2$s caracteres.",
+    "\"%s\" is not a date.": "«%s» no es una fecha.",
+    "\"%s\" is not a number.": "«%s» no es un número.",
+    "Pick a person for \"%s\".": "Elige una persona para «%s».",
+    "An option is at most %s characters.": "Una opción tiene como máximo %s caracteres.",
+    "Names and options cannot contain line breaks or special characters.": "Los nombres y las opciones no pueden contener saltos de línea ni caracteres especiales.",
+    "The answer to \"%s\" could not be read.": "No se pudo leer la respuesta a «%s».",
+    "Pick one of the options for \"%s\".": "Elige una de las opciones de «%s».",
+    "The confirmation could not be read.": "No se pudo leer la confirmación.",
+    "Pick how a request is confirmed.": "Elige cómo se confirma una solicitud.",
+    "Confirm automatically after 1 to %s days.": "Confirma automáticamente después de 1 a %s días.",
+    "_{n} field_::_{n} fields_": ["{n} campo", "{n} campos"],
+    "_Automatic after {n} day_::_Automatic after {n} days_": ["Automática después de {n} día", "Automática después de {n} días"],
+    "_A request form has at most %n field._::_A request form has at most %n fields._": ["Un formulario de solicitud tiene como máximo %n campo.", "Un formulario de solicitud tiene como máximo %n campos."],
+    "_A field has at most %n option._::_A field has at most %n options._": ["Un campo tiene como máximo %n opción.", "Un campo tiene como máximo %n opciones."],
+    "Add a field of the type Person to the request form first.": "Añade primero un campo de tipo Persona al formulario de solicitud.",
+    "Everybody in the group can answer. The first answer decides.": "Todos los del grupo pueden responder. La primera respuesta decide.",
+    "Field of the request form": "Campo del formulario de solicitud",
+    "Text of the approve button (optional)": "Texto del botón de aprobar (opcional)",
+    "Text of the approve button of step {n} (optional)": "Texto del botón de aprobar del paso {n} (opcional)",
+    "Text of the reject button (optional)": "Texto del botón de rechazar (opcional)",
+    "Text of the reject button of step {n} (optional)": "Texto del botón de rechazar del paso {n} (opcional)",
+    "The approver sees the request, its files and the steps so far from the moment it is their turn. They do not see the messages or your internal notes.": "Quien aprueba ve la solicitud, sus archivos y los pasos hasta ahora desde que le toca. No ve los mensajes ni vuestras notas internas.",
+    "The field that names who approves step {n}": "El campo que indica quién aprueba el paso {n}",
+    "The group that approves step {n}": "El grupo que aprueba el paso {n}",
+    "The manager in the requester's account, as an administrator set it.": "El responsable en la cuenta del solicitante, tal como lo definió un administrador.",
+    "The person who approves step {n}": "La persona que aprueba el paso {n}",
+    "The request ends": "La solicitud termina",
+    "The request goes on, and the team decides what follows": "La solicitud continúa y el equipo decide qué sigue",
+    "Used when there is nobody else, or when the approver made the request. Nobody approves their own request.": "Se usa cuando no hay nadie más o cuando quien aprueba hizo la solicitud. Nadie aprueba su propia solicitud.",
+    "When the approver rejects": "Cuando quien aprueba rechaza",
+    "Who approves": "Quién aprueba",
+    "Who approves otherwise": "Quién aprueba en otro caso",
+    "Who approves otherwise (optional)": "Quién aprueba en otro caso (opcional)",
+    "Who approves step {n}": "Quién aprueba el paso {n}",
+    "Who approves step {n} otherwise": "Quién aprueba el paso {n} en otro caso",
+    "A group": "Un grupo",
+    "A person": "Una persona",
+    "A person picked on the request form": "Una persona elegida en el formulario de solicitud",
+    "Check the request": "Revisar la solicitud",
+    "Explanation": "Explicación",
+    "Intake form": "Formulario de entrada",
+    "Issue": "Incidencia",
+    "Manager approves": "El responsable aprueba",
+    "Needed by": "Necesario para",
+    "Request with approval": "Solicitud con aprobación",
+    "Say for every approval who approves.": "Indica en cada aprobación quién aprueba.",
+    "Say who approves when there is no manager or nobody was picked.": "Indica quién aprueba si no hay responsable o no se eligió a nadie.",
+    "The requester's manager": "El responsable del solicitante",
+    "Approval asked of {name}": "Aprobación pedida a {name}",
+    "Approval handed to {name}": "Aprobación entregada a {name}",
+    "Approved: {step}": "Aprobado: {step}",
+    "Approves a step": "Aprueba un paso",
+    "Ask for approval": "Pedir aprobación",
+    "Hand to somebody else": "Pasar a otra persona",
+    "What do you want approved?": "¿Qué quieres que se apruebe?",
+    "The requester can read this. The request waits for the answer, and a rejection comes back to you.": "El solicitante puede leer esto. La solicitud espera la respuesta, y un rechazo vuelve a ti.",
+    "Add approval step": "Añadir paso de aprobación",
+    "Start from": "Empezar desde",
+    "Waiting for the approval you asked for.": "A la espera de la aprobación que pediste.",
+    "Whoever approves the request can view them too.": "Quien aprueba la solicitud también puede verlos.",
+    "The last step is for the team, not an approver.": "El último paso es para el equipo, no para quien aprueba.",
+    "No request is waiting for somebody else.": "Ninguna solicitud espera a otra persona.",
+    "A step is for the team, the requester or an approver.": "Un paso es para el equipo, el solicitante o quien aprueba.",
+    "The approval could not be read.": "No se pudo leer la aprobación.",
+    "Pick who approves.": "Elige quién aprueba.",
+    "Pick what happens when the approver rejects.": "Elige qué ocurre cuando quien aprueba rechaza.",
+    "The text of a button is at most %s characters.": "El texto de un botón tiene como máximo %s caracteres.",
+    "The approver could not be read.": "No se pudo leer quién aprueba.",
+    "An approver does not exist any more. Pick somebody else.": "Alguien que aprueba ya no existe. Elige a otra persona.",
+    "You cannot name this approver. Pick somebody else.": "No puedes designar a esta persona. Elige a otra.",
+    "There is nobody to approve this request. Ask the service team.": "No hay nadie para aprobar esta solicitud. Pregunta al equipo de servicio.",
+    "Wait for the approval you asked for first.": "Espera primero la aprobación que pediste.",
+    "Only whoever claimed this task can ask for an approval.": "Solo quien ha tomado esta tarea puede pedir una aprobación.",
+    "This task is not being worked on right now.": "Ahora mismo no se trabaja en esta tarea.",
+    "Say what you want approved.": "Indica qué quieres que se apruebe.",
+    "This person was already asked.": "A esta persona ya se le ha preguntado.",
+    "Wait for the approvals you asked for first.": "Espera primero las aprobaciones que pediste.",
+    "This step is not an approval.": "Este paso no es una aprobación.",
+    "The requester cannot approve their own request.": "El solicitante no puede aprobar su propia solicitud.",
+    "Whoever asks for an approval cannot give it.": "Quien pide una aprobación no puede darla.",
+    "Pick somebody to approve this.": "Elige a alguien para aprobar esto.",
+    "Hand the approval to somebody other than yourself.": "Pasa la aprobación a alguien que no seas tú.",
+    "You cannot approve this request yourself.": "No puedes aprobar esta solicitud tú mismo.",
+    "{actor} asks for your approval of {workflow}": "{actor} pide tu aprobación de {workflow}",
+    "%1$s asks for your approval of %2$s": "%1$s pide tu aprobación de %2$s",
+    "{actor} approved {workflow}": "{actor} aprobó {workflow}",
+    "%1$s approved %2$s": "%1$s aprobó %2$s",
+    "{actor} did not approve {workflow}": "{actor} no aprobó {workflow}",
+    "%1$s did not approve %2$s": "%1$s no aprobó %2$s",
+    "{name} is waiting for your answer. What you send now answers their question.": "{name} espera tu respuesta. Lo que envíes ahora responde a esa pregunta.",
+    "When enabled, an admin of a service team can have a service send an email when a step is reached, done or rejected, with the team's own text and answers from the request form. It goes to accounts on this server only. Sent email is outside Nextcloud: whoever can read it reads those answers. When disabled, services still send notifications.": "Si está activado, un administrador de un equipo de servicio puede hacer que un servicio envíe un correo cuando un paso se alcanza, se termina o se rechaza, con el texto del equipo y respuestas del formulario de solicitud. Solo va a cuentas de este servidor. Un correo enviado está fuera de Nextcloud: quien pueda leerlo lee esas respuestas. Si está desactivado, los servicios siguen enviando notificaciones.",
+    "A field without a name": "Un campo sin nombre",
+    "A group of more than 100 people is not told.": "No se avisa a un grupo de más de 100 personas.",
+    "A person or group that gets a notice does not exist any more. Pick somebody else.": "Una persona o un grupo que recibe un aviso ya no existe. Elige a otra.",
+    "About email from services": "Acerca del correo de los servicios",
+    "Add notice": "Añadir aviso",
+    "An email leaves Nextcloud. Whoever can read it reads these answers, whatever they may open here. The notification shows the subject and the text only.": "Un correo sale de Nextcloud. Quien pueda leerlo lee estas respuestas, pueda abrir aquí lo que pueda. La notificación solo muestra el asunto y el texto.",
+    "As a notification in Nextcloud": "Como notificación en Nextcloud",
+    "By email, to the address in the account": "Por correo, a la dirección de la cuenta",
+    "Give every notice a subject.": "Pon un asunto a cada aviso.",
+    "How it is sent": "Cómo se envía",
+    "It would go to more than 100 people.": "Llegaría a más de 100 personas.",
+    "Let services send email": "Permitir que los servicios envíen correo",
+    "No email could be sent to {names}.": "No se pudo enviar ningún correo a {names}.",
+    "Notice not sent: {subject}": "Aviso no enviado: {subject}",
+    "Notice: {subject}": "Aviso: {subject}",
+    "Notices": "Avisos",
+    "Open the request": "Abrir la solicitud",
+    "Remove notice {n} of step {step}": "Quitar el aviso {n} del paso {step}",
+    "Remove notice": "Quitar aviso",
+    "Say for every notice how it is sent.": "Indica en cada aviso cómo se envía.",
+    "Say for every notice who gets it.": "Indica en cada aviso quién lo recibe.",
+    "Services cannot send email on this server. Send the notice as a notification.": "Los servicios no pueden enviar correo en este servidor. Envía el aviso como notificación.",
+    "Services cannot send email on this server.": "Los servicios no pueden enviar correo en este servidor.",
+    "Services may send email": "Los servicios pueden enviar correo",
+    "Step": "Paso",
+    "Subject of notice {n} of step {step}": "Asunto del aviso {n} del paso {step}",
+    "Tell somebody about this step, in your own words. Whoever has to act is told already.": "Avisa a alguien de este paso, con tus propias palabras. Quien tiene que actuar ya recibe un aviso.",
+    "Text (optional)": "Texto (opcional)",
+    "Text of notice {n} of step {step} (optional)": "Texto del aviso {n} del paso {step} (opcional)",
+    "The approver": "Quien aprueba",
+    "The group that gets notice {n} of step {step}": "El grupo que recibe el aviso {n} del paso {step}",
+    "The name of the requester": "El nombre de quien lo solicita",
+    "The notices could not be read.": "No se pudieron leer los avisos.",
+    "The person who gets notice {n} of step {step}": "La persona que recibe el aviso {n} del paso {step}",
+    "The subject of a notice is at most %s characters.": "El asunto de un aviso tiene como máximo %s caracteres.",
+    "The text of a notice is at most %s characters.": "El texto de un aviso tiene como máximo %s caracteres.",
+    "There was nobody to send it to.": "No había a quién enviarlo.",
+    "To {names}, as a notification and by email": "A {names}, como notificación y por correo",
+    "To {names}, as a notification": "A {names}, como notificación",
+    "To {names}, by email": "A {names}, por correo",
+    "What the email also says": "Qué más dice el correo",
+    "When notice {n} of step {step} is sent": "Cuándo se envía el aviso {n} del paso {step}",
+    "When the step is done": "Cuando el paso está hecho",
+    "When the step is reached": "Cuando se llega al paso",
+    "When the step is rejected": "Cuando se rechaza el paso",
+    "Who gets it": "Quién lo recibe",
+    "Who gets notice {n} of step {step}": "Quién recibe el aviso {n} del paso {step}",
+    "Whoever has the task": "Quien tiene la tarea",
+    "You cannot send a notice to this person or group. Pick somebody else.": "No puedes enviar un aviso a esta persona o grupo. Elige a otra.",
+    "You get this email because the team that offers \"%s\" asked TeamHub to tell you about this step.": "Recibes este correo porque el equipo que ofrece \"%s\" pidió a TeamHub que te avisara de este paso.",
+    "_{names} and {n} more_::_{names} and {n} more_": ["{names} y {n} más", "{names} y {n} más"],
+    "_{n} notice_::_{n} notices_": ["{n} aviso", "{n} avisos"],
+    "_A step has at most %n notice._::_A step has at most %n notices._": ["Un paso tiene como máximo %n aviso.", "Un paso tiene como máximo %n avisos."],
+    "Notice {n}": "Aviso {n}",
+    "A condition asks something its field cannot answer. Pick another comparison.": "Una condición pregunta algo que su campo no puede responder. Elige otra comparación.",
+    "A condition could not be read.": "No se pudo leer una condición.",
+    "A condition uses a field that is not on the request form any more.": "Una condición usa un campo que ya no está en el formulario de solicitud.",
+    "A condition uses an answer of the request form. This form has no fields.": "Una condición usa una respuesta del formulario de solicitud. Este formulario no tiene campos.",
+    "At least one team step runs on every request. Remove the condition from one.": "Al menos un paso del equipo se aplica a cada solicitud. Quita la condición de uno.",
+    "Comparison": "Comparación",
+    "Give every condition a value.": "Da un valor a cada condición.",
+    "Not needed": "No necesario",
+    "Only on some requests": "Solo en algunas solicitudes",
+    "Only when {field} is filled in": "Solo si {field} está rellenado",
+    "Only when {field} {op} {value}": "Solo si {field} {op} {value}",
+    "Otherwise the step is left out and the request goes on to the next one. A field nobody answered never matches.": "Si no, el paso se omite y la solicitud pasa al siguiente. Un campo que nadie respondió nunca coincide.",
+    "Pick a field": "Elige un campo",
+    "The comparison of the condition of step {n}": "La comparación de la condición del paso {n}",
+    "The field the condition of step {n} looks at": "El campo que mira la condición del paso {n}",
+    "The last step runs on every request. Remove its condition.": "El último paso se aplica a cada solicitud. Quita su condición.",
+    "The value of a condition is at most %s characters.": "El valor de una condición tiene como máximo %s caracteres.",
+    "The value of the condition of step {n}": "El valor de la condición del paso {n}",
+    "When the answer to": "Cuando la respuesta a",
+    "does not include": "no incluye",
+    "includes": "incluye",
+    "is at least": "es como mínimo",
+    "is at most": "es como máximo",
+    "is filled in": "está rellenado",
+    "is not": "no es",
+    "is on or after": "es el o después del",
+    "is on or before": "es el o antes del",
+    "is": "es",
+    "%1$s: the step \"%2$s\" is past its deadline": "%1$s: el paso \"%2$s\" ha superado su plazo",
+    "{workflow}: the step \"{step}\" is past its deadline": "{workflow}: el paso \"{step}\" ha superado su plazo",
+    "Counted from when the request reaches this step, Monday to Friday.": "Contado desde que la solicitud llega a este paso, de lunes a viernes.",
+    "Deadline in working days (optional)": "Plazo en días laborables (opcional)",
+    "Deadline of step {n} in working days (optional)": "Plazo del paso {n} en días laborables (opcional)",
+    "Due:": "Vence:",
+    "Give a step 1 to %s working days, or no deadline.": "Da a un paso de 1 a %s días laborables, o ningún plazo.",
+    "Overdue since {date}": "Vencido desde el {date}",
+    "Overdue since:": "Vencido desde:",
+    "Past its deadline: {step}": "Plazo superado: {step}",
+    "_Within {n} working day_::_Within {n} working days_": ["En {n} día laborable", "En {n} días laborables"],
+    "Fields of task {t} of step {n}": "Campos de la tarea {t} del paso {n}",
+    "Fields the requester fills in to complete this task. Everybody on the request sees the answers.": "Campos que quien solicita rellena para completar esta tarea. Todas las personas de la solicitud ven las respuestas.",
+    "Fields whoever does this task fills in to complete it. Only the team sees the answers.": "Campos que rellena quien hace esta tarea para completarla. Solo el equipo ve las respuestas.",
+    "A condition can only use a field of the request form or of a step before it.": "Una condición solo puede usar un campo del formulario de solicitud o de un paso anterior.",
+    "Give every field of a task a name.": "Pon un nombre a cada campo de una tarea.",
+    "Loading this team. More settings may appear in a moment.": "Cargando este equipo. Pueden aparecer más ajustes en un momento.",
+    "This needs a TeamHub licence.": "Esto necesita una licencia de TeamHub.",
 },
     "nplurals=2; plural=(n != 1);");

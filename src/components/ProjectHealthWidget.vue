@@ -362,18 +362,13 @@ export default {
     gap: var(--th-space-sm, 8px);
     padding: var(--th-space-sm, 8px);
     /* v4.11.0 — a bordered card on the widget's own background, not a grey
-       fill (Justin, 2026-09-28); the state rail stays on the start edge. */
+       fill (Justin, 2026-09-28). v4.20.56 — no state rail on its edge
+       either (Justin, 2026-11-25): the header icon takes the state colour,
+       and the chips and labels say it. */
     border: 1px solid var(--color-border);
-    border-inline-start: 3px solid var(--color-border);
     border-radius: var(--border-radius-element);
     background: var(--color-main-background);
 }
-
-/* The rail is a saturated colour (`--color-element-X`): `--color-X` is the
-   pale tint meant as a chip's fill, and all but vanishes as a 3px line. */
-.th-health-tile--ok    { border-inline-start-color: var(--color-element-success); }
-.th-health-tile--amber { border-inline-start-color: var(--color-element-warning); }
-.th-health-tile--red   { border-inline-start-color: var(--color-element-error);   }
 
 .th-health-tile__row {
     display: flex;
@@ -385,6 +380,12 @@ export default {
     color: var(--color-text-maxcontrast);
     flex-shrink: 0;
 }
+
+/* An icon takes the saturated colour (`--color-element-X`); `--color-X` is the
+   pale tint meant as a chip's fill. */
+.th-health-tile--ok .th-health-tile__icon    { color: var(--color-element-success); }
+.th-health-tile--amber .th-health-tile__icon { color: var(--color-element-warning); }
+.th-health-tile--red .th-health-tile__icon   { color: var(--color-element-error); }
 
 .th-health-tile__label {
     font-weight: 600;

@@ -14,6 +14,22 @@
 		<div class="wf-dialog">
 			<h3 :id="titleId" class="wf-dialog__title">{{ title }}</h3>
 			<p class="wf-dialog__subject">{{ subject }}</p>
+			<!-- v4.20.58 — the verbs that name somebody: who approves. -->
+			<label v-if="withPerson" class="wf-dialog__field">
+				<span>{{ t('teamhub', 'Who approves') }}</span>
+				<PersonSelect
+					v-model="person"
+					input-id="wf-dialog-person"
+					:label="t('teamhub', 'Who approves')"
+					:disabled="busy" />
+			</label>
+			<!-- v4.20.71 — a task with fields is completed by filling them in. -->
+			<RequestFormField
+				v-for="field in fields"
+				:key="field.key"
+				v-model="answers[field.key]"
+				:field="field"
+				:disabled="busy" />
 			<label class="wf-dialog__field">
 				<span>{{ textLabel }}</span>
 				<NcTextArea
@@ -25,6 +41,7 @@
 					label-outside
 					:aria-label="textLabel"
 					:disabled="busy" />
+				<span v-if="action === ASK" class="wf-dialog__hint">{{ t('teamhub', 'The requester can read this. The request waits for the answer, and a rejection comes back to you.') }}</span>
 			</label>
 			<!-- v4.10.38 — the paperclip, where files may go with this verb. -->
 			<FileAttachField
@@ -38,7 +55,7 @@
 				</NcButton>
 				<NcButton
 					:variant="destructive ? 'error' : 'primary'"
-					:disabled="busy || (required && !text.trim())"
+					:disabled="busy || !ready"
 					@click="submit">
 					<template v-if="busy" #icon><NcLoadingIcon :size="iconBody" /></template>
 					{{ confirmLabel }}
@@ -53,12 +70,15 @@ import { translate as t, translatePlural as n } from '@nextcloud/l10n'
 import { getCurrentUser } from '@nextcloud/auth'
 import { NcModal, NcTextArea, NcButton, NcLoadingIcon } from '@nextcloud/vue'
 import FileAttachField from './FileAttachField.vue'
-import { actionLabel, actionText, actionTextLabel, canAttachFiles, fileSharingOf, shareNote, DESTRUCTIVE_WORKFLOW_ACTIONS } from '../../constants/workflows.js'
+import PersonSelect from '../services/PersonSelect.vue'
+import RequestFormField from '../services/RequestFormField.vue'
+import { answersPayload, isComplete } from '../../constants/requestForm.js'
+import { ACTIONS_WITH_PERSON, WORKFLOW_ACTION, activeStep, actionLabel, actionText, actionTextLabel, canAttachFiles, fileSharingOf, shareNote, DESTRUCTIVE_WORKFLOW_ACTIONS } from '../../constants/workflows.js'
 import { ICON_BODY } from '../../constants/uiTokens.js'
 
 export default {
 	name: 'WorkflowActionDialog',
-	components: { NcModal, NcTextArea, NcButton, NcLoadingIcon, FileAttachField },
+	components: { NcModal, NcTextArea, NcButton, NcLoadingIcon, FileAttachField, PersonSelect, RequestFormField },
 	props: {
 		/** One of WORKFLOW_ACTION. */
 		action: { type: String, required: true },
@@ -71,7 +91,7 @@ export default {
 	},
 	emits: ['close', 'submit'],
 	data() {
-		return { text: '', files: [] }
+		return { ASK: WORKFLOW_ACTION.REQUEST_APPROVAL, text: '', files: [], person: null, answers: {} }
 	},
 	computed: {
 		iconBody() { return ICON_BODY },
@@ -81,6 +101,15 @@ export default {
 		confirmLabel() { return actionLabel(this.action, this.workflow) },
 		textLabel() { return actionTextLabel(this.action) },
 		required() { return actionText(this.action) === 'required' },
+		withPerson() { return ACTIONS_WITH_PERSON.includes(this.action) },
+		/** v4.20.71 — what the task being completed asks to fill in. */
+		fields() {
+			return this.action === WORKFLOW_ACTION.COMPLETE ? (activeStep(this.workflow)?.fields || []) : []
+		},
+		ready() {
+			return (!this.required || !!this.text.trim()) && (!this.withPerson || !!this.person?.id)
+				&& isComplete(this.fields, this.answers)
+		},
 		destructive() { return DESTRUCTIVE_WORKFLOW_ACTIONS.includes(this.action) },
 		/** v4.10.38 — only on a service request whose service takes files. */
 		filesAllowed() { return canAttachFiles(this.workflow, this.action) },
@@ -98,9 +127,12 @@ export default {
 		},
 	},
 	mounted() {
-		// The text is the point of the dialog; put the caret in it.
+		// The text is the point of the dialog; put the caret in it — or, for a
+		// verb that names somebody, in the search for that person.
 		this.$nextTick(() => {
-			const el = this.$refs.input?.$el?.querySelector('textarea')
+			const el = this.withPerson
+				? this.$el?.querySelector?.('#wf-dialog-person') || document.getElementById('wf-dialog-person')
+				: this.$refs.input?.$el?.querySelector('textarea')
 			if (el) {
 				el.focus()
 			}
@@ -110,11 +142,12 @@ export default {
 		t,
 		n,
 		submit() {
-			if (this.busy || (this.required && !this.text.trim())) {
+			if (this.busy || !this.ready) {
 				return
 			}
 			// v4.10.38 — the files ride along as a second argument.
-			this.$emit('submit', this.text.trim(), this.filesAllowed ? this.files : [])
+			this.$emit('submit', this.text.trim(), this.filesAllowed ? this.files : [], this.withPerson ? this.person.id : '',
+				this.fields.length ? answersPayload(this.fields, this.answers) : null)
 		},
 	},
 }
@@ -145,6 +178,10 @@ export default {
 	flex-direction: column;
 	gap: var(--th-space-xs, 4px);
 	font-size: var(--th-font-meta, 13px);
+}
+
+.wf-dialog__hint {
+	color: var(--color-text-maxcontrast);
 }
 
 .wf-dialog__actions {

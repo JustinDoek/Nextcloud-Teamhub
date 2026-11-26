@@ -107,6 +107,22 @@ final class WorkflowEventType {
      * instance afterwards. Carries the `reference` and the `archiveId`.
      */
     public const ARCHIVED              = 'archived';
+    /** v4.20.58 — whoever claimed a task asked somebody to approve: `to`, `note`. */
+    public const APPROVAL_REQUESTED    = 'approval_requested';
+    /** v4.20.58 — an approval went to somebody else: `from`, `to`, `note`. */
+    public const APPROVAL_DELEGATED    = 'approval_delegated';
+
+    /**
+     * v4.20.62 — the service sends a notice (`docs/service-builder.md` § 14.5):
+     * `on`, `subject`, `uids`, `channels`. Recorded `internal`: who is told
+     * beside the request is the service team's own business.
+     */
+    public const NOTICE_SENT           = 'notice_sent';
+    /** v4.20.62 — a notice, or its email, did not go out: `subject`, `uids`, `why`. Internal too. */
+    public const NOTICE_FAILED         = 'notice_failed';
+
+    /** v4.20.68 — a step went past its deadline and whoever has it was reminded: `dueAt`, `uids`. Internal. */
+    public const STEP_OVERDUE          = 'step_overdue';
 
     public const ALL = [
         self::CREATED, self::STEP_AVAILABLE, self::STEP_STARTED, self::STEP_COMPLETED,
@@ -116,6 +132,8 @@ final class WorkflowEventType {
         self::STEP_CLAIMED, self::STEP_ASSIGNED, self::STEP_RELEASED, self::INTERNAL_NOTE, self::MESSAGE,
         self::ATTACHMENT_ADDED, self::ATTACHMENT_REMOVED, self::ARCHIVED,
         self::DECISION_LINKED, self::DECISION_UNLINKED,
+        self::APPROVAL_REQUESTED, self::APPROVAL_DELEGATED,
+        self::NOTICE_SENT, self::NOTICE_FAILED, self::STEP_OVERDUE,
     ];
 
     /**

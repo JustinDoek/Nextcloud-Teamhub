@@ -287,21 +287,23 @@ export default {
 			this.workflowAction = { workflow, action }
 		},
 
-		submitWorkflowAction(text, files = []) {
+		submitWorkflowAction(text, files = [], approver = '', answers = null) {
 			if (this.workflowAction) {
-				this.run(this.workflowAction.workflow, this.workflowAction.action, text, files)
+				this.run(this.workflowAction.workflow, this.workflowAction.action, text, files, approver, answers)
 			}
 		},
 
-		async run(workflow, action, text, files = []) {
+		async run(workflow, action, text, files = [], approver = '', answers = null) {
 			try {
 				const updated = await this.$store.dispatch('workflows/act', {
 					id: workflow.id, action, text, step: workflow.viewer?.stepKey || '',
+					answers,
 					fileIds: (files || []).map(f => f.fileId),
+					approver,
 				})
 				this.workflowAction = null
 				showSuccess(t('teamhub', 'Done: {title}', { title: updated?.title || workflow.title }))
-				if (updated && isOpen(updated) && this.workflows.detail?.id === updated.id) {
+				if (updated && isOpen(updated) && !updated.left && this.workflows.detail?.id === updated.id) {
 					this.$store.dispatch('workflows/open', { id: updated.id, step: updated.viewer?.stepKey || '' })
 				} else {
 					this.close()

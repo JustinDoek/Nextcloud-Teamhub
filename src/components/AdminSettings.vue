@@ -993,30 +993,57 @@
                          things, and a client adopts that when its people are
                          ready. Like the OpenProject row, the switch appears
                          only while a licence is active. -->
-                    <div class="admin-compact-row">
-                        <div class="admin-compact-row__text">
-                            <span class="admin-compact-row__name">
-                                {{ t('teamhub', 'Service teams module') }}
-                                <InfoHint
-                                    controls="admin-moduleserviceteams-hint"
-                                    :open="hintOpen('moduleServiceTeams')"
-                                    :label="t('teamhub', 'About the service teams module')"
-                                    @toggle="toggleHint('moduleServiceTeams')" />
+                    <div class="admin-compact-group" role="group" :aria-label="t('teamhub', 'Service teams module')">
+                        <div class="admin-compact-row">
+                            <div class="admin-compact-row__text">
+                                <span class="admin-compact-row__name">
+                                    {{ t('teamhub', 'Service teams module') }}
+                                    <InfoHint
+                                        controls="admin-moduleserviceteams-hint"
+                                        :open="hintOpen('moduleServiceTeams')"
+                                        :label="t('teamhub', 'About the service teams module')"
+                                        @toggle="toggleHint('moduleServiceTeams')" />
+                                </span>
+                                <span v-if="hintOpen('moduleServiceTeams')" id="admin-moduleserviceteams-hint" class="admin-compact-row__desc">{{ t('teamhub', 'When enabled, teams can be created from the Service template, publish services and answer requests from a queue, and everybody on the server gets the Service catalog in the navigation. When disabled, all of it is hidden across the app. Nothing is deleted: existing service teams, their services and their requests come back when it is switched on again.') }}</span>
+                            </div>
+                            <NcCheckboxRadioSwitch
+                                v-if="licenseActive"
+                                class="admin-compact-row__control"
+                                :model-value="form.serviceTeamsModuleEnabled"
+                                type="switch"
+                                :aria-label="t('teamhub', 'Enable service teams module for all teams')"
+                                @update:model-value="form.serviceTeamsModuleEnabled = $event; save()">
+                                {{ form.serviceTeamsModuleEnabled ? t('teamhub', 'Enabled') : t('teamhub', 'Disabled') }}
+                            </NcCheckboxRadioSwitch>
+                            <span v-else class="admin-compact-row__control admin-compact-row__derived">
+                                {{ t('teamhub', 'Needs a license') }}
                             </span>
-                            <span v-if="hintOpen('moduleServiceTeams')" id="admin-moduleserviceteams-hint" class="admin-compact-row__desc">{{ t('teamhub', 'When enabled, teams can be created from the Service template, publish services and answer requests from a queue, and everybody on the server gets the Service catalog in the navigation. When disabled, all of it is hidden across the app. Nothing is deleted: existing service teams, their services and their requests come back when it is switched on again.') }}</span>
                         </div>
-                        <NcCheckboxRadioSwitch
-                            v-if="licenseActive"
-                            class="admin-compact-row__control"
-                            :model-value="form.serviceTeamsModuleEnabled"
-                            type="switch"
-                            :aria-label="t('teamhub', 'Enable service teams module for all teams')"
-                            @update:model-value="form.serviceTeamsModuleEnabled = $event; save()">
-                            {{ form.serviceTeamsModuleEnabled ? t('teamhub', 'Enabled') : t('teamhub', 'Disabled') }}
-                        </NcCheckboxRadioSwitch>
-                        <span v-else class="admin-compact-row__control admin-compact-row__derived">
-                            {{ t('teamhub', 'Needs a license') }}
-                        </span>
+
+                        <!-- v4.20.62 — whether a service may send email: a switch of
+                             its own under the module, and only there while the
+                             module is on. Off by default (Justin, 2026-11-25). -->
+                        <div v-if="licenseActive && form.serviceTeamsModuleEnabled" class="admin-compact-row admin-compact-row--option">
+                            <div class="admin-compact-row__text">
+                                <span class="admin-compact-row__name">
+                                    {{ t('teamhub', 'Services may send email') }}
+                                    <InfoHint
+                                        controls="admin-moduleserviceemail-hint"
+                                        :open="hintOpen('moduleServiceEmail')"
+                                        :label="t('teamhub', 'About email from services')"
+                                        @toggle="toggleHint('moduleServiceEmail')" />
+                                </span>
+                                <span v-if="hintOpen('moduleServiceEmail')" id="admin-moduleserviceemail-hint" class="admin-compact-row__desc">{{ t('teamhub', 'When enabled, an admin of a service team can have a service send an email when a step is reached, done or rejected, with the team\'s own text and answers from the request form. It goes to accounts on this server only. Sent email is outside Nextcloud: whoever can read it reads those answers. When disabled, services still send notifications.') }}</span>
+                            </div>
+                            <NcCheckboxRadioSwitch
+                                class="admin-compact-row__control"
+                                :model-value="form.serviceTeamsEmailEnabled"
+                                type="switch"
+                                :aria-label="t('teamhub', 'Let services send email')"
+                                @update:model-value="form.serviceTeamsEmailEnabled = $event; save()">
+                                {{ form.serviceTeamsEmailEnabled ? t('teamhub', 'Enabled') : t('teamhub', 'Disabled') }}
+                            </NcCheckboxRadioSwitch>
+                        </div>
                     </div>
 
                     <!-- v4.12.3 — Sub-teams: licensed, with a switch, and the
@@ -1275,6 +1302,21 @@
                 :description="t('teamhub', 'Integrations other installed apps register with TeamHub. Enable the ones this server may use, then include them in the team templates that should have them.')">
                 <IntegrationGovernancePanel />
             </NcSettingsSection>
+
+            <!-- v4.20.41 — the per-provider switch for the Shared with team
+                 card (DESIGN §2.281): apps that list team resources through
+                 Nextcloud's Teams API, not TeamHub packages, so its own
+                 section rather than rows in the panel above. -->
+            <NcSettingsSection
+                :name="t('teamhub', 'Shared with team')"
+                :description="t('teamhub', 'Apps that list team resources through Nextcloud\'s Teams API appear in the Shared with team card on every team home. Switch one off to stop its resources appearing in TeamHub. Nextcloud\'s own Teams page is not affected.')">
+                <SharedResourceProvidersPanel />
+            </NcSettingsSection>
+
+            <!-- v4.20.48: apps that manage Team folders of their own (DESIGN
+                 §2.283). Brings its own section, because it is drawn only when
+                 an app actually claims folders. -->
+            <ManagedFolderAppsPanel />
         </div>
 
         <!-- ── Tab: Statistics ───────────────────────────────────────────── -->
@@ -4572,6 +4614,8 @@ import PolicyAdminPanel        from './admin/PolicyAdminPanel.vue'
 // template inclusion. Its own component: two impact-preview dialogs and a
 // template matrix do not belong in this file.
 import IntegrationGovernancePanel from './admin/IntegrationGovernancePanel.vue'
+import SharedResourceProvidersPanel from './admin/SharedResourceProvidersPanel.vue'
+import ManagedFolderAppsPanel from './admin/ManagedFolderAppsPanel.vue'
 import InfoHint                from './admin/InfoHint.vue'
 import LicenseQuoteDialog      from './admin/LicenseQuoteDialog.vue'
 import LicenseTrialDialog      from './admin/LicenseTrialDialog.vue'
@@ -4624,6 +4668,8 @@ export default {
         PolicyAdminPanel, ShieldLockOutlineIcon, ServicesAdminPanel, InfoHint, LicenseQuoteDialog, LicenseTrialDialog, ReceiptTextOutlineIcon, KeyPlusIcon,
         MarkdownTextareaToolbar,
         IntegrationGovernancePanel,
+        SharedResourceProvidersPanel,
+        ManagedFolderAppsPanel,
         // v4.13.16 — the integrations register.
         ChevronDown, ChevronUp,
     },
@@ -4680,6 +4726,8 @@ export default {
                 openProjectModuleEnabled: false,
                 // v4.10.46 — the service teams module's switch (off by default).
                 serviceTeamsModuleEnabled: false,
+                // v4.20.62 — whether services may send email (off by default).
+                serviceTeamsEmailEnabled: false,
                 // v4.12.3 — the sub-teams module's switch. Starts **true**,
                 // because the stored default is on: starting false would flash
                 // a switched-off module on every page load before load()
@@ -5956,6 +6004,16 @@ export default {
         telemetryContentGroups() {
             const p = this.telemetry?.preview || {}
             const t = (s) => this.t('teamhub', s)
+            const moduleLabels = {
+                presence: this.t('teamhub', 'People'),
+                decisions: this.t('teamhub', 'Decisions'),
+            }
+            const moduleNames = (p.modules_enabled || []).map(id => moduleLabels[id] || id)
+            const popupState = p.announcement_popup === 'disabled'
+                // TRANSLATORS: telemetry value: an administrator ticked "Do not show this message again" in an announcement popup
+                ? this.t('teamhub', 'Turned off by an administrator')
+                // TRANSLATORS: telemetry value: no administrator turned the announcement popup off
+                : this.t('teamhub', 'Not turned off')
             return [
                 {
                     title: t('Instance identity'),
@@ -5978,13 +6036,9 @@ export default {
                 {
                     title: t('Modules & feature adoption'),
                     fields: [
-                        { key: 'presence_module',              label: t('Presence module enabled'),         type: 'scalar', value: p.presence_module },
-                        { key: 'decisions_module',             label: t('Decisions module enabled'),        type: 'scalar', value: p.decisions_module },
-                        { key: 'teams_with_decisions_enabled', label: t('Teams with Decisions enabled'),    type: 'scalar', value: p.teams_with_decisions_enabled },
-                        { key: 'decisions_count',              label: t('Decisions recorded'),              type: 'scalar', value: p.decisions_count },
-                        { key: 'decisions_by_status',          label: t('Decisions by status'),             type: 'map',    value: p.decisions_by_status },
-                        { key: 'decision_categories_count',    label: t('Decision categories defined'),     type: 'scalar', value: p.decision_categories_count },
+                        { key: 'modules_enabled',              label: this.t('teamhub', 'Modules enabled'),         type: 'list',   value: moduleNames },
                         { key: 'suggest_wizard_uses',          label: t('Meeting-suggestion wizard runs'),  type: 'scalar', value: p.suggest_wizard_uses },
+                        { key: 'announcement_popup',           label: this.t('teamhub', 'Announcement popup'),      type: 'scalar', value: popupState },
                     ],
                 },
                 {
@@ -5992,13 +6046,6 @@ export default {
                     fields: [
                         { key: 'integrations',         label: t('Registered third-party integrations'), type: 'list', value: p.integrations },
                         { key: 'builtin_integrations', label: t('Built-in NC apps in use (per team)'),  type: 'map',  value: p.builtin_integrations },
-                    ],
-                },
-                {
-                    title: t('Custom-link domains'),
-                    fields: [
-                        // Only bare hostnames — no paths, ports, query strings, or IPs. See TelemetryService::getLinkDomains.
-                        { key: 'link_domains', label: t('Domains linked from message bodies'), type: 'map', value: p.link_domains },
                     ],
                 },
             ]
@@ -6277,6 +6324,7 @@ export default {
                 this.form.decisionsModuleEnabled = !!data.decisionsModuleEnabled
                 this.form.openProjectModuleEnabled = !!data.openProjectModuleEnabled
                 this.form.serviceTeamsModuleEnabled = !!data.serviceTeamsModuleEnabled
+                this.form.serviceTeamsEmailEnabled = !!data.serviceTeamsEmailEnabled
                 // v4.12.5 — see the note beside the matching params.set() in
                 // save(). `!!` and not `?? true`: the server already applies
                 // the default-on when the key is unset, so a `false` arriving
@@ -6920,6 +6968,7 @@ export default {
             params.set('decisionsModuleEnabled', this.form.decisionsModuleEnabled ? '1' : '0')
             params.set('openProjectModuleEnabled', this.form.openProjectModuleEnabled ? '1' : '0')
             params.set('serviceTeamsModuleEnabled', this.form.serviceTeamsModuleEnabled ? '1' : '0')
+            params.set('serviceTeamsEmailEnabled', this.form.serviceTeamsEmailEnabled ? '1' : '0')
             // v4.12.5 — this line and its twin in load() were both missing, so
             // the Sub-teams switch had never worked: the toggle wrote nothing
             // (the server reads with array_key_exists, and the key never
@@ -9322,6 +9371,28 @@ export default {
 .admin-compact-row:last-child {
     border-bottom: none;
 }
+/* v4.20.63 — a module and the option that belongs to it: one block in the
+   list, the option set in under its module on a neutral surface. No line
+   between the two; the line under the block is the group's. */
+.admin-compact-group {
+    border-bottom: 1px solid var(--color-border);
+}
+.admin-compact-group:last-child {
+    border-bottom: none;
+}
+.admin-compact-group > .admin-compact-row {
+    border-bottom: none;
+}
+.admin-compact-group > .admin-compact-row--option {
+    margin-inline-start: var(--th-space-xl);
+    margin-block-end: var(--th-space-sm);
+    padding: var(--th-space-sm) var(--th-space-md);
+    border-radius: var(--border-radius-element);
+    background: var(--color-background-hover);
+}
+.admin-compact-row--option .admin-compact-row__name {
+    font-weight: var(--th-font-weight-regular);
+}
 .admin-compact-row__text {
     display: flex;
     flex-direction: column;
@@ -10406,7 +10477,6 @@ a.maint-op-link__name:focus-visible {
     gap: 16px;
     padding: 12px 16px;
     border: 1px solid var(--color-border);
-    border-inline-start: 3px solid var(--color-warning);
     border-radius: var(--border-radius-small);
     background: var(--color-main-background);
 }
@@ -10431,8 +10501,7 @@ a.maint-op-link__name:focus-visible {
     font-family: monospace;
 }
 
-/* App-claimed teams (v4.5.37) — information, not a warning. The rows
-   deliberately drop .maint-integrity-row's amber left edge: these teams are
+/* App-claimed teams (v4.5.37) — information, not a warning: these teams are
    healthy, and an alert colour is what made twelve of them look broken. */
 .maint-integrity-claimed {
     margin-top: 24px;
@@ -10450,10 +10519,6 @@ a.maint-op-link__name:focus-visible {
     color: var(--color-text-maxcontrast);
     margin: 0 0 12px;
     max-width: 70ch;
-}
-
-.maint-integrity-claimed .maint-integrity-row {
-    border-inline-start: 3px solid var(--color-border);
 }
 
 /* ─────────────────────────────────────────────────────────────────
@@ -10751,7 +10816,7 @@ a.maint-op-link__name:focus-visible {
     text-align: start;
     padding: 8px 8px;
     font-weight: 600;
-    border-bottom: 2px solid var(--color-border);
+    border-bottom: 1px solid var(--color-border);
     white-space: nowrap;
 }
 
@@ -10802,7 +10867,7 @@ a.maint-op-link__name:focus-visible {
 /* Inline error detail row — v3.100.16: NC theme tokens (was raw hex). */
 .archive-admin__error-row td {
     padding: 0;
-    border-bottom: 2px solid var(--color-error);
+    border-bottom: 1px solid var(--color-border);
 }
 
 .archive-admin__error-panel {
@@ -10810,7 +10875,6 @@ a.maint-op-link__name:focus-visible {
     flex-direction: column;
     gap: 8px;
     background: var(--color-error);
-    border-inline-start: 4px solid var(--color-error);
     padding: 16px 16px;
     font-size: var(--th-font-meta);
     color: var(--color-error-text);

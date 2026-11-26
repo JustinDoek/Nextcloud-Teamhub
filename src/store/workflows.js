@@ -218,13 +218,21 @@ export function createWorkflowsModule(api = lazyApi) {
 			 * with `{ status, message, conflict, retryAfter }`. A second call
 			 * while one is in flight is refused with status 0.
 			 */
-			async act({ state, commit }, { id, action, text = '', step = '', fileIds = [] }) {
+			async act({ state, commit }, { id, action, text = '', step = '', fileIds = [], approver = '', answers = null }) {
 				if (state.busyId !== null) {
 					throw { status: 0, message: 'busy', conflict: false, retryAfter: 0 }
 				}
 				commit('SET_BUSY', id)
 				try {
-					const workflow = await api.actOnWorkflow(id, action, text, step, fileIds)
+					const workflow = await api.actOnWorkflow(id, action, text, step, fileIds, approver, answers)
+					if (workflow && action === 'delegate_approval' && workflow.viewer?.isParticipant === false && !workflow.viewer?.isServiceAgent) {
+						// v4.20.59 — whoever handed an approval on is not on the
+						// request any more: take it off their list, and tell the
+						// page to close it.
+						const gone = { ...workflow, purged: true, left: true }
+						commit('UPSERT', gone)
+						return gone
+					}
 					if (workflow) {
 						commit('UPSERT', workflow)
 					}

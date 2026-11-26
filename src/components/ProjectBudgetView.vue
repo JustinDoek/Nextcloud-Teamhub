@@ -1009,7 +1009,6 @@ export default {
 .th-budget__kpi {
     background: var(--color-main-background);
     border: 1px solid var(--color-border);
-    border-inline-start: 4px solid var(--th-kpi-color);
     border-radius: var(--border-radius-large, 8px);
     padding: 16px 16px;
     display: flex;
@@ -1057,8 +1056,8 @@ export default {
     color: var(--color-text-maxcontrast);
 }
 
-/* Per-card colour accents. Each KPI sets --th-kpi-color; the border-left
-   and the swatch pull from that. Semantically:
+/* Per-card colour accents. Each KPI sets --th-kpi-color, which its
+   swatch uses. Semantically:
      total     — primary (blue in default theme)
      allocated — primary-element (a slightly stronger accent)
      spent     — warning (amber)

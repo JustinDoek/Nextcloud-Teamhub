@@ -58,8 +58,9 @@ class AnnouncementService {
      * App config key: the popup's counters, as JSON
      * `{ "<filename>": { "shown": n, "read": n, "ack": n, "optout": n } }`.
      *
-     * v4.13.56 — read into the telemetry payload as `announcement_popup`.
-     * Counts only, per announcement, no user and no content. The question it
+     * v4.13.56. Since v4.20.44 telemetry reads only whether any `optout` is
+     * above zero (`announcement_popup`: enabled or disabled); the counts stay
+     * on the instance. Per announcement, no user and no content. The question it
      * exists to answer is Justin's: whether an in-app message to Nextcloud
      * administrators reaches anybody at all, which four years of zero replies
      * could not distinguish from four years of nobody looking.

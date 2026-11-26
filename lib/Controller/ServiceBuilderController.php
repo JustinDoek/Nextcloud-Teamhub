@@ -68,9 +68,10 @@ class ServiceBuilderController extends Controller {
     public function index(string $teamId): JSONResponse {
         try {
             $uid = $this->requireServiceTeam($teamId, false);
+            $mayBuild = $this->serviceTeams->isServiceOwner($uid, $teamId);
             return new JSONResponse([
-                'services' => $this->builder->listForTeam($teamId),
-                'canEdit'  => $this->serviceTeams->isServiceOwner($uid, $teamId),
+                'services' => $this->builder->listForTeam($teamId, $mayBuild),
+                'canEdit'  => $mayBuild,
             ] + $this->builder->options());
         } catch (\Throwable $e) {
             return $this->serviceError($e, 'Failed to load the services', ['teamId' => $teamId]);

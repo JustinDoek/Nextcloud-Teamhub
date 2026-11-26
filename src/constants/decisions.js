@@ -118,7 +118,9 @@ export function isRetiredStatus(status) {
  *   `hasOpenReview` — a review of this decision is running;
  *   `editingProposal` — the inline editor is already open;
  *   `finalizing` — a finalize call is in flight;
- *   `talkHref` — where the discussion lives, or null.
+ *   `talkHref` — where the discussion lives, or null;
+ *   `canCreateFollowUp` — the team can store a task (Tasks app and a team
+ *     calendar), v4.20.30.
  * @return {Array<object>} menu rows: { key, label?, icon?, href? }
  */
 export function decisionPanelActions(decision, caps = {}) {
@@ -276,6 +278,20 @@ export function decisionPanelActions(decision, caps = {}) {
 	// Copy link is unconditional: somebody who can read a decision can share
 	// its address, and doing so writes nothing.
 	const record = [{ key: 'copy-link', label: t('teamhub', 'Copy link'), icon: 'LinkVariantIcon' }]
+	// v4.20.30 — a follow-up task: a to-do in the team's task list that links
+	// back here, for yourself, a colleague or the team. Not *Create task*
+	// above, which makes a Deck card attached to the decision; this one
+	// attaches nothing, so it is any member's, on any status, and it sits
+	// with Copy link because it is the same gesture: taking the decision's
+	// address somewhere else.
+	if (caps.canCreateFollowUp) {
+		record.push({
+			key: 'follow-up-task',
+			// TRANSLATORS: menu item — make a task (for you, a colleague or the team) that links back to this item
+			label: t('teamhub', 'Create follow-up task'),
+			icon: 'ClipboardPlusOutlineIcon',
+		})
+	}
 	// v4.11.31 — Justin: *only a category approver can set a decision in the
 	// category as public.* So the gate is `canApprove` and no longer
 	// `canPerformDecisionActions`, which is the team's action minimum level

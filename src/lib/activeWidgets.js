@@ -81,6 +81,7 @@ export function isProjectHealthActive(ctx) {
  * @param {Array}   ctx.teamWidgets            registered integration widgets (legacy registry)
  * @param {Array}   ctx.packageWidgets         shown widget capabilities (v4.13.23 packages)
  * @param {object}  ctx.dashboardConfig        { hidden_widgets }
+ * @param {boolean} ctx.licensed               the instance has a licence (v4.21.1: Shared with team)
  * @param {object}  [options]
  * @param {boolean} [options.applyHidden=true] subtract admin-hidden widgets
  * @return {Set<string>}
@@ -112,6 +113,13 @@ export function computeActiveWidgetIds(ctx, { applyHidden = true } = {}) {
     active.add('widget-teaminfo')
     active.add('widget-members')
     active.add('widget-activity')
+    // v4.20.39 — Shared with team. Active whatever it holds: whether it has
+    // content is known only after the card's own fetch, so the card says when
+    // it is empty instead of the packer reserving a block it may not fill.
+    // v4.21.1 — licensed (Justin, 2026-11-26): not there without a licence.
+    if (ctx.licensed) {
+        active.add('widget-shared')
+    }
     if (ctx.teamType === 'department' && ctx.presenceModuleEnabled
         && ctx.presenceConfig?.presence_enabled) {
         active.add('widget-birthdays')
@@ -138,6 +146,14 @@ export function computeActiveWidgetIds(ctx, { applyHidden = true } = {}) {
 
     if (ctx.resources?.files) {
         active.add('widget-files-center')
+    }
+
+    // v4.20.2 — the team conversation, whenever the team has a Talk room.
+    // Not gated on the viewer being a participant: that is Talk's answer,
+    // known only after a request, and the widget says so itself rather than
+    // leaving a hole in the layout that differs per viewer.
+    if (ctx.resources?.talk?.token) {
+        active.add('widget-talk')
     }
 
     if (ctx.decisionsModuleEnabled && ctx.decisionsConfig?.decisions_enabled) {

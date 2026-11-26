@@ -27,9 +27,32 @@
                 <span>{{ t('teamhub', 'This period has too many events to show them all. Narrow the view to see the rest.') }}</span>
             </div>
 
-            <FullCalendar ref="fc" :options="calendarOptions" />
+            <!-- v4.20.17 (DESIGN §2.268) — the team's busy times as their own
+                 view: a timeline with one row per person, as the room finder
+                 draws rooms. Nextcloud answers them from each person's own
+                 calendars, times only; nobody shares anything. The grid is
+                 kept mounted behind it (v-show) so its window and events
+                 survive switching back. -->
+            <div class="th-calgrid__busybar">
+                <NcCheckboxRadioSwitch
+                    :model-value="busyOn"
+                    type="switch"
+                    @update:model-value="onBusyToggle">
+                    {{ t('teamhub', 'Show busy times') }}
+                </NcCheckboxRadioSwitch>
+            </div>
 
-            <div v-if="loading" class="th-calgrid__loading">
+            <TeamBusyTimeline
+                v-if="busyOn"
+                ref="busy"
+                class="th-calgrid__busy"
+                :team-id="teamId" />
+
+            <div v-show="!busyOn" class="th-calgrid__fc">
+                <FullCalendar ref="fc" :options="calendarOptions" />
+            </div>
+
+            <div v-if="loading && !busyOn" class="th-calgrid__loading">
                 <NcLoadingIcon :size="iconNav" />
             </div>
 
@@ -147,6 +170,12 @@
  * mode, so prev/next/today/view/Add/Delete/Suggest/Reload come from there and
  * stay identical to every other tab. `Open in new tab` disappears on its own,
  * because hosted mode passes no `url`.
+ *
+ * **Busy times (v4.20.15, DESIGN §2.267; a timeline since v4.20.17,
+ * §2.268).** A switch above the grid swaps it for `TeamBusyTimeline`: one row
+ * per picked member, their busy times as bars, from Nextcloud's own
+ * free/busy. The grid stays mounted behind it. Everything about busy times
+ * lives in that component; this one only owns the switch.
  */
 import FullCalendar from '@fullcalendar/vue3'
 import dayGridPlugin from '@fullcalendar/daygrid'
@@ -159,6 +188,7 @@ import { locale as ncLocale, formatDate, formatTime, formatIsoDate, shiftIsoDate
 import NcButton from '@nextcloud/vue/components/NcButton'
 import NcModal from '@nextcloud/vue/components/NcModal'
 import NcLoadingIcon from '@nextcloud/vue/components/NcLoadingIcon'
+import NcCheckboxRadioSwitch from '@nextcloud/vue/components/NcCheckboxRadioSwitch'
 import AlertCircleOutline from 'vue-material-design-icons/AlertCircleOutline.vue'
 import CalendarIcon from 'vue-material-design-icons/Calendar.vue'
 import ClockIcon from 'vue-material-design-icons/ClockOutline.vue'
@@ -169,6 +199,28 @@ import TextIcon from 'vue-material-design-icons/TextBoxOutline.vue'
 import RepeatIcon from 'vue-material-design-icons/Repeat.vue'
 import OpenInNew from 'vue-material-design-icons/OpenInNew.vue'
 import { ICON_INLINE, ICON_BODY, ICON_NAV, ICON_LARGE } from '../constants/uiTokens.js'
+import TeamBusyTimeline from './TeamBusyTimeline.vue'
+
+// Per viewer and per browser: whether the busy times view was on. A
+// convenience only, so every read and write survives storage being
+// unavailable (private window, blocked site data).
+const BUSY_ON_KEY = 'teamhub.calendar.busyOn'
+
+function readStorage(key) {
+    try {
+        return window.localStorage?.getItem(key) ?? null
+    } catch (e) {
+        return null
+    }
+}
+
+function writeStorage(key, value) {
+    try {
+        window.localStorage?.setItem(key, value)
+    } catch (e) {
+        // Not remembered; nothing else depends on it.
+    }
+}
 
 export default {
     name: 'TeamCalendarGrid',
@@ -178,6 +230,8 @@ export default {
         NcButton,
         NcModal,
         NcLoadingIcon,
+        NcCheckboxRadioSwitch,
+        TeamBusyTimeline,
         AlertCircleOutline,
         CalendarIcon,
         ClockIcon,
@@ -219,6 +273,9 @@ export default {
             // switches often ask for the same dates twice.
             loadedFrom: null,
             loadedTo: null,
+
+            // v4.20.17 — the busy times view instead of the grid.
+            busyOn: readStorage(BUSY_ON_KEY) === '1',
         }
     },
 
@@ -425,6 +482,10 @@ export default {
 
         /** Reload the window currently displayed. Bound to the toolbar's Reload. */
         refresh() {
+            // The toolbar's Reload reloads whichever view is showing.
+            if (this.busyOn) {
+                this.$refs.busy?.refresh()
+            }
             const api = this.$refs.fc?.getApi?.()
             if (!api) {
                 return
@@ -463,6 +524,17 @@ export default {
         onEventClick(info) {
             info.jsEvent?.preventDefault()
             this.selected = info.event.extendedProps.source
+        },
+
+        // ── Busy times (v4.20.17, DESIGN §2.268) ─────────────────────────
+
+        onBusyToggle(value) {
+            this.busyOn = value
+            writeStorage(BUSY_ON_KEY, value ? '1' : '0')
+            if (!value) {
+                // Back to the grid, which measured nothing while hidden.
+                this.$nextTick(() => this.withApi(api => api.updateSize()))
+            }
         },
 
         editHref(ev) {
@@ -554,7 +626,14 @@ export default {
 
 /* FullCalendar measures its own height; the flex child needs a definite basis
    or the grid collapses to zero in a flex column. */
-.th-calgrid > :deep(.fc) {
+.th-calgrid__fc {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.th-calgrid__fc > :deep(.fc) {
     flex: 1 1 auto;
     min-height: 0;
 }
@@ -795,6 +874,20 @@ export default {
     margin-bottom: 8px;
     font-size: var(--th-font-meta);
     color: var(--color-text-maxcontrast);
+}
+
+/* ── Busy times (v4.20.17, DESIGN §2.268) ─────────────────────────────────── */
+.th-calgrid__busybar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--th-space-sm) var(--th-space-md);
+    margin-block-end: var(--th-space-sm);
+}
+
+/* The timeline view fills the space the grid had and scrolls on its own. */
+.th-calgrid__busy {
+    flex: 1 1 auto;
 }
 
 .th-calgrid__loading {

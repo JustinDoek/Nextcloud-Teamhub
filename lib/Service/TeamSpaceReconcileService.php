@@ -99,6 +99,8 @@ class TeamSpaceReconcileService {
         private ITimeFactory          $timeFactory,
         private ICacheFactory         $cacheFactory,
         private LoggerInterface       $logger,
+        // v4.20.48 — never convert a folder another app manages.
+        private ManagedFolderService  $managedFolders,
     ) {}
 
     // ──────────────────────────────────────────────────────────────────────
@@ -255,6 +257,19 @@ class TeamSpaceReconcileService {
                     $this->disconnectRow($row, $folderId, $owner, $teamNames, $needsSpace, $disconnectedRowIds, $summary);
                 }
             }
+            return;
+        }
+
+        // v4.20.48 — another app's folder, accepted by a team before the app
+        // claimed it. Converting would strip the access that app granted to
+        // everybody else, so it is left as it is. An app that cannot answer
+        // now is no reason to convert: the next run asks again.
+        $answer = $this->managedFolders->claims($claimTeams[0], [$folderId]);
+        if ($answer['claims'] !== [] || $answer['unanswered'] !== []) {
+            $this->logger->info('[TeamHub][TeamSpaceReconcile] folder is, or may be, managed by another app; not converted', [
+                'folderId' => $folderId, 'claims' => $answer['claims'], 'unanswered' => $answer['unanswered'],
+                'app' => Application::APP_ID,
+            ]);
             return;
         }
 

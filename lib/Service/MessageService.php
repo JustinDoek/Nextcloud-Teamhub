@@ -157,6 +157,10 @@ class MessageService {
         // mapper, the OpenProject client and framework interfaces only — no
         // MemberService, no TeamService — so it closes no cycle either.
         private OpenProjectNewsService $openProjectNews,
+        // v4.20.27 — emoji reactions, stamped onto stream rows and removed
+        // with a message. ReactionService takes mappers and MemberService
+        // only, so it closes no cycle.
+        private ReactionService $reactionService,
     ) {
         $this->messageMapper = $messageMapper;
         $this->userSession = $userSession;
@@ -329,6 +333,19 @@ class MessageService {
             $toStamp[] = $pinned;
         }
         $this->openProjectNews->stampOrigins($toStamp);
+        if ($pinned !== null) {
+            $pinned = array_pop($toStamp);
+        }
+        $messages = $toStamp;
+
+        // v4.20.27 — emoji reactions, one query for the page and the pin.
+        // The stream is members-only (listMessages requires membership), so
+        // every reader here may react; the card needs no flag for it.
+        $toStamp = $messages;
+        if ($pinned !== null) {
+            $toStamp[] = $pinned;
+        }
+        $this->reactionService->stamp($toStamp, ReactionService::TARGET_MESSAGE, $viewerUid);
         if ($pinned !== null) {
             $pinned = array_pop($toStamp);
         }
@@ -612,6 +629,9 @@ class MessageService {
         }
 
         $this->messageMapper->delete($messageId);
+        // v4.20.27 — the message's reactions and its thread's. Never throws
+        // (DESIGN §2.56: a side effect does not fail a committed delete).
+        $this->reactionService->deleteForMessage($messageId);
 
         // v4.7.5 — audit. Logged after the delete succeeds, so the stream
         // never claims a removal that did not happen. The message id no
@@ -2832,7 +2852,41 @@ class MessageService {
         if (!$user) {
             return [];
         }
-        $uid = $user->getUID();
+        return $this->resolveTeamIdsForUid($user->getUID());
+    }
+
+    /**
+     * Teams whose messages unified search may return to `$uid`.
+     *
+     * v4.20.27 — the search provider used to fetch matches from every team
+     * and drop the ones the searcher was not in afterwards, one direct
+     * `circles_member` lookup per team. Two things were wrong with that: a
+     * page of matches from other teams came back empty with no next page,
+     * and a member through a group or a sub-team (no direct row) never got
+     * a result at all. The team list now goes into the query, resolved the
+     * way the feed resolves it, and a team with Messages switched off is
+     * left out, because its stream is not shown and a result would open
+     * nothing.
+     *
+     * @return string[]
+     */
+    public function getMessageSearchTeamIds(string $uid): array {
+        $out = [];
+        foreach ($this->resolveTeamIdsForUid($uid) as $teamId) {
+            if ($this->config->getAppValue(Application::APP_ID, 'messages_enabled_' . $teamId, '1') === '1') {
+                $out[] = $teamId;
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * @return string[] see getCurrentUserTeamIds()
+     */
+    private function resolveTeamIdsForUid(string $uid): array {
+        if ($uid === '') {
+            return [];
+        }
 
         $ids = [];
 

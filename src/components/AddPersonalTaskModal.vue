@@ -1,16 +1,37 @@
 <template>
     <NcModal
-        :name="t('teamhub', 'Create personal task')"
+        :name="t('teamhub', 'Create task')"
         @close="$emit('close')">
         <div class="addtask-modal">
             <h3 class="addtask-modal__title">
                 <ClipboardPlusOutline :size="ICON_BODY" />
-                {{ t('teamhub', 'Create personal task') }}
+                {{ t('teamhub', 'Create task') }}
             </h3>
 
             <p class="addtask-modal__hint">
                 {{ t('teamhub', 'This task will be added to the team calendar and visible in the Tasks app.') }}
             </p>
+
+            <!--
+                v4.20.29 — the quick-task button sits on every team tab and on
+                My Work. On a team tab the team is the one on screen; on My Work
+                there is none, so the person picks it. The task lives in that
+                team's calendar either way.
+            -->
+            <div v-if="!teamId" class="addtask-modal__field">
+                <label class="addtask-modal__label" for="th-task-team">
+                    {{ t('teamhub', 'Team') }}
+                </label>
+                <NcSelect
+                    v-model="selectedTeam"
+                    input-id="th-task-team"
+                    label-outside
+                    :options="teamOptions"
+                    :placeholder="t('teamhub', 'Choose a team')"
+                    :clearable="false"
+                    :disabled="saving"
+                    label="label" />
+            </div>
 
             <div class="addtask-modal__field">
                 <NcTextField
@@ -76,6 +97,25 @@
                 </div>
             </div>
 
+            <!--
+                v4.20.29 — the page the dialog was opened on travels with the
+                task, so whoever does it lands where the problem was. Removable:
+                a task about something else should not point here.
+            -->
+            <div v-if="link && keepLink" class="addtask-modal__link">
+                <LinkVariant :size="ICON_INLINE" class="addtask-modal__link-icon" />
+                <span class="addtask-modal__link-text">
+                    {{ t('teamhub', 'Links to {page}', { page: linkLabel || t('teamhub', 'this page') }) }}
+                </span>
+                <NcButton
+                    variant="tertiary"
+                    size="small"
+                    :disabled="saving"
+                    @click="keepLink = false">
+                    {{ t('teamhub', 'Remove link') }}
+                </NcButton>
+            </div>
+
             <p v-if="errors.general" class="addtask-modal__error">{{ errors.general }}</p>
 
             <div class="addtask-modal__actions">
@@ -102,7 +142,8 @@ import { showSuccess, showError } from '@nextcloud/dialogs'
 import axios from '@nextcloud/axios'
 import { NcModal, NcButton, NcLoadingIcon, NcTextField, NcTextArea, NcSelect } from '@nextcloud/vue'
 import ClipboardPlusOutline from 'vue-material-design-icons/ClipboardPlusOutline.vue'
-import { ICON_BODY } from '../constants/uiTokens.js'
+import LinkVariant from 'vue-material-design-icons/LinkVariant.vue'
+import { ICON_BODY, ICON_INLINE } from '../constants/uiTokens.js'
 
 /** Mirrors `TaskService::ASSIGN_SELF` / `::ASSIGN_TEAM`. Keep in sync. */
 const ASSIGN_SELF = 'self'
@@ -111,10 +152,18 @@ const ASSIGN_TEAM = 'team'
 export default {
     name: 'AddPersonalTaskModal',
 
-    components: { NcModal, NcButton, NcLoadingIcon, NcTextField, NcTextArea, NcSelect, ClipboardPlusOutline },
+    components: { NcModal, NcButton, NcLoadingIcon, NcTextField, NcTextArea, NcSelect, ClipboardPlusOutline, LinkVariant },
 
     props: {
-        teamId: { type: String, required: true },
+        // Empty on a page across teams (My Work): the dialog asks for one.
+        teamId: { type: String, default: '' },
+        // v4.20.29 — the page the dialog was opened on (src/lib/pageLink.js),
+        // and what to call it in the "Links to" line.
+        link: { type: String, default: '' },
+        linkLabel: { type: String, default: '' },
+        // v4.20.30 — a follow-up task starts from the words of what it follows
+        // up on (src/lib/quickTask.js); the person sharpens it.
+        initialTitle: { type: String, default: '' },
     },
 
     emits: ['close', 'created'],
@@ -122,12 +171,16 @@ export default {
     data() {
         return {
             ICON_BODY,
+            ICON_INLINE,
             saving: false,
+            /** The picked team, as an option, when no `teamId` was given. */
+            selectedTeam: null,
+            keepLink: true,
             errors: {},
             /** Team members, for the "For" picker. Self is filtered out — `Me` is already an option. */
             members: [],
             form: {
-                title:       '',
+                title:       this.initialTitle,
                 description: '',
                 dueDate:     '',
                 dueTime:     '09:00',
@@ -138,6 +191,18 @@ export default {
     },
 
     computed: {
+        /** The team the task goes to: the one on screen, or the one picked. */
+        effectiveTeamId() {
+            return this.teamId || this.selectedTeam?.id || ''
+        },
+
+        /** Every team of the viewer's, by name, for the picker on My Work. */
+        teamOptions() {
+            return (this.$store?.state?.teams || [])
+                .map(team => ({ id: team.id, label: team.name || team.id }))
+                .sort((a, b) => a.label.localeCompare(b.label))
+        },
+
         todayDate() {
             const n = new Date()
             const pad = v => String(v).padStart(2, '0')
@@ -182,6 +247,18 @@ export default {
         },
     },
 
+    watch: {
+        // A different team has different members: reload them, and fall back
+        // to Me when the colleague picked is not in the new one.
+        effectiveTeamId() {
+            const picked = this.form.assignee?.id
+            if (picked && picked !== ASSIGN_SELF && picked !== ASSIGN_TEAM) {
+                this.form.assignee = this.assigneeOptions[0]
+            }
+            this.loadMembers()
+        },
+    },
+
     created() {
         // The default has to be an object from the options list, or NcSelect
         // shows its placeholder instead of the selection.
@@ -203,12 +280,22 @@ export default {
          * cannot assign is better than a dialog that will not open.
          */
         async loadMembers() {
+            const teamId = this.effectiveTeamId
+            if (!teamId) {
+                this.members = []
+                return
+            }
             try {
                 const { data } = await axios.get(
-                    generateUrl(`/apps/teamhub/api/v1/teams/${this.teamId}/members/all`),
+                    generateUrl(`/apps/teamhub/api/v1/teams/${teamId}/members/all`),
                 )
                 const list = Array.isArray(data) ? data : (Array.isArray(data?.members) ? data.members : [])
                 const me = (getCurrentUser()?.uid || '').toLowerCase()
+                // A slower answer for the previous team must not land on the
+                // new one.
+                if (teamId !== this.effectiveTeamId) {
+                    return
+                }
                 this.members = list.filter(m => (m.userId || '').toLowerCase() !== me)
             } catch (e) {
                 this.members = []
@@ -219,6 +306,9 @@ export default {
             this.errors = {}
             if (!this.form.title.trim()) {
                 this.errors.title = t('teamhub', 'Task title is required')
+            }
+            if (!this.effectiveTeamId) {
+                this.errors.general = t('teamhub', 'Choose a team')
             }
             return Object.keys(this.errors).length === 0
         },
@@ -242,10 +332,13 @@ export default {
                 payload.duedate = new Date(`${this.form.dueDate}T${this.form.dueTime}:00`).toISOString()
             }
 
+            if (this.link && this.keepLink) {
+                payload.link = this.link
+            }
 
             try {
                 await axios.post(
-                    generateUrl(`/apps/teamhub/api/v1/teams/${this.teamId}/tasks`),
+                    generateUrl(`/apps/teamhub/api/v1/teams/${this.effectiveTeamId}/tasks`),
                     payload,
                 )
                 showSuccess(t('teamhub', 'Task added'))
@@ -362,6 +455,26 @@ export default {
     font-size: var(--th-font-meta);
     color: var(--color-text-error);
     margin: 0 0 16px;
+}
+
+/* v4.20.29 — the "Links to" line: quiet, one row, the remove button at the end. */
+.addtask-modal__link {
+    display: flex;
+    align-items: center;
+    gap: var(--th-space-sm);
+    margin: 0 0 var(--th-space-lg);
+    color: var(--color-text-maxcontrast);
+    font-size: var(--th-font-meta);
+}
+
+.addtask-modal__link-icon {
+    flex-shrink: 0;
+}
+
+.addtask-modal__link-text {
+    flex: 1;
+    min-width: 0;
+    overflow-wrap: anywhere;
 }
 
 .addtask-modal__actions {

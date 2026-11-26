@@ -581,6 +581,18 @@ class LicenseService {
     }
 
     /**
+     * True while the licence is active or in its grace window (v4.20.8): the
+     * same line `WorkflowLicenceTier::tier()` draws between `full` and
+     * `basic`. The gate for licensed meeting features (recurring meetings,
+     * attendee replies on Upcoming events, room details, Free room now).
+     * Seat over-lock does not switch these off: they write no Advanced data.
+     */
+    public function isLicensed(): bool {
+        $level = $this->getEnforcementLevel();
+        return $level === 'none' || $level === 'grace';
+    }
+
+    /**
      * True iff this instance may create new Advanced teams and accept new
      * writes on existing Advanced-project surfaces (Budget expenses,
      * TimeLogs, Milestones).

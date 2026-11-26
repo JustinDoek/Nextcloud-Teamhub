@@ -58,7 +58,7 @@
 
 		<form v-if="canWrite" class="wf-talk__compose" @submit.prevent="send">
 			<NcNoteCard v-if="answers" type="info">
-				<p>{{ t('teamhub', 'The service team is waiting for your answer. What you send now answers their question.') }}</p>
+				<p>{{ answerNote }}</p>
 			</NcNoteCard>
 			<NcTextArea
 				v-model="text"
@@ -141,6 +141,7 @@ import { decisionUrl } from '../../lib/internalLinks.js'
 import {
 	canAttachFiles,
 	conversation,
+	openQuestion,
 	fileSharingOf,
 	formatAbsolute,
 	formatStamp,
@@ -187,6 +188,15 @@ export default {
 		canWrite() { return this.isOpen && !!this.viewer.canMessage },
 		/** The requester's next message answers the desk's question. */
 		answers() { return this.viewer.messageSide === 'requester' && !!this.viewer.answersQuestion },
+		/** v4.20.61 — by name: an approver may have asked, not the team. */
+		answerNote() {
+			const uid = openQuestion(this.workflow).askedBy
+			const name = uid ? (this.workflow?.people?.[uid] || uid) : ''
+			return name
+				// TRANSLATORS: above the box the requester answers in; {name} is the person who asked
+				? t('teamhub', '{name} is waiting for your answer. What you send now answers their question.', { name })
+				: t('teamhub', 'The service team is waiting for your answer. What you send now answers their question.')
+		},
 		busy() {
 			const busyId = this.$store.state.workflows?.busyId
 			return this.sending || (busyId !== null && busyId !== undefined && busyId === this.workflow?.id)
@@ -348,9 +358,14 @@ export default {
 			}
 			const action = this.action
 			const id = this.workflow.id
-			// The desk's question lands on its own task; an answer and a plain
-			// message are placed by the server.
-			const step = action === 'request_information' ? (this.viewer.stepKey || '') : ''
+			// The desk's question lands on its own task and an answer on the
+			// task that asked; a plain message is placed by the server.
+			let step = ''
+			if (action === 'request_information') {
+				step = this.viewer.stepKey || ''
+			} else if (action === 'provide_information') {
+				step = openQuestion(this.workflow).stepKey
+			}
 			this.sending = true
 			try {
 				await this.$store.dispatch('workflows/act', {

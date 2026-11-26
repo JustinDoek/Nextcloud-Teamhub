@@ -3,6 +3,9 @@
         :name="t('teamhub', 'Add event')"
         size="normal"
         @close="$emit('close')">
+        <!-- v4.20.19 — Add event is the free form of Add meeting (DESIGN
+             §2.270): no Repeat, and the room finder offers three rooms with
+             no full list behind it. -->
         <div class="addevent-modal">
 
             <h3 class="addevent-modal__title">
@@ -64,24 +67,19 @@
                 <NcLoadingIcon :size="ICON_BODY" />
                 <span>{{ t('teamhub', 'Looking up rooms…') }}</span>
             </div>
+            <!-- v4.20.0 — RoomFinder: building, people, and which rooms are
+                 free at the date and time above. The RoomVox / invitation hint
+                 lives inside it, following the picked room's `source`. -->
             <div v-else-if="rooms.length > 0" class="addevent-modal__field">
-                <label class="addevent-modal__label" for="addevent-room">
-                    {{ t('teamhub', 'Meeting room') }}
-                </label>
-                <NcSelect
-                    input-id="addevent-room"
-                    label-outside
-                    v-model="selectedRoomId"
-                    class="addevent-modal__input addevent-modal__select"
-                    :options="[{ id: '', label: t('teamhub', 'No room') }, ...rooms.map(r => ({ id: r.id, label: r.displayName }))]"
-                    :reduce="o => o.id"
-                    :clearable="false" />
-                <p v-if="pickedRoomIsRoomVox" class="addevent-modal__hint">
-                    {{ t('teamhub', 'This room will be booked automatically via RoomVox.') }}
-                </p>
-                <p v-else-if="selectedRoomId" class="addevent-modal__hint">
-                    {{ t('teamhub', 'This room will be invited to the event. Booking must be confirmed by the resource manager.') }}
-                </p>
+                <RoomFinder
+                    v-model="selectedRoom"
+                    :team-id="teamId"
+                    :rooms="rooms"
+                    :date="form.date"
+                    :start-time="form.startTime"
+                    :end-time="form.endTime"
+                    :people-count="selectedIds.length + 1"
+                    simple />
             </div>
             <div v-else class="addevent-modal__field">
                 <NcTextField
@@ -200,13 +198,15 @@ import { generateUrl } from '@nextcloud/router'
 import { showSuccess, showError } from '@nextcloud/dialogs'
 import { getCurrentUser } from '@nextcloud/auth'
 import axios from '@nextcloud/axios'
-import { NcModal, NcButton, NcLoadingIcon, NcTextField, NcTextArea, NcCheckboxRadioSwitch, NcSelect } from '@nextcloud/vue'
+import { NcModal, NcButton, NcLoadingIcon, NcTextField, NcTextArea, NcCheckboxRadioSwitch } from '@nextcloud/vue'
 import CalendarPlus from 'vue-material-design-icons/CalendarPlus.vue'
+import RoomFinder from './RoomFinder.vue'
 import { ICON_BODY } from '../constants/uiTokens.js'
+import { formatIsoDate, zonedIsoDate } from '../lib/localDate.js'
 
 export default {
     name: 'AddEventModal',
-    components: {  NcSelect, NcModal, NcButton, NcLoadingIcon, NcTextField, NcTextArea, NcCheckboxRadioSwitch, CalendarPlus },
+    components: { NcModal, NcButton, NcLoadingIcon, NcTextField, NcTextArea, NcCheckboxRadioSwitch, CalendarPlus, RoomFinder },
 
     props: {
         teamId:    { type: String, required: true },
@@ -230,10 +230,11 @@ export default {
             loadingMembers: false,
             members: [],
             checked: {},
-            // Rooms (RoomVox)
+            // Rooms (RoomVox and/or CRM). v4.20.0: the picked `/rooms`
+            // entry from RoomFinder, or null.
             loadingRooms: false,
             rooms: [],
-            selectedRoomId: '',
+            selectedRoom: null,
             // Form
             form: {
                 title:       '',
@@ -256,12 +257,6 @@ export default {
         },
         showCalendarPicker() {
             return this.calendars && this.calendars.length > 1
-        },
-        /** True when the selected room comes from RoomVox (auto-booking applies). */
-        pickedRoomIsRoomVox() {
-            if (!this.selectedRoomId) return false
-            const r = this.rooms.find(r => r.id === this.selectedRoomId)
-            return r ? (r.source === 'roomvox' || r.source === 'mixed') : false
         },
         allSelected() {
             return this.members.length > 0
@@ -351,7 +346,8 @@ export default {
                 const startDt = new Date(`${this.form.date}T${this.form.startTime}:00`)
                 const endDt   = new Date(`${this.form.date}T${this.form.endTime}:00`)
 
-                const picked = this.rooms.find(r => r.id === this.selectedRoomId)
+                const picked = this.selectedRoom
+                const pickedIsRoomVox = !!picked && (picked.source === 'roomvox' || picked.source === 'mixed')
 
                 const payload = {
                     title:       this.form.title.trim(),
@@ -368,7 +364,7 @@ export default {
                     // Only pass roomId for RoomVox rooms — ActivityService uses
                     // roomId !== '' as the gate for calling RoomVoxClient::createBooking.
                     // CRM rooms go in as NEEDS-ACTION ATTENDEEs without a booking attempt.
-                    roomId:      (picked && this.pickedRoomIsRoomVox) ? picked.id : '',
+                    roomId:      pickedIsRoomVox ? picked.id : '',
                 }
 
                 await axios.post(
@@ -378,6 +374,28 @@ export default {
                 showSuccess(t('teamhub', 'Event added to calendar'))
                 this.$emit('close')
             } catch (e) {
+                // v4.20.0 — the room was taken between the finder loading and
+                // the save. Said in the user's language; the form stays open.
+                const data = e?.response?.data
+                if (e?.response?.status === 409 && data?.code === 'room_busy') {
+                    const room = data.room || this.selectedRoom?.displayName || ''
+                    const dates = Array.isArray(data.dates) ? data.dates : []
+                    this.errors.general = dates.length > 0
+                        // v4.20.8 — a series: name the first few clashing dates.
+                        ? n('teamhub', '{room} is booked on %n date of this series ({dates}). Pick another room.', '{room} is booked on %n dates of this series ({dates}). Pick another room.', dates.length, {
+                            n: dates.length,
+                            room,
+                            dates: dates.slice(0, 3).map(d => formatIsoDate(zonedIsoDate(d))).join(', '),
+                        })
+                        : t('teamhub', '{room} is booked at this time. Pick another room or time.', { room })
+                    showError(this.errors.general)
+                    return
+                }
+                if (e?.response?.status === 403 && data?.licenseGate) {
+                    this.errors.general = t('teamhub', 'Recurring meetings need an active TeamHub licence.')
+                    showError(this.errors.general)
+                    return
+                }
                 const msg = e?.response?.data?.error || ''
                 this.errors.general = msg
                     ? t('teamhub', 'Failed to add event: {error}', { error: msg })
@@ -447,10 +465,6 @@ export default {
 
 .addevent-modal__input--error {
     border-color: var(--color-error);
-}
-
-.addevent-modal__select {
-    cursor: pointer;
 }
 
 .addevent-modal__field-error {

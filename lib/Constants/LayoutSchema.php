@@ -270,6 +270,35 @@ final class LayoutSchema {
             'collapsed'   => false,
             'hSaved'      => 7,
         ],
+        // v4.20.2 — the team conversation: call state, unread count, the
+        // last messages and open polls, read from Talk as the viewer. Right
+        // column, under the service statistics; a saved layout receives it at
+        // the bottom of that column through mergeNewWidgets(). Rendered only
+        // when the team has a Talk room (src/lib/activeWidgets.js).
+        [
+            'i'           => 'widget-talk',
+            'x'           => 9, 'y' => 38,
+            'w'           => 3, 'h' => self::H_ROW,
+            'minW'        => 2, 'minH' => 2,
+            'isResizable' => true,
+            'collapsed'   => false,
+            'hSaved'      => self::H_ROW,
+        ],
+        // v4.20.39 — Shared with team: what other apps registered for the
+        // team through Nextcloud's Teams API (SharedTeamResourceService).
+        // Right column, under Communication; a saved layout receives it at the
+        // bottom of that column through mergeNewWidgets(). Active on every
+        // team: whether it has content is known only after its own fetch, so
+        // it says so itself rather than leaving a hole (src/lib/activeWidgets.js).
+        [
+            'i'           => 'widget-shared',
+            'x'           => 9, 'y' => 42,
+            'w'           => 3, 'h' => self::H_ROW,
+            'minW'        => 2, 'minH' => 2,
+            'isResizable' => true,
+            'collapsed'   => false,
+            'hSaved'      => self::H_ROW,
+        ],
         // v4.10.34–43 placed `widget-services` here; v4.10.44 retired it —
         // the team's own services and the builder live on the *Services*
         // tab. Pruned on GET with the other legacy ids.
@@ -332,6 +361,10 @@ final class LayoutSchema {
         'widget-service-stats',
         // v4.10.50 — teams made outside TeamHub.
         'widget-team-adoption',
+        // v4.20.2 — the team conversation (Talk).
+        'widget-talk',
+        // v4.20.39 — Shared with team (Nextcloud's Teams API).
+        'widget-shared',
         // Legacy — kept so saves from old clients are not rejected mid-migration.
         // v4.10.44 — the retired Services widget (now the Services tab).
         'widget-services',

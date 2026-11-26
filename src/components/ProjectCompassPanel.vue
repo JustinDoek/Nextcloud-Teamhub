@@ -213,7 +213,7 @@ export default {
     },
 
     computed: {
-        ...mapState(['currentTeamId', 'project', 'budgetConfig', 'timeConfig', 'currentView', 'intravoxAvailable']),
+        ...mapState(['currentTeamId', 'project', 'budgetConfig', 'timeConfig', 'currentView', 'intravoxAvailable', 'licensed']),
 
         visible() {
             return !!(
@@ -385,6 +385,9 @@ export default {
         itemHasOpenAffordance(item) {
             const requires = item?.link?.requires
             if (requires === 'intravox' && !this.intravoxAvailable) return false
+            // v4.20.12 — Add meeting is licensed. The item stays (it can still
+            // be marked done); only the Open button that starts the wizard goes.
+            if (item?.link?.target === 'add-meeting' && !this.licensed) return false
             return !!item?.link
         },
 
@@ -549,12 +552,8 @@ export default {
 }
 
 /* v3.98.4 — advisory items surface state (over budget, slipping milestones)
- * but don't gate phase advancement. Muted left border + info icon so
- * admins see them as informational rather than as a to-do. */
-.th-compass__item--advisory {
-    border-inline-start: 3px solid var(--color-warning);
-}
-
+ * but don't gate phase advancement. The info icon and the *Advisory* tag
+ * say so: informational rather than a to-do. */
 .th-compass__item-check {
     color: var(--color-text-maxcontrast);
     flex-shrink: 0;

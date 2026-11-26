@@ -1563,13 +1563,8 @@ export default {
     border-block-end: 1px solid var(--color-border);
 }
 
-/* A day the organisation normally does not work. A tinted fill with its own
-   ink, per the NC state pair, and the holiday's name beside it so the colour
-   is never the only thing saying it. */
-.roster-day--holiday .roster-day__header {
-    border-block-end-color: var(--color-warning-text);
-}
-
+/* A day the organisation normally does not work: its name, in a tinted fill
+   with its own ink, so the colour is never the only thing saying it. */
 .roster-day__holiday {
     padding-inline: var(--th-space-xs);
     border-radius: var(--th-radius-chip);
@@ -1582,11 +1577,8 @@ export default {
     max-width: 100%;
 }
 
-.roster-day--today .roster-day__header {
-    border-block-end-color: var(--color-primary-element);
-}
-
 .roster-day__name { font-weight: 600; font-size: var(--th-font-body); }
+.roster-day--today .roster-day__name { color: var(--color-primary-element); }
 .roster-day__date { font-size: var(--th-font-meta); color: var(--color-text-maxcontrast); }
 
 /* Open places on this day. A tinted fill with its own ink, per the NC state

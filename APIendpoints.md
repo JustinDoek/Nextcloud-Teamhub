@@ -5,6 +5,68 @@
 
 ---
 
+## Team folders managed by other apps (added 4.20.48)
+
+DESIGN §2.283. Registration itself is in-process only (`developers.md`).
+
+### `GET /api/v1/admin/managed-folders/apps` (`managedFolderAdmin#listApps`)
+
+Full Nextcloud administrator (`#[AuthorizedAdminSetting]` + `requireNcAdmin()`; a delegated TeamHub admin gets 403). `#[NoCSRFRequired]` (admin panel fetch).
+
+- **200:** `{ apps: [{ id, name, enabled, registered }], unreadable }`. Apps that claim folders, plus switched-off ids that no longer register. `unreadable: true` when the stored value cannot be read, in which case every app is treated as off.
+
+### `PUT /api/v1/admin/managed-folders/apps/{claimingApp}` (`managedFolderAdmin#setAppEnabled`)
+
+Body `{ enabled: bool }`. Same gate, CSRF protected. Answers the list above. **400** for an id outside `[A-Za-z0-9_.-]{1,64}`.
+
+### Changed by a claim
+
+- `GET /teams/{teamId}/resources/panel`: rows may have `status: "managed"`, with `managedBy: { id, name }`.
+- `POST …/resources/{app}/{resourceId}/accept|ignore|unignore|dismiss`, `DELETE …/remove`, `DELETE …/delete` and the connect route answer **400** for a claimed folder and change nothing (accept turns a pending row into `managed`).
+
+## Shared with team: guarantees and the per-provider switch (added 4.20.40)
+
+DESIGN §2.281.
+
+### `GET /api/v1/teams/{teamId}/shared-resources` (changed)
+
+- No session user: `200` with an empty list (`{ available: true, providers: [], failed: [] }`); no provider is called. (In practice the route requires a login already.)
+- Always `Cache-Control: no-cache, no-store, must-revalidate`. The answer is per user.
+- Takes no uid in path, query or body, and never will.
+- Providers switched off by an administrator are not called and not listed in `failed`.
+- **Licensed (v4.21.1):** without an active licence (or grace) the answer is the licence gate's `403`, after the membership check, and no provider is called.
+
+### `GET /api/v1/admin/shared-resources/providers` (`sharedResourceAdmin#listProviders`)
+
+Full Nextcloud administrator (`#[AuthorizedAdminSetting]` + `requireNcAdmin()`; a delegated TeamHub admin gets 403). `#[NoCSRFRequired]` (admin panel fetch).
+
+- **200:** `{ providers: [{ id, name, enabled, registered }], unreadable }`. Every registered provider except TeamHub's own, plus switched-off ids no longer registered (`registered: false`). `unreadable: true` when the stored value cannot be read, in which case every provider is treated as off.
+
+### `PUT /api/v1/admin/shared-resources/providers/{providerId}` (`sharedResourceAdmin#setProviderEnabled`)
+
+Body `{ enabled: bool }`. Same gate, CSRF protected. Answers the list above. **400** for an id outside `[A-Za-z0-9_.-]{1,64}` or for `teamhub`.
+
+## Shared with team (added 4.20.39)
+
+### `GET /api/v1/teams/{teamId}/shared-resources` (`teamSharedResource#getSharedResources`)
+
+Read-only. What other apps registered for the team through Nextcloud's Teams API (`ITeamResourceProvider`), for the logged-in user. DESIGN §2.280.
+
+- **Auth:** `#[NoAdminRequired]`; membership answered by core (`ITeamManager::getTeamsForUser()` for the session user). **403** for a non-member or nobody logged in.
+- **200:** `{ available, providers: [{ id, name, icon, resources: [{ id, label, url, icon }] }], failed: [{ id, name }] }`. `icon` is `{ type: "emoji" | "svg" | "url", value }` or `null`. `available: false` when Nextcloud has no team support.
+- TeamHub's own provider, every resource TeamHub actively shows (registry status `active`) and, since 4.20.42, every resource a team admin ignored in the resource review (status `ignored`) are left out. Pending resources are shown. A provider that throws is listed in `failed`; the request still answers 200. At most 50 resources per provider; rows with an unsafe URL are dropped.
+- Writes nothing: no registry rows, no `teamhub_team_app_resources` change.
+
+---
+
+## The workplace default: the office, Monday to Friday (changed 4.20.12)
+
+No new route. DESIGN §2.265.
+
+- **`GET /api/v1/presence/template`** — every cell now carries **`is_default`**. A user who has never saved a template gets the default (the `office` type on days 0 to 4, both halves, no room, `updated_at: null`), every cell `is_default: true`. A saved template, empty or not, comes back as stored with `is_default: false`. If the instance has no usable `office` type (missing, busy or not selectable) there is no default and the old blank template is returned.
+- **`PUT /api/v1/presence/template/bulk`** and **`PUT /api/v1/presence/template/cell`** — the first save sets the user value `teamhub` / `presence_template_saved = 1`, after which the stored rows are the whole truth, including none. A save on top of the default first writes the default as rows, so a partial payload does not blank the days it leaves out. A bulk save of fourteen unchanged default cells is how the panel's *Keep this workplace* makes the default the user's own.
+- **`GET /api/v1/presence/slots`**, **`GET /api/v1/teams/{teamId}/presence`** and the meeting suggestions read the default for an unconfigured user as `source: 'template'` slots on every weekday half-day with no row of its own; those slots have `id: null`. Overrides and holidays are unchanged and still win.
+
 ## A team can switch off Email all members (added 4.20.0)
 
 ### `PUT /api/v1/teams/{teamId}/members/mail/config` (`team#saveMemberMailConfig`)
@@ -945,6 +1007,12 @@ Every `gf:` resource row that is the team's space still carries **`quotaRequest`
 
 `POST /api/v1/teams/{teamId}/resources/{app}/{resourceId}/dismiss` deletes a pending row whose resource is gone or detached. Team admin required. The verdict is **recomputed server-side**, not taken from the request: a row that has become available again is refused with `400` and `{"error": "resource_available_again"}` so the client can refetch and offer Accept / Ignore instead. Dismissing drops the row from the `pending` count that feeds the Team info "N resources need review" strip.
 
+**Changed in 4.20.34: TeamHub destroys only what it created.** `DELETE /api/v1/teams/{teamId}/resources/{app}/{resourceId}/delete` destroys the Nextcloud resource only when its registry row has `origin = 'teamhub_create'`. Any other origin (`teamhub_connect`, `discovered_auto_accepted`, `discovered_pending`, empty, unknown) is unlinked instead, exactly as `…/remove` does (ACL stripped, row marked `disconnected`). Response 200 now carries `mode`: `{ status: "ok", mode: "destroyed" }` or `{ status: "ok", mode: "unlinked", aclStripped }`; the unlinked case is audited as `resource.access_removed` with `requested: "delete"`, `reason: "not_created_by_teamhub"` and the `origin`. `DELETE /api/v1/teams/{teamId}/resources/{app}` (and the app-disable switch in `PUT …/apps`) applies the same rule to every active registry row of the app; its `result` is `{ deleted, mode: "destroyed"|"unlinked"|"detached"|"mixed"|"none", destroyed: [resourceId], unlinked: [resourceId], detached: [resourceId], failed: [resourceId], detail }`, where `deleted` is true when anything was destroyed. **4.20.35 (files), 4.20.36 (calendar, deck):** a resource another team still has (in the registry, or in `group_folders_groups`, `dav_shares` or `deck_board_acl`) is never destroyed: this team's access is removed and it is listed under `detached`. Talk has no other-team check on this route.
+
+**4.20.37: only an active row can destroy.** A row with status `pending`, `ignored` (or anything but `active`) is released on `…/{resourceId}/delete` and in the team-delete cascade: this team's own access is stripped and its registry row **deleted** (not marked disconnected); the resource and other teams' access stay. `…/delete` then answers `{ status: "ok", mode: "released", aclStripped }`, audited as `resource.access_removed` with `reason: "not_active"` and the row's `status`. Team deletion now visits pending and ignored rows too.
+
+**4.20.38: one decision for every route.** `…/{resourceId}/delete`, `DELETE …/resources/{app}` (and app disable) and team deletion all run the same checks in the same order: status (not `active` → `released`), other teams in the registry or the app's own sharing (→ `detached`, either lookup failing counts as another team), origin (not `teamhub_create` → `unlinked`), and only then destroy (`destroyed`). Talk is no longer an exception. `…/delete` can now answer `{ status: "ok", mode: "detached", aclStripped }`, audited as `resource.access_removed` with `reason: "shared_with_other_team"`. When this team's access cannot be removed, every route answers a failure (`…/delete` and `…/remove`: **400** `{"error": "Could not remove team access"}`; `DELETE …/resources/{app}`: the id under `failed`) and the registry row is left as it was; it used to be marked disconnected regardless. A resource with no registry row is never destroyed (it used to be found by ACL). IntraVox keeps its own page delete.
+
 ---
 
 ## WorkflowHub endpoints (added 4.10.14)
@@ -1028,7 +1096,7 @@ All `POST /api/v1/workflows/{id}/…`, all answer `200 { workflow }` with the up
 
 Actor types: `user` (uid), `group` (Nextcloud group id; `admin` = the administrators), `team_owner` (level 9 of the instance's team), `team_moderator` (level ≥ 4), `team` (any effective member). `viewer` is computed for the caller and is a rendering hint only — every action re-checks. Row ids of steps and participants, retention and removed participants are not exposed.
 
-**Added 4.11.0** (the conversation on a service request): `viewer.canMessage` — the caller may `POST …/message` now; `viewer.messageSide` — `'requester'`, `'desk'` or `null`; `viewer.canAskRequester` — the caller's message may instead be sent as `request-information` (their own claimed desk task, not already waiting); `viewer.answersQuestion` — the caller is the requester and a desk task is waiting for their answer, so their next message goes as `provide-information`. All four are `false`/`null` on a workflow no service team handles.
+**Added 4.11.0** (the conversation on a service request): `viewer.canMessage` — the caller may `POST …/message` now; `viewer.messageSide` — `'requester'`, `'desk'` or `null`; `viewer.canAskRequester` — the caller's message may instead be sent as `request-information` (their own claimed desk task, not already waiting); `viewer.answersQuestion` — the caller is the requester and a desk task or (4.20.60) an approval is waiting for their answer, so their next message goes as `provide-information`. All four are `false`/`null` on a workflow no service team handles.
 
 **Changed 4.10.17:** `viewer.canRequestStatus` now also honours its own cooldown — one ask per person per step per 24 hours — so it is `false` while the caller is inside that window and the client stops offering a button whose press would answer `429` (CLAUDE.md § Permissions: hidden, not left to fail). One batched query serves a whole list, so this costs no extra request per row.
 
@@ -1129,7 +1197,7 @@ Every decision payload gains **`isPublic`**. **Public means readable by every lo
 
 **The internal half.** `GET /workflows/{id}` gains **`internal`**, present only for an eligible agent of the handling desk and `null` for everybody else: `{ serviceTeamId, serviceTeamName, assignee, assigneeName, claimable, canAssign, canRelease, isServiceOwner, agents, involved }` (`involved`, v4.10.31: this member claimed or completed one of its desk steps). `viewer.isServiceAgent` says whether it is there. The history gains **`visibility`** per event (`all` / `internal`), and `internal` events are **removed from the response** for the requester, for every other participant and for a Nextcloud administrator — the filter runs before the licence tier's, so a licence can never widen what a requester reads. `responsible` is unchanged and still names the desk, so a requester always knows who has it.
 
-**v4.10.31 — whose action is required, and who lists what.** The view's `viewer` block gains **`actionRequired`** (this viewer's action is required: they may act on the active step *and*, for a desk step, have claimed it — an unclaimed desk step is the desk's, not any one member's; My Work labels it *Action required*) and **`canClose`** (see `close-request`). Each step in `steps` gains **`roleLabel`**, the role a built service's desk step needs (`''` otherwise). `GET /api/v1/workflows` (My Work) lists a desk's request for a desk member **only when they worked on it** (claimed, were assigned or completed one of its desk steps); `GET /workflows/{id}` still lets any member of the desk open any of its requests.
+**v4.10.31 — whose action is required, and who lists what.** The view's `viewer` block gains **`actionRequired`** (since 4.20.60, while the task waits for information it is `true` for the requester and `false` for whoever asked, and `responsible` names the requester; otherwise: this viewer's action is required: they may act on the active step *and*, for a desk step, have claimed it — an unclaimed desk step is the desk's, not any one member's; My Work labels it *Action required*) and **`canClose`** (see `close-request`). Each step in `steps` gains **`roleLabel`**, the role a built service's desk step needs (`''` otherwise). `GET /api/v1/workflows` (My Work) lists a desk's request for a desk member **only when they worked on it** (claimed, were assigned or completed one of its desk steps); `GET /workflows/{id}` still lets any member of the desk open any of its requests.
 
 **Starting a service request** uses the existing route: `POST /api/v1/teams/{teamId}/workflows/{definitionKey}` with `{ "data": { "summary", "details" } }`, where `definitionKey` comes from a catalogue entry. A definition no active desk offers is dark — `isStartable()` is false, so it is not listed and `create()` answers `404`.
 
@@ -1210,7 +1278,18 @@ A service of another team answers `404`, whatever the path's team.
 }
 ```
 
-`title` required, ≤ 100, one line. `description` ≤ 1000, line breaks allowed. `category` one of `ServiceCatalogue::CATEGORIES` (default `support_requests`). `leadDays` 0–60 whole working days, `0` / `""` / `null` = none said. `askTeam` stored for personal requests (a later step; today every request carries the team it is asked from). `steps` a list of at most 10; `kind` `desk` (the service team) or `requester` (a planned action); `label` ≤ 100, one line. The engine adds *Request submitted* before and *Requester confirms* after.
+`title` required, ≤ 100, one line. `description` ≤ 1000, line breaks allowed. `category` one of `ServiceCatalogue::CATEGORIES` (default `support_requests`). `leadDays` 0–60 whole working days, `0` / `""` / `null` = none said. `askTeam` is gone from the top level since v4.20.54; see *The request form*. `steps` a list of at most 10; `kind` `desk` (the service team) or `requester` (a planned action); `label` ≤ 100, one line. The engine adds *Request submitted* before and *Requester confirms* after.
+
+**v4.20.54 — the request form and the confirmation (`docs/service-builder.md` § 14.3).**
+
+- **`request`** `{ askTeam, titleField, fields: [{ key, type, label, help, required, options }] }`. Not sent, or a document saved before v4.20.54, is **the standard form**: `askTeam: true` (whatever the old top-level `askTeam` said) and the fields `summary` and `details`, both required, whose labels may stay empty and are then the app's own words in each requester's language. `type` one of `short | long | choice | multi | date | number | yesno | person`. At most 20 fields; `label` ≤ 100, `help` ≤ 255, both one line; `options` at most 20 of ≤ 100, kept for `choice` and `multi` only. `key` matches `^[a-z][a-z0-9_]{0,31}$` and identifies the field for good: a missing, malformed or repeated one is replaced on save. `titleField` names a `short` or `choice` field, else it becomes `""` and requests are named after the service. `askTeam: false`: only personal requests may be started (`403` on any other team).
+- **`confirm`** `{ mode: requester | auto | none, days 1-90 (default 14) }`. `none` leaves the *Requester confirms* step out. `auto`: a daily job confirms a request whose requester did not, `days` × 24 hours after that step was reached; nobody's uid is on it (`completedBy`, `endedBy` and the events' `actorUid` are `null`) and the `step_completed` event's payload has `auto: true`. Not while the request is blocked, waits for an answer, or the licence or the module switch is off.
+- **Limits** in `GET /built-services`: `fields`, `fieldLabel`, `fieldHelp`, `options`, `confirmDays`.
+- **publishProblems** adds: a field without a name, a choice with fewer than two options.
+
+**v4.20.57 — who reads what.** `GET /teams/{teamId}/built-services` answers drafts, unpublished services, `publishProblems` and names only to a team admin (`canEdit: true`). Any other member gets the listed services, `draft: null`, `hasChanges: false`, no `createdBy` / `publishedBy`.
+
+**v4.20.58 — approval steps (`docs/service-builder.md` § 14.4).** A step of kind **`approval`** carries **`approval`** `{ approver: { source: user | group | manager | field, id, name, fallback: { id, name } }, approveLabel, rejectLabel, onReject: end | continue }` and exactly one unnamed task. `id` is a uid, a group id or the `key` of a `person` field of the request form; `""` for `manager`. The two labels are at most 40 characters, `""` is the app's own words. `400` on a save that names a person or group the caller could not share with, unless the draft named them already. **publishProblems** adds: no approver, an approver or fallback that no longer exists, no fallback with `manager` or `field`, an approval as the last step. Limit `verb` in `GET /built-services`.
 
 **v4.10.37 — tasks (`docs/service-builder.md` § 4).** Every step holds `tasks`, 1–10, done at the same time: `{ label ≤ 100, role ≤ 64, nonBlocking, links }`. `role` and `nonBlocking` mean something on a `desk` step only (`role` is a label, not a permission; `nonBlocking` lets the request move on while the task is open — it must still be done before the request ends); on a `requester` step they are dropped. One task may leave `label` empty and borrows the step's. **A step saved before v4.10.37** — `role` and `links` on the step itself — is read as one task that has them; the next save writes the new shape. **`start` / `startUrl` (v4.10.36, the link service) are withdrawn**: dropped on save; a service still *published* with `start: "link"` is left off the catalogue and cannot be started until it is published again.
 
@@ -1220,7 +1299,27 @@ A service of another team answers `404`, whatever the path's team.
 
 **A service** in every response: `{ id, teamId, definitionKey: "team_service_{id}", draft, published | null, version, listed, hasChanges, publishProblems: [string], createdBy, createdAt, updatedAt, publishedBy, publishedAt }`. `publishProblems` is what stands between the draft and publishing, in the viewer's language: no step for the team, a step without a name, a requester step first (v4.10.35: every request reaches the team first) or last, a link without a name or an address (v4.10.36), a task without a name in a step of several, a team step whose every task is non-blocking (v4.10.37).
 
-**On the Services page** a published, listed service is one more `GET /api/v1/service-teams/catalogue` entry of its team: `serviceKey` = `definitionKey` = `team_service_{id}`, `label` / `description` in the team's own words (not translated), `leadTime` *Usually within {n} working days* or `""`, **`builtService: true`**, and (v4.10.38) **`fileSharing`** `{ allowed, edit, days }` for the request form's paperclip. It is requested with the generic form, `POST /api/v1/teams/{teamId}/workflows/team_service_{id}` + `{ data: { summary, details, fileIds? } }`.
+**On the Services page** a published, listed service is one more `GET /api/v1/service-teams/catalogue` entry of its team: `serviceKey` = `definitionKey` = `team_service_{id}`, `label` / `description` in the team's own words (not translated), `leadTime` *Usually within {n} working days* or `""`, **`builtService: true`**, and (v4.10.38) **`fileSharing`** `{ allowed, edit, days }` for the request form's paperclip. Since v4.20.54 the entry also carries **`version`** and **`form`** (the published `request`). It is requested with `POST /api/v1/teams/{teamId}/workflows/team_service_{id}` + `{ data: { answers: { key: value }, version, fileIds? } }`: text for `short`, `long`, `choice`, `date` (`YYYY-MM-DD`) and `number` (a comma or a point), a list for `multi`, a boolean for `yesno`, a uid for `person`. `400` names the field that is missing or does not fit; an answer to a field the form does not have is dropped. A person must be an enabled account the requester could share a file with. A `version` other than the published one is `409` with `conflict: true`; without it there is no check. `{ data: { summary, details } }` is still read, as the standard form's own keys.
+
+**Approvals on a request (v4.20.58).** The approver is resolved when the request is made and stored on the step (`actor` a user or a group); `409` when there is nobody. Never the requester: not by name, as a member of the group, or as the fallback.
+
+- `POST /api/v1/workflows/{id}/approval` `{ approver, note, step? }` — whoever claimed an open desk task asks somebody to approve: an extra `approval_{n}` task in the same step. The task cannot be completed while it is open (`409`); a rejection goes back to the claimant and does not end the request. `403` for anybody else, `400` for the requester, the person asking, somebody the caller could not share with, or an empty `note`. At most 5 open per request; 30 calls an hour.
+- `POST /api/v1/workflows/{id}/approval/delegate` `{ approver, note?, step? }` — by whoever was asked, or an admin of the service team, never to oneself. Whoever had it leaves the request.
+- `POST …/complete` approves and `POST …/reject` rejects. `onReject: continue` moves the request on.
+- **The view:** `steps[].type` `"approval"` or `""`, `steps[].question`; `actionLabels` are the approval's own words; `viewer.canRequestApproval`, `viewer.waitsForApproval`, `viewer.canDelegate`, `viewer.canProvideInformation`. Participant role `approver`.
+- **What an approver reads:** the request from the moment their step is reached, without messages, linked decisions, internal notes, the documents list or the archive record; of questions and answers only their own. They may ask the requester (`request-information`) and may not answer (`provide-information` is `403`).
+- **Events:** `approval_requested` `{ to, note }`, `approval_delegated` `{ from, to, note? }`; `step_completed` and `step_rejected` of an approval carry `approval: true`.
+- **Files:** a planned approver gets a view-only share of the requester's attached files when the step is reached, removed when it is answered, handed on or the request ends. The catalogue entry's `approvals: true` is what the form says it with.
+
+**Fields on a task (v4.20.71).** A task of the service document may carry `fields` (the request form's field shape); a key used elsewhere in the service is replaced. On a request, `steps[].fields` is what a task asks and `steps[].answers` what was filled in (`[{ key, type, label, value, text? }]`), both `[]` on a team task for anybody outside the team. `POST /workflows/{id}/complete` takes `answers` (field key → value) and answers `400` *Fill in "…"* when a required one is empty. A condition's `field` may be one of an earlier step's tasks.
+
+**Deadlines of a step (v4.20.68).** A step of the service document may carry `dueDays` (1 to 60 working days; `400` otherwise); a step without one has no key. `GET /built-services` answers `limits.dueDays`. On a request, `steps[].dueAt` is when a reached step with a deadline is due (epoch seconds, end of its last working day; `null` otherwise) and the view's top-level `dueAt` is that of the task it answers for while it is open. Event `step_overdue` `{ dueAt, uids }`, internal; notification subject `workflow_step_overdue`.
+
+**Conditions of a step (v4.20.66).** A step of the service document may carry `when: { field, op: is|is_not|at_least|at_most|filled, value }` on a field of the request form; a step without one has no key. On a request, a step whose condition does not hold is `steps[].status` `skipped` with `actionTaken` `not_needed`, and its `step_skipped` event carries `notNeeded: true`.
+
+**Notices of a step (v4.20.62).** A step of the service document may carry `notify: [{ on: reached|done|rejected, to: { type: requester|task|user|group, id, name }, channels: [bell|email], subject, text, requester, fields }]`, at most five; a step without any has no key. The server writes `to.name`, refuses a person or group the caller may not name (`400`), and drops keys that are not on the form. `GET /built-services` answers `limits.notices`, `noticeSubject`, `noticeText` and `noticeEmail` (whether services may send email here). Sent by `SendServiceNoticeJob`. **Events**, both `internal`: `notice_sent` `{ on, subject, uids, channels }` and `notice_failed` `{ on, subject, uids, why: nobody|too_many|email_off|email }`; `GET /workflows/{id}` has the names of their `uids` in `people`. **Admin settings:** `serviceTeamsEmailEnabled` (default `false`). Notification subject `service_notice`, object type `workflow_notice`.
+
+**What a request keeps (v4.20.54):** `data.form: [{ key, type, label, value, text? }]` (the answered fields, with the label they were asked under; `text` is a person's name), `data.titleField`, `data.summary` (the title field's answer or `""`) and `data.confirm`. `data.details` exists only on requests made before that; `description` is built from `form`.
 
 **Step links on a request (v4.10.36).** A request copies each task's `links` onto its row at start (`teamhub_wf_step.links`), like the label and the role, and every workflow view's `steps[]` carries **`links: [{ label, url, kind }]`** — `[]` for a step without any, which is every step of a built-in workflow. **A desk task's links are the team's own material: they are sent only to an agent of the desk handling the request**; everybody else on the request receives `[]` for that task. A requester task's links go to everybody on the request. The client renders only `https://` addresses.
 
@@ -1782,6 +1881,27 @@ Unsubscribe. **Auth**: identical. An author unsubscribing from their own message
 Two guards, and they are not redundant. The deletion is hygiene — it stops dead rows accumulating. The send-time membership check is the boundary, and it is what holds when membership ends by a route that runs none of those three methods (a group membership change, or the stuck Circles event in HANDOFF §0000). `forgetTeamSubscriptions()` re-tests effective membership first and does nothing if the user is still in the team through a group or sub-team.
 
 The notification is subject `message_comment`, one per comment, linking to `?team={teamId}&message={messageId}`.
+
+## Emoji reactions (added 4.20.27)
+
+One reaction per person per emoji per message or comment (`teamhub_reactions`, unique on target, user and emoji). **No notification** is sent for a reaction. The summary ships on every row that shows one: each message row and the `pinned` slot of `GET /api/v1/teams/{teamId}/messages`, and each comment of `GET /api/v1/messages/{messageId}/comments`, carry
+
+```json
+"reactions": [
+  { "emoji": "👍", "count": 3, "reacted": true, "names": ["Inge NC", "Jaap Tel", "Lieke Adm"], "more": 0 }
+]
+```
+
+in the order the emojis were first given. `reacted` is the calling user; `names` holds at most ten display names and `more` counts the rest. An endpoint that returns a message row without stamping it (edit, pin, unpin, vote) carries no `reactions` key, which the client reads as "unchanged".
+
+### `POST /api/v1/messages/{messageId}/reactions` · `DELETE /api/v1/messages/{messageId}/reactions`
+### `POST /api/v1/comments/{commentId}/reactions` · `DELETE /api/v1/comments/{commentId}/reactions`
+
+Add or take back the caller's reaction. **Parameter** `emoji` (body on POST, query on DELETE). **Auth**: member of the message's team, direct or through a group or sub-team (for a comment, its parent message's team). CSRF-protected.
+
+Both answer `{ "reactions": [...] }` with the target's summary afterwards. Adding an emoji already given, or removing one that is not there, succeeds without change. `400` for an emoji that is not one (letters, digits, whitespace, markup, more than 8 code points or 32 bytes), when the target already carries 20 different emojis, or when the caller already has 10 on it; `403` for a non-member; `404` when the message or comment does not exist.
+
+Reactions go with their message (`MessageService::deleteMessage`, including those on its comments), their comment (`CommentController::deleteComment`) and their team (`MaintenanceService` purge, by `team_id`).
 
 ### `GET /api/v1/messages/{messageId}/comments`  *(public branch added 4.8.7)*
 
@@ -2363,16 +2483,17 @@ User-scoped UI preferences stored in `oc_preferences` under the `teamhub` app id
 
 **Response 200**:
 ```json
-{ "gettingStartedHint": true }
+{ "gettingStartedHint": true, "showBusyOnTeamCalendars": true }
 ```
 
+- `showBusyOnTeamCalendars` (4.20.15) — whether the team calendar may show this user's busy times to their teammates (`busy_on_team_calendars` in `oc_preferences`, default `true`). Read by `GET …/calendar/busy-people` below. Not a security boundary: Nextcloud's own free/busy answers anyone who invites this user in Calendar. DESIGN §2.267.
 - `gettingStartedHint` — whether to render the "Need help getting started?" callout above the sidebar help button. Defaults to `true` for every user including existing ones. The callout is additionally gated on the instance being unlicensed, since the help button it points at is itself licence-gated.
 
 ### `PUT /api/v1/preferences`
 
 **Auth**: any logged-in user (`#[NoAdminRequired]`). CSRF-protected — no `#[NoCSRFRequired]`.
 
-**Body**: `{ "gettingStartedHint": bool }`. Only keys present in the body are written, so a future preference can be added without every caller sending the whole set. A non-boolean value returns `400`; `true`/`false`/`1`/`0`/`"true"`/`"false"` are all accepted.
+**Body**: `{ "gettingStartedHint"?: bool, "showBusyOnTeamCalendars"?: bool }`. Only keys present in the body are written, so a future preference can be added without every caller sending the whole set. A non-boolean value returns `400`; `true`/`false`/`1`/`0`/`"true"`/`"false"` are all accepted.
 
 **Response 200**: the same envelope as the GET, reflecting the stored state.
 
@@ -2634,6 +2755,7 @@ Creates a VTODO. **Auth**: `requireMemberLevel($teamId)`.
 | `duedate` | string | Optional, ISO 8601. An unparseable value is dropped rather than refused. |
 | `calendarId` | int | Optional. Defaults to the team's first connected calendar. |
 | `assignee` | string | *(4.11.15)* A team member's uid, `self`, or `team` — omitted means `team`. |
+| `link` | string | *(4.20.29)* The page the task was made on, a path into this instance (`/index.php/apps/teamhub/?team=…&tab=files&open=…`). Written as the VTODO's `URL`, made absolute. Anything that is not a single-slash path, has whitespace, a backslash or a control character, or is over 2000 bytes is `400`. Read back on the task's My Work row as `metadata.sourceUrl`, only when it points into this instance. |
 
 **`assignee` is who the task is for**, and it is the whole of what tells a to-do somebody wrote for themselves from one the team owes (`TaskService`'s docblock; DESIGN §2.153):
 
@@ -2644,7 +2766,7 @@ A uid that is not an effective member of the team is `400`. The person is identi
 
 **Response 201**: `{ uri, title, assignee }` — `assignee` is the resolved uid, or `null` for a team task.
 
-**Status codes**: `400` title missing or assignee not in the team · `403` not a member, no signed-in user, or the calendar is read-only for this account · `404` the team has no calendar, or it is not in the caller's calendar home · `422` Tasks app missing · `500` with a `ref` for anything else.
+**Status codes**: `400` title missing, assignee not in the team, or a `link` that is not a path into this instance · `403` not a member, no signed-in user, or the calendar is read-only for this account · `404` the team has no calendar, or it is not in the caller's calendar home · `422` Tasks app missing · `500` with a `ref` for anything else.
 
 Completing a task is **not** an endpoint of its own: it is the `complete` action on the `tasks` My Work provider (`POST /api/v1/mywork/action`, item id `tasks:{calendarId}:{objectUri}`). Offered on a task that is yours or the team's, never on a *Waiting for others* row; an already-finished task answers `conflict`, and the organiser is notified (`task_completed`) when somebody else finishes what they asked for.
 
@@ -2700,15 +2822,131 @@ Notes that matter to a caller:
 
 Sibling endpoints on the same prefix are pre-existing and were not previously documented here: `GET …/calendar/events` (upcoming feed for the home widget, capped and ordered by `lastmodified`, **does not** expand recurrence), `GET …/calendar/events/week`, `POST …/calendar/events`, `DELETE …/calendar/events`. **4.9.10:** each `GET …/calendar/events` row carries `openProjectMeetingId` — the OpenProject meeting id when the event is a copy the meeting sync wrote (from its `X-TEAMHUB-OPENPROJECT-MEETING` property), else `null`.
 
+**4.20.6, room finder (DESIGN §2.261).** `POST …/calendar/events` and `POST …/meetings` now refuse a `roomEmail` whose room is already booked in the slot, before anything is written: **409** `{ error, code: "room_busy", room: "<display name>" }`. A room whose calendar cannot be read is let through.
+
+**4.20.8, recurring meetings and the event row (DESIGN §2.263).**
+
+- `POST …/calendar/events` and `POST …/meetings` take an optional **`recurrence`**: a JSON string (or object) `{ freq: "daily"|"weekly"|"monthly"|"yearly", interval: 1-99, byDay?: ["MO",…] (weekly), monthlyMode?: "date"|"weekday" (monthly), end: { type: "never"|"until"|"count", until?: "YYYY-MM-DD", count?: 1-500 } }`. The server writes the matching RRULE (monthly by weekday as `BYDAY` + `BYSETPOS`, as Nextcloud Calendar writes it). **Licensed**: an unlicensed instance answers **403** `{ error, licenseGate: true, enforcementLevel }`. A series with a room is checked on every date up to a year ahead (at most 200 dates), and a clash answers **409** `room_busy` with **`dates`**: the ISO-8601 starts of the clashing occurrences. A series cannot book a RoomVox room (**400**). Malformed settings answer **400**.
+- `GET …/calendar/events` (the Upcoming events feed) now **expands recurring events** into their dates in the next 30 days and picks objects by `firstoccurence`/`lastoccurence` instead of `lastmodified`. Each row adds `recurring` (bool), `room` (`{ email, name }` from `ATTENDEE;CUTYPE=ROOM`, or `null`) and `attendance`: `{ accepted, total, attendees: [{ name, status: "accepted"|"tentative"|"needs-action"|"delegated"|"declined", organizer }] }` over invited people (rooms and resources left out), or `null`. **`attendance` is sent to licensed instances only**, and carries names, never addresses. A recurring occurrence's `id` is `<UID>/<start timestamp>`.
+
+**4.20.10, replies and series (DESIGN §2.264).**
+
+- `GET …/calendar/events` rows add `uid` (the event's UID), and on licensed instances `attendance.myStatus` (the viewer's own answer, or `null` when they are not invited or organised it) and `self` on each attendee.
+- A recurring event that books a Nextcloud resource room writes the room attendee as `PARTSTAT=ACCEPTED;RSVP=FALSE`: Nextcloud does not auto-answer a series for a room, and TeamHub has checked every date.
+- `POST …/meetings` takes `reminderDays` (1-7, default 2) with `recurrence`: each later date of the series gets its own notes file and a reminder in the team's Talk chat that many days before it (hourly `MeetingSeriesPrepJob`).
+
+**4.20.13 to 4.20.14, Add meeting (DESIGN §2.266).**
+
+- `POST …/meetings` is **licensed**: team membership first (403), then an unlicensed instance answers **403** `{ error, licenseGate: true, enforcementLevel }` before any input is read. `POST …/calendar/events` (Add event, and the Decisions approver meeting) is not licensed.
+- `GET …/presence/suggest-times` and `GET …/presence/suggest-timeslots`: every suggestion carries **`unavailable`**, a list of `{ userId, displayName, reason }` with `reason` one of `off` (presence says not working: an empty half-day in a saved template, or a one-off busy entry), `unchecked` (Nextcloud gave no calendar answer, usually no email address on the account) or `calendar` (Nextcloud says busy). Presence is checked first. `suggest-timeslots` now reads presence too: a slot counts someone as available only when they work then and their calendar is free. `conflictCount` stays `attendeeCount - availableCount`.
+
+### `GET /api/v1/teams/{teamId}/calendar/busy-people` — added 4.20.15
+
+The members whose busy times the team calendar may show, each with the address Nextcloud's free/busy looks them up by. **The busy times themselves never pass through TeamHub**: the grid sends one `VFREEBUSY` request to the viewer's own CalDAV outbox (`POST /remote.php/dav/calendars/{uid}/outbox/`), the request Nextcloud Calendar sends for an event's attendees, and Nextcloud answers it. DESIGN §2.267.
+
+**Auth**: `#[NoAdminRequired]` + team membership (`MemberService::getEffectiveMemberIds()`), 403 otherwise.
+
+**Response 200**:
+```json
+{
+  "organizer": "me@example.com",
+  "maxPerRequest": 12,
+  "people": [
+    { "userId": "me", "displayName": "Me", "email": "me@example.com", "self": true },
+    { "userId": "jaap", "displayName": "Jaap Tel", "email": "jaap@example.com", "self": false }
+  ],
+  "notShown": 2
+}
+```
+
+- `people` — viewer first, then by name. Left out, and counted in `notShown` without being named: a member who switched `showBusyOnTeamCalendars` off, a member whose email is **Private** in their Nextcloud profile (the members widget's rule for the same field), and a member with no email. Disabled accounts and members on other servers are skipped and not counted. The viewer is always listed when they have an address, whatever their own scope or switch.
+- `organizer` — the viewer's own email, the `ORGANIZER` Nextcloud requires to be one of the viewer's calendar addresses. `null` when they have none; the grid then uses the viewer's principal URL (`{webroot}/remote.php/dav/principals/users/{uid}/`), which is in the same address set.
+- `maxPerRequest` — how many people one free/busy request may name. Mirrors `MAX_BUSY_PEOPLE` in `src/lib/teamBusy.js`; a JS test pins the two together.
+
+### `GET /api/v1/teams/{teamId}/meetings/wrap-up/{objectId}/{start}` — added 4.20.20
+
+What the wrap-up dialog needs for one finished meeting occurrence (`objectId` = the calendar object, `start` = the occurrence's start, the pair My Work's `meeting_wrap_up` open target carries). DESIGN §2.271.
+
+**Auth**: `#[NoAdminRequired]` + team membership (403), then the licence (`LicenseGateException`), then in `MeetingWrapUpService`: the viewer organised this occurrence, it has ended, and it was made with Add meeting (its description carries `Meeting notes:`). 404 when there is no wrap-up for the viewer, 403 when they are not the organiser.
+
+**Response 200**:
+```json
+{
+  "meeting": { "title": "Weekly", "start": 1794906000, "end": 1794909600, "notesUrl": "https://…/s/AbC123" },
+  "notesFound": true,
+  "actionItems": [{ "title": "order the laptops", "assignee": "Jaap Tel", "due": "2026-11-24" }],
+  "proposals": [{ "id": 12, "question": "New laptops", "status": "finalized", "inNotes": true }],
+  "members": [{ "userId": "Jaap Tel", "displayName": "Jaap Tel" }],
+  "tasksAvailable": true,
+  "wrapped": null
+}
+```
+
+- `actionItems` — the list items under the notes' *Action items* heading, each read into what, who (`@uid`, `Name:` or `(Name)`, matched to a member; `null` when nobody matches) and when (an ISO or day-month-year date). Empty when nobody wrote any or the notes were not found (`notesFound: false`).
+- `proposals` — the team's open and finalized proposals the viewer may see; those linked from the notes' *Proposals* section first, with `inNotes`.
+- `wrapped` — `{ status: "done" | "skipped", at }` once wrapped up.
+
+### `POST /api/v1/teams/{teamId}/meetings/wrap-up/{objectId}/{start}` — added 4.20.20
+
+Wrap the meeting up. Same auth as the GET. Body: `tasks` (up to 50 of `{ title, assignee, due }`; `assignee` a member's uid or `''` for the whole team; `due` `YYYY-MM-DD` or `''`) and `proposalIds`.
+
+Each task becomes a team task (`TaskService::createTeamTask`, due at 17:00 in the organiser's zone, its description naming the meeting and linking the notes), which notifies the person and lands in their My Work. Each proposal gets a `meeting_discussed` audit line with `meeting_title`, `meeting_start` and `notes_url`; **nothing is decided**. The outcome is written into the notes file between `<!-- teamhub:wrap-up -->` markers (replaced, never repeated). A wrap-up is recorded in `teamhub_mtg_wrapups`.
+
+**Response 200**: `{ "tasks": 2, "linked": 1, "notesUpdated": true, "failedTasks": [] }`. 400 for a bad task, a proposal not open in the team, tasks without the Tasks app, or a meeting already wrapped up.
+
+### `GET /api/v1/teams/{teamId}/rooms`
+
+Every room the caller may book. Team membership required (403 otherwise). `[]` when no room backend is installed.
+
+Each entry: `key` (unique across sources: `<source>:<kind>:<id>`), `id`, `displayName`, `email`, `source` (`crm` | `roomvox`), `kind` (`room` | `resource`), and since 4.20.6 `building`, `floor`, `roomNumber`, `capacity` (int or `null` when not published), `features` (upper-case list, e.g. `VIDEO-CONFERENCING`), `type`. All from the room's published `IRoomMetadata`. A room restricted to groups the caller is in none of is left out.
+
+### `GET /api/v1/teams/{teamId}/rooms/availability` (4.20.6)
+
+Free or busy per room for one slot, plus busy blocks across a wider window. Team membership required.
+
+| Param | | |
+|---|---|---|
+| `start`, `end` | required, ISO-8601 | The slot. At most 24 hours. |
+| `windowStart`, `windowEnd` | optional, ISO-8601 | The timeline window, widened to contain the slot. At most 48 hours. |
+| `building` | optional | Only rooms in this building (exact name). |
+| `unplaced` | optional, `1` | Only rooms that publish no building. Wins over `building`. |
+
+Without `building` or `unplaced`, every room is checked, up to 150; above that **400** asks for a building.
+
+Answer: `{ rooms: { "<key>": { status: "free" | "busy" | "unknown", busy: [{ start, end }] } } }`. Times are UTC ISO-8601 and are the only booking data returned: no title, organiser or attendee. `unknown` means the room's calendar could not be read and must never be shown as free.
+
+**4.20.8:** an optional `recurrence` (same JSON as `POST …/calendar/events`, licensed, 403 otherwise) checks every date of the series. Each room then also carries `series: { total, conflicts: [ISO start…], checked }`, and a room free in the slot but taken on a later date is `partial`.
+
+### `GET /api/v1/teams/{teamId}/rooms/free-now` (4.20.8)
+
+Free room now. Team membership required; **licensed** (403 `licenseGate` otherwise). The rooms of one building with their verdict from the current minute for `minutes` (15-240, default 30), and their bookings for the next 12 hours.
+
+| Param | | |
+|---|---|---|
+| `minutes` | optional, 15-240 | How long the room must be free. Default 30. |
+| `building` / `unplaced` | optional | As for `/rooms/availability`. |
+
+Answer: `{ rooms: { "<key>": { status, busy } }, start, end }` (`start` is the current minute, `end` is `start + minutes`, both UTC ISO-8601). Booking goes through `POST …/calendar/events`, which checks the room again.
+
 ---
 
 ## Meeting endpoints (extended 3.81.2)
+
+### `POST /api/v1/teams/{teamId}/meetings/reply` (4.20.10)
+
+Answer a meeting invitation on the team calendar. Team membership required, then a licence (**403** `{ error, licenseGate: true, enforcementLevel }` when unlicensed).
+
+Body: `{ uid: "<event UID>", status: "accepted" | "tentative" | "declined" }`.
+
+The server sends a METHOD:REPLY naming only the signed-in attendee to the organiser's calendar through Nextcloud's `IHandleImipMessage::handleIMipMessage()`, so Nextcloud's own iTIP broker records it, then reads the event back. Answers: **200** `{ status }`; **400** unknown status, or the caller organised the meeting; **403** the caller is not invited; **404** the event is not on this team's calendar; **500** Nextcloud did not record the reply (for example when the organiser is not the owner of the team calendar). Without a RECURRENCE-ID the reply covers the whole series.
+
+My Work's meeting rows carry the same three answers as the actions `accept`, `tentative` and `decline`.
 
 ### `POST /api/v1/teams/{teamId}/meetings`
 
 Create a team meeting — writes a notes file in the team's `Meetings/` folder, then writes a calendar event linked to that notes file. The wizard's Add Meeting button is the primary caller. Existing fields are unchanged; the additions below are all optional and default to safe behaviour.
 
-**Auth**: caller must meet the team's `meeting_min_level` (1/4/8). Enforced inside `MeetingService::enforceMinLevel`.
+**Auth**: team member, then an active licence (since 4.20.13, **403** with `licenseGate: true` otherwise), then the team's `meeting_min_level` (1/4/8), enforced inside `MeetingService::enforceMinLevel`.
 
 **Body (additions in 3.81.2 — bold fields are new):**
 
@@ -2875,7 +3113,7 @@ Returns the current telemetry state plus a live preview of the next outgoing rep
 ```json
 {
   "enabled":    true,
-  "report_url": "https://tldr.host/teamhub/report/",
+  "report_url": "https://teleserv.doekworks.eu/",
   "preview":    { /* TelemetryService::collectStats() output */ }
 }
 ```
@@ -2888,9 +3126,14 @@ Returns the current telemetry state plus a live preview of the next outgoing rep
 **`preview.builtin_integrations` field removed 3.87.0**:
 - `shared_files` — the per-team toggle behind this metric was removed when the Shared-files widget was folded into the Filecenter widget as an always-on tab. The `builtin_integrations` map no longer emits a `shared_files` key. Legacy `teamhub_team_apps` rows for that `app_id` are ignored.
 
-Other `preview` fields are unchanged from earlier versions: `team_count`, `user_count`, `member_total`, `message_count`, `integrations`, `builtin_integrations`, `presence_module`, `decisions_module`, `teams_with_decisions_enabled`, `decisions_count`, `decisions_by_status`, `decision_categories_count`, `suggest_wizard_uses`, `link_domains`. See `TelemetryService::collectStats()` for the authoritative list.
+Other `preview` fields are unchanged from earlier versions: `team_count`, `user_count`, `member_total`, `message_count`, `integrations`, `builtin_integrations`, `suggest_wizard_uses`. See `TelemetryService::collectStats()` for the authoritative list.
 
-**Note (v4.4.0)**: the outbound daily-report path (`SendTelemetryJob` + `DailyReportJob`) that used to POST the `preview` payload to `tldr.host/business/telemetry.php` was removed with the air-gapped-only licensing pivot. `TelemetryService::sendDailyReport()` remains as a defensive no-op. The `GET /api/v1/admin/telemetry` endpoint above stays live as a self-inspection tool — nothing leaves the instance.
+**`preview` fields changed 4.20.44**:
+- Added `modules_enabled` (list of strings): the instance-wide modules that are on, out of `presence` (People) and `decisions`. Replaces the booleans `presence_module` and `decisions_module`. Modules that need a licence never appear, because a licensed instance does not report.
+- `announcement_popup` is now `"enabled"` or `"disabled"`: `disabled` once any administrator ticked "Do not show this message again". Was a map of counts per announcement.
+- Removed: `teams_with_decisions_enabled`, `decisions_count`, `decisions_by_status`, `decision_categories_count`, `link_domains`.
+
+**Sending**: an unlicensed instance POSTs `preview` plus `event: "daily_report"` to `report_url` once a day (`TelemetryReportJob`, restored in 4.4.7). A licensed instance sends nothing.
 
 ---
 
@@ -3100,7 +3343,7 @@ NC's unified search calls `IProvider::search` on every registered provider. Team
 | Provider | ID | `getOrder` | Surfaces |
 |---|---|---|---|
 | `TeamSearchProvider` (new in 3.84.3) | `teamhub-teams` | 49 | Teams the searcher is a member of (direct or via group / sub-team), filtered to user-created teams (`circles_circle.source=16`), pending-deletion excluded. Result entry deep-links to `/apps/teamhub/#/team/{teamId}`. |
-| `MessageSearchProvider` (pre-existing) | `teamhub-messages` | 50 | Messages in teams the searcher belongs to. |
+| `MessageSearchProvider` (pre-existing; reworked 4.20.27) | `teamhub-messages` | 50 | Messages in teams the searcher belongs to, direct or through a group or sub-team, minus teams pending deletion and teams with Messages switched off (`MessageService::getMessageSearchTeamIds()`). The team list is a `WHERE` clause, so every returned row is readable and a full page carries a cursor (before 4.20.27 the provider filtered after the fetch, could answer an empty last page while matches existed, and gave nothing to an indirect member). Decision rows and direct proposals are left out, as in the stream. Title is the subject (or the body when there is none); subline is *author display name · team · plain-text body*, mentions shown as `@Display name`. `%` and `_` in the term are literal. Links to `?team={teamId}&message={id}`. |
 | `DecisionSearchProvider` (pre-existing) | `teamhub-decisions` | 51 | Decisions in teams the searcher belongs to. |
 | `ServiceSearchProvider` *(4.11.11)* | `teamhub-services` | 52 | The service catalog as **this viewer** sees it — `ServiceCatalogueReader::forUser()`, the same list the Services page renders, so the per-viewer cards (quota, more time) are filtered before matching. Matches label, description, offering team and category. Links to `?services=1`. |
 | `ServiceRequestSearchProvider` *(4.11.11)* | `teamhub-service-requests` | 53 | The searcher's **own** service requests — `listForParticipant()` narrowed to those they started, so a desk member's claimed work is not listed here. Open before finished, then most recently touched. Links to `?mywork=1`. |

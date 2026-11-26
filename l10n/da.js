@@ -1,6 +1,22 @@
     OC.L10N.register(
     "teamhub",
     {
+    "Show why %n person is not available": [
+        "Vis hvorfor %n person ikke er tilgængelig",
+        "Vis hvorfor %n personer ikke er tilgængelige"
+    ],
+    "Cannot check the calendar for {name}.": "Kan ikke kontrollere kalenderen for {name}.",
+    "{name} is not working at that time.": "{name} arbejder ikke på det tidspunkt.",
+    "{name} has a calendar conflict.": "{name} har en kalenderkonflikt.",
+    "Nextcloud checks a calendar through the account's email address. An account without one cannot be checked.": "Nextcloud kontrollerer en kalender via kontoens e-mailadresse. En konto uden e-mailadresse kan ikke kontrolleres.",
+    "_%n is not working_::_%n are not working_": [
+        "%n arbejder ikke",
+        "%n arbejder ikke"
+    ],
+    "_%n cannot be checked_::_%n cannot be checked_": [
+        "%n kan ikke kontrolleres",
+        "%n kan ikke kontrolleres"
+    ],
     "{count} public holiday days were skipped": "{count} helligdage blev sprunget over",
     "Change a workplace or mark vacation, sickness or other non-working time. Your usual workplace remains unchanged. Public holidays are managed by administrators.": "Skift arbejdssted eller registrer ferie, sygdom eller andet fravær. Dit normale arbejdssted ændres ikke. Helligdage administreres centralt.",
     "Set a day or date range": "Vælg en dag eller periode",
@@ -14,14 +30,14 @@
     "Temporary change saved": "Midlertidig ændring gemt",
     "Failed to save temporary change": "Kunne ikke gemme midlertidig ændring",
     "Birthdays are unavailable while People or this widget is disabled.": "Birthdays are unavailable while People or this widget is disabled.",
-    "People profile": "People profile",
+    "People profile": "People-profil",
     "View collaboration profile": "View collaboration profile",
-    "Collaboration profile unavailable": "Collaboration profile unavailable",
-    "This collaboration profile is not available. Sign in, or ask your administrator whether the People module is enabled.": "This collaboration profile is not available. Sign in, or ask your administrator whether the People module is enabled.",
-    "No collaboration details have been shared yet.": "No collaboration details have been shared yet.",
-    "Expertise": "Expertise",
-    "Preferred contact": "Preferred contact",
-    "Fun fact": "Fun fact",
+    "Collaboration profile unavailable": "Samarbejdsprofil ikke tilgængelig",
+    "This collaboration profile is not available. Sign in, or ask your administrator whether the People module is enabled.": "Denne samarbejdsprofil er ikke tilgængelig. Log ind, eller spørg din administrator, om People-modulet er aktiveret.",
+    "No collaboration details have been shared yet.": "Der er endnu ikke delt nogen samarbejdsoplysninger.",
+    "Expertise": "Ekspertise",
+    "Preferred contact": "Foretrukken kontakt",
+    "Fun fact": "Sjov kendsgerning",
     "%1$s still has %2$d service. Move it to another category first.": [
         "%1$s har stadig %2$d tjeneste. Flyt den til en anden kategori først.",
         "%1$s har stadig %2$d tjenester. Flyt dem til en anden kategori først."
@@ -114,8 +130,8 @@
     "Archive box": "Arkivkasse",
     "Calendar with a clock": "Kalender med et ur",
     "Clock": "Ur",
-    "Email": "Email",
-    "Phone": "Phone",
+    "Email": "E-mail",
+    "Phone": "Telefon",
     "Mobile phone": "Mobiltelefon",
     "Laptop": "Bærbar",
     "Printer": "Printer",
@@ -161,7 +177,7 @@
     "Fold step": "Fold trin sammen",
     "Unfold step": "Fold trin ud",
     "Step {n}": "Trin {n}",
-    "{n} task": [
+    "_{n} task_::_{n} tasks_": [
         "{n} opgave",
         "{n} opgaver"
     ],
@@ -201,19 +217,19 @@
     "The file settings could not be read.": "Filindstillingerne kunne ikke læses.",
     "Share files for a whole number of days.": "Del filer i et helt antal dage.",
     "Share files for 1 to %s days.": "Del filer i 1 til %s dage.",
-    "Files are shared with {who} for {n} day, to view and edit.": [
+    "_Files are shared with {who} for {n} day, to view and edit._::_Files are shared with {who} for {n} days, to view and edit._": [
         "Filer deles med {who} i {n} dag, til visning og redigering.",
         "Filer deles med {who} i {n} dage, til visning og redigering."
     ],
-    "Files are shared with {who} for {n} day, to view only.": [
+    "_Files are shared with {who} for {n} day, to view only._::_Files are shared with {who} for {n} days, to view only._": [
         "Filer deles med {who} i {n} dag, kun til visning.",
         "Filer deles med {who} i {n} dage, kun til visning."
     ],
-    "You can attach at most {n} file.": [
+    "_You can attach at most {n} file._::_You can attach at most {n} files._": [
         "Du kan højst vedhæfte {n} fil.",
         "Du kan højst vedhæfte {n} filer."
     ],
-    "You can attach at most %n file.": [
+    "_You can attach at most %n file._::_You can attach at most %n files._": [
         "Du kan højst vedhæfte %n fil.",
         "Du kan højst vedhæfte %n filer."
     ],
@@ -240,7 +256,7 @@
     "The name of a task is at most %s characters.": "En opgaves navn er højst %s tegn.",
     "This task is no longer open.": "Denne opgave er ikke længere åben.",
     "This request cannot end while \"%s\" is still open.": "Denne anmodning kan ikke afsluttes, mens \"%s\" stadig er åben.",
-    "A step has at most %n task.": [
+    "_A step has at most %n task._::_A step has at most %n tasks._": [
         "Et trin har højst %n opgave.",
         "Et trin har højst %n opgaver."
     ],
@@ -264,7 +280,7 @@
     "A link opens a page or a form.": "Et link åbner en side eller en formular.",
     "The name of a link is at most %s characters.": "Et links navn er højst %s tegn.",
     "An address is at most %s characters.": "En adresse er højst %s tegn.",
-    "A step has at most %n link.": [
+    "_A step has at most %n link._::_A step has at most %n links._": [
         "Et trin har højst %n link.",
         "Et trin har højst %n links."
     ],
@@ -321,15 +337,15 @@
     "Published": "Udgivet",
     "Unpublished": "Ikke udgivet",
     "Unpublished changes": "Ikke-udgivne ændringer",
-    "Usually within %n working day": [
+    "_Usually within %n working day_::_Usually within %n working days_": [
         "Normalt inden for %n arbejdsdag",
         "Normalt inden for %n arbejdsdage"
     ],
-    "A team can offer at most %n service.": [
+    "_A team can offer at most %n service._::_A team can offer at most %n services._": [
         "Et team kan højst tilbyde %n service.",
         "Et team kan højst tilbyde %n services."
     ],
-    "A service has at most %n step.": [
+    "_A service has at most %n step._::_A service has at most %n steps._": [
         "En service har højst %n trin.",
         "En service har højst %n trin."
     ],
@@ -338,7 +354,7 @@
     "Give the service a name.": "Giv servicen et navn.",
     "TeamHub services": "TeamHub-tjenester",
     "My TeamHub requests": "Mine TeamHub-anmodninger",
-    "%n request": [
+    "_%n request_::_%n requests_": [
         "%n anmodning",
         "%n anmodninger"
     ],
@@ -446,19 +462,19 @@
     "Requests": "Anmodninger",
     "Only an admin of the service team can reassign a request.": "Kun en administrator af serviceteamet kan tildele en anmodning igen.",
     "Choose a period of 7, 30 or 90 days.": "Vælg en periode på 7, 30 eller 90 dage.",
-    "Last {n} day": [
+    "_Last {n} day_::_Last {n} days_": [
         "Seneste {n} dag",
         "Seneste {n} dage"
     ],
-    "{n} hour": [
+    "_{n} hour_::_{n} hours_": [
         "{n} time",
         "{n} timer"
     ],
-    "{n} minute": [
+    "_{n} minute_::_{n} minutes_": [
         "{n} minut",
         "{n} minutter"
     ],
-    "{n} unclaimed request": [
+    "_{n} unclaimed request_::_{n} unclaimed requests_": [
         "{n} anmodning ikke taget",
         "{n} anmodninger ikke taget"
     ],
@@ -584,7 +600,7 @@
     "These people are members through a group or team. Giving someone a higher role adds them to this team directly as well. They keep their group membership.": "Disse personer er medlemmer via en gruppe eller et team. Når du giver nogen en højere rolle, bliver personen også medlem af dette team direkte, gruppemedlemskabet bevares.",
     "via {source}": "via {source}",
     "%1$s needs review": "%1$s skal gennemgås",
-    "%n event in this period": [
+    "_%n event in this period_::_%n events in this period_": [
         "%n begivenhed i denne periode",
         "%n begivenheder i denne periode"
     ],
@@ -727,31 +743,31 @@
     "{name} (unavailable)": "{name} (utilgængelig)",
     "{action}: {title}": "{action}: {title}",
     "%1$s · %2$s": "%1$s · %2$s",
-    "%n attendee": [
+    "_%n attendee_::_%n attendees_": [
         "%n deltager",
         "%n deltagere"
     ],
-    "%n attendee will be invited": [
+    "_%n attendee will be invited_::_%n attendees will be invited_": [
         "%n deltager bliver inviteret",
         "%n deltagere bliver inviteret"
     ],
-    "%n could join online": [
+    "_%n could join online_::_%n could join online_": [
         "%n kunne deltage online",
         "%n kunne deltage online"
     ],
-    "%n has a calendar conflict": [
+    "_%n has a calendar conflict_::_%n have a calendar conflict_": [
         "%n har en kalenderkonflikt",
         "%n har en kalenderkonflikt"
     ],
-    "%n has a conflict": [
+    "_%n has a conflict_::_%n have a conflict_": [
         "%n har en konflikt",
         "%n har en konflikt"
     ],
-    "%n member selected": [
+    "_%n member selected_::_%n members selected_": [
         "%n medlem valgt",
         "%n medlemmer valgt"
     ],
-    "%n resource needs review.": [
+    "_%n resource needs review._::_%n resources need review._": [
         "%n ressource skal gennemgås.",
         "%n ressourcer skal gennemgås."
     ],
@@ -766,7 +782,7 @@
     "+ Connect team folder": "+ Forbind teammappe",
     "+ Create new": "+ Opret ny",
     "+ Create new team folder": "+ Opret ny teammappe",
-    "+{n} other team": [
+    "_+{n} other team_::_+{n} other teams_": [
         "+{n} andet team",
         "+{n} andre teams"
     ],
@@ -789,11 +805,11 @@
     "A team folder is now connected to this team": "En teammappe er nu forbundet til dette team",
     "A kickoff meeting to align the team on scope, timeline, and roles. Mark as done once it's on the calendar.": "Et kickoff-møde for at afstemme teamet om omfang, tidsplan og roller. Marker som færdigt, når det står i kalenderen.",
     "A message with a link to the meeting notes will be posted in the Talk room asking team members to add agenda items.": "En besked med et link til mødenotaterne vil blive postet i Talk-rummet og bede teammedlemmer om at tilføje dagsordenpunkter.",
-    "A new message from TeamHub": [
+    "_A new message from TeamHub_::_{n} new messages from TeamHub_": [
         "En ny besked fra TeamHub",
         "{n} nye beskeder fra TeamHub"
     ],
-    "A new message from TeamHub is waiting for you.": [
+    "_A new message from TeamHub is waiting for you._::_{n} new messages from TeamHub are waiting for you._": [
         "En ny besked fra TeamHub venter på dig.",
         "{n} nye beskeder fra TeamHub venter på dig."
     ],
@@ -1038,11 +1054,11 @@
     "Cancel superseding": "Annuller erstatning",
     "Cancel: make team usable again": "Annuller: gør teamet brugbart igen",
     "Cannot create page: team name not available": "Kan ikke oprette side: teamnavn ikke tilgængeligt",
-    "Cannot delete: in use by {n} entry": [
+    "_Cannot delete: in use by {n} entry_::_Cannot delete: in use by {n} entries_": [
         "Kan ikke slettes: bruges af {n} post",
         "Kan ikke slettes: bruges af {n} poster"
     ],
-    "Cannot delete: status type is in use by {n} entry": [
+    "_Cannot delete: status type is in use by {n} entry_::_Cannot delete: status type is in use by {n} entries_": [
         "Kan ikke slettes: statustype bruges af {n} post",
         "Kan ikke slettes: statustype bruges af {n} poster"
     ],
@@ -1367,7 +1383,7 @@
     "Delete time entry": "Slet tidsregistrering",
     "Delete {label}?": "Slet {label}?",
     "Delete {name}": "Slet {name}",
-    "Delete {n} event": [
+    "_Delete {n} event_::_Delete {n} events_": [
         "Slet {n} begivenhed",
         "Slet {n} begivenheder"
     ],
@@ -1621,7 +1637,7 @@
     "Loading the request…": "Indlæser anmodningen…",
     "Request extension": "Anmod om forlængelse",
     "This request is no longer waiting for a decision. Refresh to update the list.": "Denne anmodning venter ikke længere på en afgørelse. Opdater for at forny listen.",
-    "{n} team is waiting for a decision on its expiration date:": [
+    "_{n} team is waiting for a decision on its expiration date:_::_{n} teams are waiting for a decision on their expiration date:_": [
         "{n} team venter på en afgørelse om sin udløbsdato:",
         "{n} teams venter på en afgørelse om deres udløbsdato:"
     ],
@@ -1823,7 +1839,7 @@
     "Ignore resource {id}": "Ignorér ressource {id}",
     "Image URL (https://…)": "Billed-URL (https://…)",
     "Image attachment": "Billedvedhæftning",
-    "Image cache cleared (%n file removed)": [
+    "_Image cache cleared (%n file removed)_::_Image cache cleared (%n files removed)_": [
         "Billedcache ryddet (%n fil fjernet)",
         "Billedcache ryddet (%n filer fjernet)"
     ],
@@ -2193,7 +2209,7 @@
     "Not installed": "Ikke installeret",
     "not readable: requester and timing are unknown, so Waiting for others falls back to rule membership": "ikke læsbar: anmoder og tidspunkt er ukendte, så Venter på andre falder tilbage på regelmedlemskab",
     "not readable": "ikke læsbar",
-    "Not set": "Not set",
+    "Not set": "Ikke angivet",
     "Not user-selectable": "Ikke brugervalgbar",
     "Note": "Note",
     "Note (optional)": "Note (valgfri)",
@@ -2230,7 +2246,7 @@
     "Team name cannot consist only of dots.": "Teamnavnet må ikke kun bestå af punktummer.",
     "A team with this name already exists. Team names must be unique.": "Der findes allerede et team med dette navn. Teamnavne skal være unikke.",
     "Only members of the selected groups can create teams. Leave empty to allow all users.": "Kun medlemmer af de valgte grupper kan oprette teams. Lad det stå tomt for at tillade alle brugere.",
-    "Only proposals in the %n selected category will be added.": [
+    "_Only proposals in the %n selected category will be added._::_Only proposals in the %n selected categories will be added._": [
         "Kun forslag i den %n valgte kategori tilføjes.",
         "Kun forslag i de %n valgte kategorier tilføjes."
     ],
@@ -2275,7 +2291,7 @@
     "Other": "Andet",
     "Over your licensed seats: {used} of {cap} used.": "Over dine licenserede pladser: {used} af {cap} brugt.",
     "Overdue": "Forfalden",
-    "Overdue by {n} day": [
+    "_Overdue by {n} day_::_Overdue by {n} days_": [
         "{n} dag forsinket",
         "{n} dage forsinket"
     ],
@@ -2467,7 +2483,7 @@
     "Remove {name} from the project time budget? Their existing logs are kept for the audit trail.": "Fjern {name} fra projektets tidsbudget? De eksisterende registreringer bevares som revisionsspor.",
     "Remove {user} from all teams": "Fjern {user} fra alle teams",
     "Remove {user} from {team}": "Fjern {user} fra {team}",
-    "Removed from {n} team": [
+    "_Removed from {n} team_::_Removed from {n} teams_": [
         "Fjernet fra {n} team",
         "Fjernet fra {n} teams"
     ],
@@ -2510,7 +2526,7 @@
     "Resources pending review": "Ressourcer afventer gennemgang",
     "Restore": "Gendan",
     "Restore team {name}": "Gendan team {name}",
-    "Restricted to {n} group": [
+    "_Restricted to {n} group_::_Restricted to {n} groups_": [
         "Begrænset til {n} gruppe",
         "Begrænset til {n} grupper"
     ],
@@ -2649,7 +2665,7 @@
     "Short note": "Kort note",
     "Short summary of the feedback": "Kort resumé af feedbacken",
     "Show": "Vis",
-    "Show %n ignored resource": [
+    "_Show %n ignored resource_::_Show %n ignored resources_": [
         "Vis %n ignoreret ressource",
         "Vis %n ignorerede ressourcer"
     ],
@@ -2875,13 +2891,13 @@
     "The team itself and every other resource are unaffected. Only Collectives is being removed.": "Selve teamet og alle andre ressourcer påvirkes ikke. Kun Collectives fjernes.",
     "The team will be hidden immediately and permanently deleted in 30 days. An administrator can restore it before then. No archive will be produced.": "Teamet skjules straks og slettes permanent om 30 dage. En administrator kan gendanne det inden da. Der produceres intet arkiv.",
     "The team will be hidden immediately and permanently deleted in 60 days. An administrator can restore it before then. No archive will be produced.": "Teamet skjules straks og slettes permanent om 60 dage. En administrator kan gendanne det inden da. Der produceres intet arkiv.",
-    "The team will be hidden immediately and permanently deleted in {n} day. Administrators can restore it before that deadline.": [
+    "_The team will be hidden immediately and permanently deleted in {n} day. Administrators can restore it before that deadline._::_The team will be hidden immediately and permanently deleted in {n} days. Administrators can restore it before that deadline._": [
         "Teamet vil straks blive skjult og permanent slettet om {n} dag. Administratorer kan gendanne det inden den frist.",
         "Teamet vil straks blive skjult og permanent slettet om {n} dage. Administratorer kan gendanne det inden den frist."
     ],
     "The team will be permanently deleted immediately after the archive is produced. This cannot be undone.": "Teamet slettes permanent straks efter arkivet er oprettet. Dette kan ikke fortrydes.",
     "The team will be permanently deleted immediately. No archive bundle is produced.": "Teamet slettes permanent med det samme. Ingen arkivpakke produceres.",
-    "The team will be permanently deleted in {n} day. Administrators can restore it.": [
+    "_The team will be permanently deleted in {n} day. Administrators can restore it._::_The team will be permanently deleted in {n} days. Administrators can restore it._": [
         "Teamet vil blive permanent slettet om {n} dag. Administratorer kan gendanne det.",
         "Teamet vil blive permanent slettet om {n} dage. Administratorer kan gendanne det."
     ],
@@ -2901,7 +2917,7 @@
     "Third-party integrations": "Tredjepartsintegrationer",
     "This action cannot be easily undone.": "Denne handling kan ikke nemt fortrydes.",
     "This action cannot be undone.": "Denne handling kan ikke fortrydes.",
-    "This building has {n} floor": [
+    "_This building has {n} floor_::_This building has {n} floors_": [
         "Denne bygning har {n} etage",
         "Denne bygning har {n} etager"
     ],
@@ -2914,7 +2930,7 @@
     "This feature requires a license: ask your admin.": "Denne funktion kræver en licens: spørg din administrator.",
     "This file no longer exists.": "Denne fil findes ikke længere.",
     "This file type cannot be previewed read-only in the browser. Download it to view its contents.": "Denne filtype kan ikke forhåndsvises skrivebeskyttet i browseren. Download den for at se dens indhold.",
-    "This floor has {n} room": [
+    "_This floor has {n} room_::_This floor has {n} rooms_": [
         "Denne etage har {n} lokale",
         "Denne etage har {n} lokaler"
     ],
@@ -3168,12 +3184,12 @@
     "Yesterday": "I går",
     "You approved this decision": "Du godkendte denne beslutning",
     "You approved this file": "Du godkendte denne fil",
-    "You are about to remove {user} from {n} team. This cannot be undone.": [
+    "_You are about to remove {user} from {n} team. This cannot be undone._::_You are about to remove {user} from {n} teams. This cannot be undone._": [
         "Du er ved at fjerne {user} fra {n} team. Dette kan ikke fortrydes.",
         "Du er ved at fjerne {user} fra {n} teams. Dette kan ikke fortrydes."
     ],
     "You are about to withdraw this decision and open a new proposal in its place.": "Du er ved at trække denne beslutning tilbage og åbne et nyt forslag i dens sted.",
-    "You are an approver and this request has been waiting %n day": [
+    "_You are an approver and this request has been waiting %n day_::_You are an approver and this request has been waiting %n days_": [
         "Du er godkender, og denne anmodning har ventet i %n dag",
         "Du er godkender, og denne anmodning har ventet i %n dage"
     ],
@@ -3209,7 +3225,7 @@
     "You’re all caught up": "Du er helt ajour",
     "You're getting the project off the ground. Here's what to focus on:": "Du er i gang med at få projektet i gang. Her er, hvad du skal fokusere på:",
     "You're setting up your project. Here's what to focus on:": "Du er ved at sætte dit projekt op. Her er, hvad du bør fokusere på:",
-    "Your approval request has been waiting %n day": [
+    "_Your approval request has been waiting %n day_::_Your approval request has been waiting %n days_": [
         "Din godkendelsesanmodning har ventet i %n dag",
         "Din godkendelsesanmodning har ventet i %n dage"
     ],
@@ -3275,7 +3291,7 @@
     "e.g. Weekly sync": "f.eks. Ugentlig sync",
     "e.g. en/teamhub": "f.eks. da/teamhub",
     "email address": "e-mailadresse",
-    "grace: {n} day left": [
+    "_grace: {n} day left_::_grace: {n} days left_": [
         "henstand: {n} dag tilbage",
         "henstand: {n} dage tilbage"
     ],
@@ -3320,7 +3336,7 @@
     "{available} of {total} available, {count} at {building}": "{available} af {total} tilgængelige, {count} på {building}",
     "{available} of {total} available, {count} at {room}": "{available} af {total} tilgængelige, {count} i {room}",
     "{cell}: {type}. Click to change.": "{cell}: {type}. Klik for at ændre.",
-    "{count} project member": [
+    "_{count} project member_::_{count} project members_": [
         "{count} projektmedlem",
         "{count} projektmedlemmer"
     ],
@@ -3338,7 +3354,7 @@
     "{name} has been approved": "{name} er godkendt",
     "{name} is now the team owner. You are now a moderator.": "{name} er nu teamejer. Du er nu moderator.",
     "{name} saved": "{name} gemt",
-    "{n} altered file": [
+    "_{n} altered file_::_{n} altered files_": [
         "{n} ændret fil",
         "{n} ændrede filer"
     ],
@@ -3354,71 +3370,71 @@
         "{n} kalender",
         "{n} kalendere"
     ],
-    "{n} comment": [
+    "_{n} comment_::_{n} comments_": [
         "{n} kommentar",
         "{n} kommentarer"
     ],
-    "{n} day": [
+    "_{n} day_::_{n} days_": [
         "{n} dag",
         "{n} dage"
     ],
-    "{n} day ago": [
+    "_{n} day ago_::_{n} days ago_": [
         "{n} dag siden",
         "{n} dage siden"
     ],
-    "{n} day left": [
+    "_{n} day left_::_{n} days left_": [
         "{n} dag tilbage",
         "{n} dage tilbage"
     ],
-    "{n} decision": [
+    "_{n} decision_::_{n} decisions_": [
         "{n} beslutning",
         "{n} beslutninger"
     ],
-    "{n} deleted user found in team memberships.": [
+    "_{n} deleted user found in team memberships._::_{n} deleted users found in team memberships._": [
         "{n} slettet bruger fundet i teammedlemskaber.",
         "{n} slettede brugere fundet i teammedlemskaber."
     ],
-    "{n} event could not be deleted": [
+    "_{n} event could not be deleted_::_{n} events could not be deleted_": [
         "{n} begivenhed kunne ikke slettes",
         "{n} begivenheder kunne ikke slettes"
     ],
-    "{n} event deleted": [
+    "_{n} event deleted_::_{n} events deleted_": [
         "{n} begivenhed slettet",
         "{n} begivenheder slettet"
     ],
-    "{n} event selected": [
+    "_{n} event selected_::_{n} events selected_": [
         "{n} begivenhed valgt",
         "{n} begivenheder valgt"
     ],
     "{n} hour ago": "{n} time siden",
     "{n} hours ago": "{n} timer siden",
-    "{n} item awaiting your approval": [
+    "_{n} item awaiting your approval_::_{n} items awaiting your approval_": [
         "{n} element afventer din godkendelse",
         "{n} elementer afventer din godkendelse"
     ],
-    "{n} lane over budget": [
+    "_{n} lane over budget_::_{n} lanes over budget_": [
         "{n} bane over budget",
         "{n} baner over budget"
     ],
-    "{n} member invited": [
+    "_{n} member invited_::_{n} members invited_": [
         "{n} medlem inviteret",
         "{n} medlemmer inviteret"
     ],
-    "{n} member over hours": [
+    "_{n} member over hours_::_{n} members over hours_": [
         "{n} medlem over timer",
         "{n} medlemmer over timer"
     ],
     "{n} min ago": "{n} min siden",
-    "{n} missing file": [
+    "_{n} missing file_::_{n} missing files_": [
         "{n} manglende fil",
         "{n} manglende filer"
     ],
     "{n} of {total} votes": "{n} af {total} stemmer",
-    "{n} open decision": [
+    "_{n} open decision_::_{n} open decisions_": [
         "{n} åben beslutning",
         "{n} åbne beslutninger"
     ],
-    "{n} over": [
+    "_{n} over_::_{n} over_": [
         "{n} over",
         "{n} over"
     ],
@@ -3427,35 +3443,35 @@
         "{n} svar: åbn chat",
         "{n} svar: åbn chat"
     ],
-    "{n} team": [
+    "_{n} team_::_{n} teams_": [
         "{n} team",
         "{n} teams"
     ],
-    "{n} team selected": [
+    "_{n} team selected_::_{n} teams selected_": [
         "{n} team valgt",
         "{n} teams valgt"
     ],
-    "{n} type allowed": [
+    "_{n} type allowed_::_{n} types allowed_": [
         "{n} type tilladt",
         "{n} typer tilladt"
     ],
-    "{n} unassigned card": [
+    "_{n} unassigned card_::_{n} unassigned cards_": [
         "{n} ikke-tildelt kort",
         "{n} ikke-tildelte kort"
     ],
-    "{n} unassigned card in {board}: open board": [
+    "_{n} unassigned card in {board}: open board_::_{n} unassigned cards in {board}: open board_": [
         "{n} ikke-tildelt kort i {board}: åbn board",
         "{n} ikke-tildelte kort i {board}: åbn board"
     ],
-    "{n} unexpected file": [
+    "_{n} unexpected file_::_{n} unexpected files_": [
         "{n} uventet fil",
         "{n} uventede filer"
     ],
-    "{n} unsolved question": [
+    "_{n} unsolved question_::_{n} unsolved questions_": [
         "{n} uløst spørgsmål",
         "{n} uløste spørgsmål"
     ],
-    "{n} user": [
+    "_{n} user_::_{n} users_": [
         "{n} bruger",
         "{n} brugere"
     ],
@@ -3479,11 +3495,11 @@
     "{team} is ready": "{team} er klar",
     "{title} disabled for this team": "{title} deaktiveret for dette team",
     "{title} enabled for this team": "{title} aktiveret for dette team",
-    "{total} total vote": [
+    "_{total} total vote_::_{total} total votes_": [
         "{total} stemme i alt",
         "{total} stemmer i alt"
     ],
-    "{total} total vote: Poll closed": [
+    "_{total} total vote: Poll closed_::_{total} total votes: Poll closed_": [
         "{total} stemme i alt: Afstemning lukket",
         "{total} stemmer i alt: Afstemning lukket"
     ],
@@ -3585,7 +3601,7 @@
     "Write a reply…": "Skriv et svar…",
     "You cannot post in this conversation.": "Du kan ikke skrive i denne samtale.",
     "This role does not allow commenting in this team.": "Denne rolle tillader ikke kommentarer i dette team.",
-    "{n} reply": [
+    "_{n} reply_::_{n} replies_": [
         "{n} svar",
         "{n} svar"
     ],
@@ -3603,7 +3619,7 @@
     "Try widening the period, or clearing a team or type selection.": "Prøv at udvide perioden, eller ryd et team- eller typevalg.",
     "Turn on at least one row under Show in the Feed control panel.": "Slå mindst én række til under Vis i Feed-styringspanelet.",
     "You’ve reached the end": "Du er nået til slutningen",
-    "{n} item shown": [
+    "_{n} item shown_::_{n} items shown_": [
         "{n} element vist",
         "{n} elementer vist"
     ],
@@ -3629,7 +3645,7 @@
     "Scans every user-created team for system bits that should never appear on a user team (CFG_SINGLE, CFG_PERSONAL, CFG_SYSTEM, CFG_NO_OWNER, CFG_HIDDEN, CFG_BACKEND). Nextcloud Circles refuses any config update on a team carrying one of these, so apps can no longer change it. Use Repair to reset a team's config to clean defaults.": "Scanner alle brugeroprettede teams for systembits, der aldrig bør forekomme på et brugerteam (CFG_SINGLE, CFG_PERSONAL, CFG_SYSTEM, CFG_NO_OWNER, CFG_HIDDEN, CFG_BACKEND). Nextcloud Circles afviser enhver konfigurationsopdatering på et team med en af disse bits, så apps ikke længere kan ændre det. Brug Reparér for at nulstille et teams konfiguration til rene standardværdier.",
     "These teams carry the CFG_APP flag, which a Nextcloud app sets to mark the team as managed by it: enabling a Collective does this. It is not corruption and needs no repair. The flag stays behind if the app that set it is later removed.": "Disse teams bærer CFG_APP-flaget, som en Nextcloud-app sætter for at markere teamet som administreret af den: at aktivere et Collective gør dette. Det er ikke en fejl og kræver ingen reparation. Flaget bliver tilbage, hvis den app, der satte det, senere fjernes.",
     "Current config: {config}. App flag: {appBits}": "Nuværende konfiguration: {config}. App-flag: {appBits}",
-    "{n} team is claimed by another app": [
+    "_{n} team is claimed by another app_::_{n} teams are claimed by another app_": [
         "{n} team er gjort krav på af en anden app",
         "{n} teams er gjort krav på af en anden app"
     ],
@@ -3692,27 +3708,27 @@
     "{message} ({error})": "{message} ({error})",
     "Bulk team import": "Masseimport af teams",
     "Create many teams at once from a CSV file, each with its own owner and team admins.": "Opret mange teams på én gang ud fra en CSV-fil, hver med sin egen ejer og sine egne teamadministratorer.",
-    "{n} team ready": [
+    "_{n} team ready_::_{n} teams ready_": [
         "{n} team klar",
         "{n} teams klar"
     ],
-    "{n} created": [
+    "_{n} created_::_{n} created_": [
         "{n} oprettet",
         "{n} oprettet"
     ],
-    "{n} skipped": [
+    "_{n} skipped_::_{n} skipped_": [
         "{n} sprunget over",
         "{n} sprunget over"
     ],
-    "{n} error": [
+    "_{n} error_::_{n} errors_": [
         "{n} fejl",
         "{n} fejl"
     ],
-    "Create {n} team": [
+    "_Create {n} team_::_Create {n} teams_": [
         "Opret {n} team",
         "Opret {n} teams"
     ],
-    "{n} team will be created, with its apps, privacy settings and modules. This cannot be undone from here. A team created by mistake has to be deleted individually.": [
+    "_{n} team will be created, with its apps, privacy settings and modules. This cannot be undone from here. A team created by mistake has to be deleted individually._::_{n} teams will be created, each with its apps, privacy settings and modules. This cannot be undone from here. A team created by mistake has to be deleted individually._": [
         "{n} team oprettes med sine apps, privatlivsindstillinger og moduler. Det kan ikke fortrydes herfra, et team, der er oprettet ved en fejl, skal slettes enkeltvis.",
         "{n} teams oprettes, hver med sine apps, privatlivsindstillinger og moduler. Det kan ikke fortrydes herfra, et team, der er oprettet ved en fejl, skal slettes enkeltvis."
     ],
@@ -3834,7 +3850,7 @@
     "Audit log retention details": "Detaljer om opbevaring af revisionslog",
     "Audit log:": "Revisionslog:",
     "Events are appended and purged in bulk after the retention window. No code path updates or deletes an individual row, so a record cannot be rewritten before it expires.": "Hændelser tilføjes og slettes samlet efter opbevaringsperioden. Ingen kodesti opdaterer eller sletter en enkelt række, så en post kan ikke omskrives, før den udløber.",
-    "{n} day retention": [
+    "_{n} day retention_::_{n} days retention_": [
         "{n} dags opbevaring",
         "{n} dages opbevaring"
     ],
@@ -3916,7 +3932,7 @@
         "%n låst",
         "%n låst"
     ],
-    "%n setting": [
+    "_%n setting_::_%n settings_": [
         "%n indstilling",
         "%n indstillinger"
     ],
@@ -3927,7 +3943,7 @@
     "Profiles": "Profiler",
     "Team expiration": "Teamudløb",
     "The date the picker opens on when someone creates this kind of team. 0 leaves it on the standard six months.": "Den dato, vælgeren åbner på, når nogen opretter denne slags team. Ved 0 er det fortsat de sædvanlige seks måneder.",
-    "Default %n day": [
+    "_Default %n day_::_Default %n days_": [
         "Standard %n dag",
         "Standard %n dage"
     ],
@@ -3968,7 +3984,7 @@
     "No pages yet": "Ingen sider endnu",
     "Expand {title}": "Udvid {title}",
     "Collapse {title}": "Sammenfold {title}",
-    "Only the first %n page is listed": [
+    "_Only the first %n page is listed_::_Only the first %n pages are listed_": [
         "Kun %n side vises",
         "Kun de første %n sider vises"
     ],
@@ -4005,35 +4021,35 @@
     "Teams to create": "Teams der skal oprettes",
     "This template does not allow an expiration date.": "Denne skabelon tillader ikke en udløbsdato.",
     "{done} of {total}": "{done} af {total}",
-    "%n created": [
+    "_%n created_::_%n created_": [
         "%n oprettet",
         "%n oprettet"
     ],
-    "%n failed": [
+    "_%n failed_::_%n failed_": [
         "%n mislykkedes",
         "%n mislykkedes"
     ],
-    "%n row ready": [
+    "_%n row ready_::_%n rows ready_": [
         "%n række klar",
         "%n rækker klar"
     ],
-    "%n skipped": [
+    "_%n skipped_::_%n skipped_": [
         "%n sprunget over",
         "%n sprunget over"
     ],
-    "%n team": [
+    "_%n team_::_%n teams_": [
         "%n team",
         "%n teams"
     ],
-    "%n with a warning": [
+    "_%n with a warning_::_%n with warnings_": [
         "%n med en advarsel",
         "%n med advarsler"
     ],
-    "%n with an error": [
+    "_%n with an error_::_%n with errors_": [
         "%n med en fejl",
         "%n med fejl"
     ],
-    "Create %n team": [
+    "_Create %n team_::_Create %n teams_": [
         "Opret %n team",
         "Opret %n teams"
     ],
@@ -4048,7 +4064,7 @@
     "One row per team. Apps and settings come from the template and policy you pick, and can be changed per team afterwards. Rows without a name are ignored, so you can leave spare rows empty.": "Én række pr. team. Apps og indstillinger kommer fra den skabelon og politik, du vælger, og kan ændres pr. team bagefter. Rækker uden navn springes over, så du kan lade tomme rækker stå.",
     "Search a person…": "Søg efter en person…",
     "This row cannot be created.": "Denne række kan ikke oprettes.",
-    "%n row needs attention before these teams can be created.": [
+    "_%n row needs attention before these teams can be created._::_%n rows need attention before these teams can be created._": [
         "%n række skal rettes, før disse teams kan oprettes.",
         "%n rækker skal rettes, før disse teams kan oprettes."
     ],
@@ -4056,17 +4072,17 @@
     "Creating several teams at once requires a license.": "At oprette flere teams på én gang kræver en licens.",
     "Templates and policy profiles": "Skabeloner og politikprofiler",
     "{n} of {total} adjusted": "{n} af {total} justeret",
-    "{n} template, none adjusted": [
+    "_{n} template, none adjusted_::_{n} templates, none adjusted_": [
         "{n} skabelon, ingen justeret",
         "{n} skabeloner, ingen justeret"
     ],
     "Templates decide which apps and modules a new team is given, and how long it may live. Adjust them under Policy → Team templates.": "Skabeloner bestemmer, hvilke apps og moduler et nyt team får, og hvor længe det må bestå. Justér dem under Politik → Teamskabeloner.",
     "Policy profiles": "Politikprofiler",
-    "{total} defined, {n} team classified": [
+    "_{total} defined, {n} team classified_::_{total} defined, {n} teams classified_": [
         "{total} defineret, {n} team klassificeret",
         "{total} defineret, {n} teams klassificeret"
     ],
-    "{n} profile, no team classified": [
+    "_{n} profile, no team classified_::_{n} profiles, no team classified_": [
         "{n} profil, intet team klassificeret",
         "{n} profiler, intet team klassificeret"
     ],
@@ -4076,7 +4092,7 @@
     "Team profiles:": "Teamprofiler:",
     "No teams classified": "Ingen teams klassificeret",
     "Team profile compliance details": "Detaljer om overholdelse af teamprofiler",
-    "{n} team classified, {ok} still matching": [
+    "_{n} team classified, {ok} still matching_::_{n} teams classified, {ok} still matching_": [
         "{n} team klassificeret, {ok} passer stadig",
         "{n} teams klassificeret, {ok} passer stadig"
     ],
@@ -4106,7 +4122,7 @@
     "This team already matches the profile. Applying it changes no setting.": "Dette team svarer allerede til profilen. At anvende den ændrer ingen indstilling.",
     "Not changed by applying: existing members are never removed. The team will be reported as non-compliant until they are.": "Ændres ikke ved anvendelse: eksisterende medlemmer fjernes aldrig. Teamet meldes som ikke-overholdende, indtil de er det.",
     "These integrations are switched off for the team: {apps}. Their own data is not deleted.": "Disse integrationer slås fra for teamet: {apps}. Deres egne data slettes ikke.",
-    "The profile also governs {n} setting this team already matches.": [
+    "_The profile also governs {n} setting this team already matches._::_The profile also governs {n} settings this team already matches._": [
         "Profilen styrer også {n} indstilling, som dette team allerede opfylder.",
         "Profilen styrer også {n} indstillinger, som dette team allerede opfylder."
     ],
@@ -4115,7 +4131,7 @@
     "The team keeps its current settings and stops being checked against a profile.": "Teamet beholder sine nuværende indstillinger og tjekkes ikke længere mod en profil.",
     "Apply the profile": "Anvend profilen",
     "Profile applied to {team}.": "Profil anvendt på {team}.",
-    "Profile applied. {n} setting could not be changed and is reported instead. See the team’s profile chip.": [
+    "_Profile applied. {n} setting could not be changed and is reported instead. See the team’s profile chip._::_Profile applied. {n} settings could not be changed and are reported instead. See the team’s profile chip._": [
         "Profil anvendt. {n} indstilling kunne ikke ændres og meldes i stedet, se teamets profilmærkat.",
         "Profil anvendt. {n} indstillinger kunne ikke ændres og meldes i stedet, se teamets profilmærkat."
     ],
@@ -4170,11 +4186,11 @@
     "This review is already closed.": "Denne gennemgang er allerede afsluttet.",
     "This review no longer exists.": "Denne gennemgang findes ikke længere.",
     "That did not work. Try again.": "Det virkede ikke. Prøv igen.",
-    "There is already %n open review on this file.": [
+    "_There is already %n open review on this file._::_There are already %n open reviews on this file._": [
         "Der er allerede %n åben gennemgang af denne fil.",
         "Der er allerede %n åbne gennemgange af denne fil."
     ],
-    "%n team member will be asked.": [
+    "_%n team member will be asked._::_%n team members will be asked._": [
         "%n teammedlem bliver spurgt.",
         "%n teammedlemmer bliver spurgt."
     ],
@@ -4223,23 +4239,23 @@
     "failed": "mislykkedes",
     "needs {apps} added by hand": "kræver, at {apps} tilføjes manuelt",
     "no longer uses this": "bruger ikke længere dette",
-    "Apply to all {n} team": [
+    "_Apply to all {n} team_::_Apply to all {n} teams_": [
         "Anvend på alle {n} team",
         "Anvend på alle {n} teams"
     ],
-    "Apply to {n} team": [
+    "_Apply to {n} team_::_Apply to {n} teams_": [
         "Anvend på {n} team",
         "Anvend på {n} teams"
     ],
-    "{eligible} of {total} team still matches what this said before the change.": [
+    "_{eligible} of {total} team still matches what this said before the change._::_{eligible} of {total} teams still match what this said before the change._": [
         "{eligible} af {total} team matcher stadig det, dette sagde før ændringen.",
         "{eligible} af {total} teams matcher stadig det, dette sagde før ændringen."
     ],
-    "{n} more team was not processed in this run. Save the change again to continue.": [
+    "_{n} more team was not processed in this run. Save the change again to continue._::_{n} more teams were not processed in this run. Save the change again to continue._": [
         "{n} yderligere team blev ikke behandlet i denne kørsel. Gem ændringen igen for at fortsætte.",
         "{n} yderligere teams blev ikke behandlet i denne kørsel. Gem ændringen igen for at fortsætte."
     ],
-    "{n} team updated.": [
+    "_{n} team updated._::_{n} teams updated._": [
         "{n} team opdateret.",
         "{n} teams opdateret."
     ],
@@ -4255,11 +4271,11 @@
     "left for you: {apps}": "overladt til dig: {apps}",
     "not applied: {fields}": "ikke anvendt: {fields}",
     "removed {apps}": "{apps} fjernet",
-    "{n} needs attention.": [
+    "_{n} needs attention._::_{n} need attention._": [
         "{n} kræver opmærksomhed.",
         "{n} kræver opmærksomhed."
     ],
-    "{n} setting applied": [
+    "_{n} setting applied_::_{n} settings applied_": [
         "{n} indstilling anvendt",
         "{n} indstillinger anvendt"
     ],
@@ -4380,7 +4396,7 @@
     "OpenProject data could not be loaded.": "OpenProject-data kunne ikke indlæses.",
     "Project info": "Projektinfo",
     "Work package": "Arbejdspakke",
-    "Show {n} more work package": [
+    "_Show {n} more work package_::_Show {n} more work packages_": [
         "Vis {n} arbejdspakke mere",
         "Vis {n} arbejdspakker mere"
     ],
@@ -4406,7 +4422,7 @@
     "My OpenProject work": "Mit OpenProject-arbejde",
     "OpenProject project": "OpenProject-projekt",
     "My work": "Mit arbejde",
-    "Due in {n} day": [
+    "_Due in {n} day_::_Due in {n} days_": [
         "Forfalder om {n} dag",
         "Forfalder om {n} dage"
     ],
@@ -4414,7 +4430,7 @@
         "{shown} af {n} arbejdspakke",
         "{shown} af {n} arbejdspakker"
     ],
-    "Showing the first {n} match. Narrow the search to find others.": [
+    "_Showing the first {n} match. Narrow the search to find others._::_Showing the first {n} matches. Narrow the search to find others._": [
         "Kun det første resultat vises. Indsnævr søgningen for at finde andre.",
         "Kun de første {n} resultater vises. Indsnævr søgningen for at finde andre."
     ],
@@ -4548,12 +4564,12 @@
     "Setup stopped": "Opsætning stoppet",
     "Setup rolled back": "Opsætning rullet tilbage",
     "Existing, will be linked": "Eksisterende, linkes",
-    "Not available": "Not available",
+    "Not available": "Ikke tilgængelig",
     "Required, not installed": "Påkrævet, ikke installeret",
     "TeamHub dashboard": "TeamHub-dashboard",
     "Guest": "Gæst",
     "Open project in OpenProject": "Åbn projektet i OpenProject",
-    "{n} member has no OpenProject account. Decide what to do with them before continuing.": [
+    "_{n} member has no OpenProject account. Decide what to do with them before continuing._::_{n} members have no OpenProject account. Decide what to do with them before continuing._": [
         "{n} medlem har ingen OpenProject-konto. Beslut, hvad der skal ske, før du fortsætter.",
         "{n} medlemmer har ingen OpenProject-konto. Beslut, hvad der skal ske, før du fortsætter."
     ],
@@ -4571,15 +4587,15 @@
     "Add to the team only": "Tilføj kun til teamet",
     "Leave out": "Udelad",
     "Team page, {apps}": "Teamside, {apps}",
-    "{n} attempt": [
+    "_{n} attempt_::_{n} attempts_": [
         "{n} forsøg",
         "{n} forsøg"
     ],
-    "{n} member could not be added in OpenProject": [
+    "_{n} member could not be added in OpenProject_::_{n} members could not be added in OpenProject_": [
         "{n} medlem kunne ikke tilføjes i OpenProject",
         "{n} medlemmer kunne ikke tilføjes i OpenProject"
     ],
-    "{n} member added in OpenProject": [
+    "_{n} member added in OpenProject_::_{n} members added in OpenProject_": [
         "{n} medlem tilføjet i OpenProject",
         "{n} medlemmer tilføjet i OpenProject"
     ],
@@ -4597,19 +4613,19 @@
     "Created {name}": "{name} oprettet",
     "The project folder OpenProject manages is linked": "Projektmappen, som OpenProject administrerer, er linket",
     "Existing resource kept": "Eksisterende ressource bevaret",
-    "Add {n} missing member to OpenProject": [
+    "_Add {n} missing member to OpenProject_::_Add {n} missing members to OpenProject_": [
         "Tilføj {n} manglende medlem til OpenProject",
         "Tilføj {n} manglende medlemmer til OpenProject"
     ],
-    "{n} member is in step on both sides.": [
+    "_{n} member is in step on both sides._::_{n} members are in step on both sides._": [
         "{n} medlem stemmer overens på begge sider.",
         "{n} medlemmer stemmer overens på begge sider."
     ],
-    "OpenProject refused {n} member.": [
+    "_OpenProject refused {n} member._::_OpenProject refused {n} members._": [
         "OpenProject afviste {n} medlem.",
         "OpenProject afviste {n} medlemmer."
     ],
-    "Added {n} member to the project.": [
+    "_Added {n} member to the project._::_Added {n} members to the project._": [
         "{n} medlem tilføjet til projektet.",
         "{n} medlemmer tilføjet til projektet."
     ],
@@ -4683,22 +4699,22 @@
     "{source} answered slowly, so not every project was read this time. Refresh to try again.": "{source} svarede langsomt, så ikke alle projekter blev læst denne gang. Opdater for at prøve igen.",
     "{source} no longer accepts your connection. Reconnect your account in your personal settings.": "{source} accepterer ikke længere din forbindelse. Forbind din konto igen i dine personlige indstillinger.",
     "Opens in {app}, in a new tab": "Åbner i {app}, i en ny fane",
-    "Milestone in {n} day: {subject}": [
+    "_Milestone in {n} day: {subject}_::_Milestone in {n} days: {subject}_": [
         "Milepæl om {n} dag: {subject}",
         "Milepæl om {n} dage: {subject}"
     ],
     "Milestone today: {subject}": "Milepæl i dag: {subject}",
     "Your attention": "Til dig",
     "{n} of your work packages due within {days} days, {today} today": "{n} af dine arbejdspakker forfalder inden for {days} dage, {today} i dag",
-    "{n} of your work packages is due within {days} days": [
+    "_{n} of your work packages is due within {days} days_::_{n} of your work packages are due within {days} days_": [
         "{n} af dine arbejdspakker forfalder inden for {days} dage",
         "{n} af dine arbejdspakker forfalder inden for {days} dage"
     ],
-    "{n} of your work packages is overdue": [
+    "_{n} of your work packages is overdue_::_{n} of your work packages are overdue_": [
         "{n} af dine arbejdspakker er forfalden",
         "{n} af dine arbejdspakker er forfaldne"
     ],
-    "{n} work package changed in the last 7 days": [
+    "_{n} work package changed in the last 7 days_::_{n} work packages changed in the last 7 days_": [
         "{n} arbejdspakke ændret de sidste 7 dage",
         "{n} arbejdspakker ændret de sidste 7 dage"
     ],
@@ -4711,12 +4727,12 @@
     "All projects": "Alle projekter",
     "All work types": "Alle arbejdstyper",
     "Work type": "Arbejdstype",
-    "Overdue by %n day": [
+    "_Overdue by %n day_::_Overdue by %n days_": [
         "%n dag forsinket",
         "%n dage forsinket"
     ],
     "Due tomorrow": "Forfalder i morgen",
-    "Due in %n day": [
+    "_Due in %n day_::_Due in %n days_": [
         "Forfalder om %n dag",
         "Forfalder om %n dage"
     ],
@@ -4725,7 +4741,7 @@
     "Completed in OpenProject": "Afsluttet i OpenProject",
     "Milestone today": "Milepæl i dag",
     "Milestone tomorrow": "Milepæl i morgen",
-    "Milestone in %n day": [
+    "_Milestone in %n day_::_Milestone in %n days_": [
         "Milepæl om %n dag",
         "Milepæl om %n dage"
     ],
@@ -4975,7 +4991,7 @@
     "This workflow is blocked; lift the block first.": "Denne arbejdsgang er blokeret; ophæv blokeringen først.",
     "You are not part of this workflow.": "Du er ikke en del af denne arbejdsgang.",
     "Workflow not found.": "Arbejdsgang ikke fundet.",
-    "You already asked for an update on this step; you can ask again in %n hour.": [
+    "_You already asked for an update on this step; you can ask again in %n hour._::_You already asked for an update on this step; you can ask again in %n hours._": [
         "Du har allerede bedt om en opdatering på dette trin; du kan spørge igen om %n time.",
         "Du har allerede bedt om en opdatering på dette trin; du kan spørge igen om %n timer."
     ],
@@ -5122,15 +5138,15 @@
     "That team does not answer requests.": "Det team besvarer ikke anmodninger.",
     "The service team creates the team": "Serviceteamet opretter teamet",
     "The owner or a moderator of the team you ask from approves the request; the service team then creates the team and you confirm it.": "Ejeren eller en moderator af det team, du anmoder fra, godkender anmodningen; derefter opretter serviceteamet teamet, og du bekræfter det.",
-    "%n person can work the queue.": [
+    "_%n person can work the queue._::_%n people can work the queue._": [
         "%n person kan arbejde i køen.",
         "%n personer kan arbejde i køen."
     ],
-    "%n person can work the queue right now.": [
+    "_%n person can work the queue right now._::_%n people can work the queue right now._": [
         "%n person kan arbejde i køen lige nu.",
         "%n personer kan arbejde i køen lige nu."
     ],
-    "{n} person can work the queue.": [
+    "_{n} person can work the queue._::_{n} people can work the queue._": [
         "{n} person kan arbejde i køen.",
         "{n} personer kan arbejde i køen."
     ],
@@ -5187,7 +5203,7 @@
     "%s is now in TeamHub": "%s er nu i TeamHub",
     "{team} was not added to TeamHub": "{team} blev ikke føjet til TeamHub",
     "%s was not added to TeamHub": "%s blev ikke føjet til TeamHub",
-    "{n} to review": [
+    "_{n} to review_::_{n} to review_": [
         "{n} at gennemgå",
         "{n} at gennemgå"
     ],
@@ -5368,7 +5384,7 @@
     "%s answered your review request": "%s har besvaret din anmodning om gennemgang",
     "%s has been archived.": "%s er arkiveret.",
     "%s still stands.": "%s står stadig ved magt.",
-    "Reviewed every month": [
+    "_Reviewed every month_::_Reviewed every {n} months_": [
         "Gennemgås hver måned",
         "Gennemgås hver {n}. måned"
     ],
@@ -5513,7 +5529,7 @@
     "The team was created, but not everything finished: {error}": "Teamet blev oprettet, men ikke alt blev fuldført: {error}",
     "Could not create the team. Try again.": "Teamet kunne ikke oprettes. Prøv igen.",
     "Could not decline the group. Try again.": "Gruppen kunne ikke afvises. Prøv igen.",
-    "%n person": [
+    "_%n person_::_%n people_": [
         "%n person",
         "%n personer"
     ],
@@ -5635,7 +5651,7 @@
     "Only its own members and this team's administrators know it exists.": "Kun dets egne medlemmer og dette teams administratorer ved, at det findes.",
     "Members are picked from this team. You can invite people from outside once the sub-team exists.": "Medlemmer vælges fra dette team. Du kan invitere personer udefra, når underteamet findes.",
     "A sub-team is a smaller group inside this team, with its own files and its own members. You pick who is in it from this team, and you can invite people from outside. Everything about a sub-team is managed from here.": "Et underteam er en mindre gruppe inde i dette team med sine egne filer og sine egne medlemmer. Du vælger medlemmerne fra dette team og kan invitere personer udefra. Alt om et underteam styres herfra.",
-    "{n} member": [
+    "_{n} member_::_{n} members_": [
         "{n} medlem",
         "{n} medlemmer"
     ],
@@ -5705,7 +5721,7 @@
     "Failed to remove banner: {error}": "Kunne ikke fjerne banner: {error}",
     "Open team maintenance to request an extension": "Åbn teamvedligeholdelse for at anmode om forlængelse",
     "This team passed its expiration date on {date}.": "Dette team overskred sin udløbsdato den {date}.",
-    "This team expires in %n day.": [
+    "_This team expires in %n day._::_This team expires in %n days._": [
         "Dette team udløber om %n dag.",
         "Dette team udløber om %n dage."
     ],
@@ -5713,7 +5729,7 @@
     "Compliment {name}": "Kompliment til {name}",
     "They will see this the next time they open TeamHub.": "De ser det, næste gang de åbner TeamHub.",
     "Say what they did well": "Skriv, hvad de gjorde godt",
-    "%n character left": [
+    "_%n character left_::_%n characters left_": [
         "%n tegn tilbage",
         "%n tegn tilbage"
     ],
@@ -5721,12 +5737,12 @@
     "Compliment sent to {name}": "Kompliment sendt til {name}",
     "Could not send the compliment": "Kunne ikke sende komplimentet",
     "Could not send the compliment: {error}": "Kunne ikke sende komplimentet: {error}",
-    "A compliment for you": [
+    "_A compliment for you_::_%n compliments for you_": [
         "En kompliment til dig",
         "%n komplimenter til dig"
     ],
     "{name} sent you a compliment.": "{name} har sendt dig en kompliment.",
-    "%n person sent you a compliment.": [
+    "_%n person sent you a compliment._::_%n people sent you a compliment._": [
         "%n person har sendt dig en kompliment.",
         "%n personer har sendt dig en kompliment."
     ],
@@ -5824,7 +5840,7 @@
     "Review became due": "Gennemgangen blev forfalden",
     "Team admin confirms the list": "Teamadministrator bekræfter listen",
     "Membership confirmed. The review is recorded with your name and today's date.": "Medlemskab bekræftet. Gennemgangen er registreret med dit navn og dagens dato.",
-    "Reviewed every %n month. This team has not been reviewed yet.": [
+    "_Reviewed every %n month. This team has not been reviewed yet._::_Reviewed every %n months. This team has not been reviewed yet._": [
         "Gennemgås hver %n måned. Dette team er endnu ikke gennemgået.",
         "Gennemgås hver %n måneder. Dette team er endnu ikke gennemgået."
     ],
@@ -5855,11 +5871,11 @@
     "Teams using it": "Team der bruger den",
     "Show the teams using {app}": "Vis de team, der bruger {app}",
     "Could not build the integrations register.": "Kunne ikke opbygge integrationsregistret.",
-    "{n} row written since the last hourly pass is not chained yet": [
+    "_{n} row written since the last hourly pass is not chained yet_::_{n} rows written since the last hourly pass are not chained yet_": [
         "{n} række skrevet siden sidste timegennemløb er endnu ikke kædet",
         "{n} rækker skrevet siden sidste timegennemløb er endnu ikke kædet"
     ],
-    "{n} row predates this feature and can never be verified": [
+    "_{n} row predates this feature and can never be verified_::_{n} rows predate this feature and can never be verified_": [
         "{n} række er ældre end denne funktion og kan aldrig kontrolleres",
         "{n} rækker er ældre end denne funktion og kan aldrig kontrolleres"
     ],
@@ -5955,32 +5971,32 @@
     "{title} is included in {template}.": "{title} er medtaget i {template}.",
     "{title} is no longer included in {template}. Nothing was deleted.": "{title} er ikke længere medtaget i {template}. Intet blev slettet.",
     "{title} is shown in this team.": "{title} vises i dette team.",
-    "%n team has previously hidden one of these and will keep it hidden.": [
+    "_%n team has previously hidden one of these and will keep it hidden._::_%n teams have previously hidden one of these and will keep them hidden._": [
         "%n team har tidligere skjult en af dem og holder den skjult.",
         "%n teams har tidligere skjult en af dem og holder den skjult."
     ],
-    "%n widget": [
+    "_%n widget_::_%n widgets_": [
         "%n widget",
         "%n widgets"
     ],
-    "%n team tab": [
+    "_%n team tab_::_%n team tabs_": [
         "%n teamfane",
         "%n teamfaner"
     ],
-    "%n My Work source": [
+    "_%n My Work source_::_%n My Work sources_": [
         "%n kilde til Mit arbejde",
         "%n kilder til Mit arbejde"
     ],
-    "The integration was notified about every team but one, which reported a problem.": [
+    "_The integration was notified about every team but one, which reported a problem._::_The integration was notified, but {failed} teams reported a problem._": [
         "Integrationen blev underrettet om alle teams undtagen et, som meldte en fejl.",
         "Integrationen blev underrettet, men {failed} teams meldte en fejl."
     ],
-    "{n} integration enabled": [
+    "_{n} integration enabled_::_{n} integrations enabled_": [
         "{n} integration aktiveret",
         "{n} integrationer aktiveret"
     ],
     "\"{name}\" will no longer be offered when someone creates a team.": "\"{name}\" tilbydes ikke længere, når nogen opretter et team.",
-    "%n team was created from it. It keeps every app, module and setting it was created with.": [
+    "_%n team was created from it. It keeps every app, module and setting it was created with._::_%n teams were created from it. They keep every app, module and setting they were created with._": [
         "%n team blev oprettet ud fra den. Det beholder alle apps, moduler og indstillinger, det blev oprettet med.",
         "%n teams blev oprettet ud fra den. De beholder alle apps, moduler og indstillinger, de blev oprettet med."
     ],
@@ -5997,7 +6013,7 @@
     "New template": "Ny skabelon",
     "Template created. Its integrations can be included below.": "Skabelon oprettet. Dens integrationer kan medtages nedenfor.",
     "Template deleted.": "Skabelon slettet.",
-    "Template deleted. %n existing team keeps what it was created with.": [
+    "_Template deleted. %n existing team keeps what it was created with._::_Template deleted. %n existing teams keep what they were created with._": [
         "Skabelon slettet. %n eksisterende team beholder, hvad det blev oprettet med.",
         "Skabelon slettet. %n eksisterende teams beholder, hvad de blev oprettet med."
     ],
@@ -6011,15 +6027,15 @@
     "This widget has no address to load.": "Denne widget har ingen adresse at indlæse.",
     "Created from the {template} template.": "Oprettet fra skabelonen {template}.",
     "The team was created, but its template could not be saved. Integrations and the expiration date that come with the template will not apply until an administrator sets the template again.": "Teamet blev oprettet, men dets skabelon kunne ikke gemmes. Integrationer og udløbsdatoen, der følger med skabelonen, gælder først, når en administrator angiver skabelonen igen.",
-    "No member report has reached the licensing service for {n} day.": [
+    "_No member report has reached the licensing service for {n} day._::_No member report has reached the licensing service for {n} days._": [
         "Der er ikke kommet nogen medlemsrapport til licenstjenesten i {n} dag.",
         "Der er ikke kommet nogen medlemsrapport til licenstjenesten i {n} dage."
     ],
-    "No member report for {n} day. Action needed.": [
+    "_No member report for {n} day. Action needed._::_No member report for {n} days. Action needed._": [
         "Ingen medlemsrapport i {n} dag. Handling er nødvendig.",
         "Ingen medlemsrapport i {n} dage. Handling er nødvendig."
     ],
-    "Advanced features are locked: no member report for {n} day.": [
+    "_Advanced features are locked: no member report for {n} day._::_Advanced features are locked: no member report for {n} days._": [
         "Avancerede funktioner er låst: ingen medlemsrapport i {n} dag.",
         "Avancerede funktioner er låst: ingen medlemsrapport i {n} dage."
     ],
@@ -6144,148 +6160,148 @@
     "Home layout removed. Teams of this template open with the layout TeamHub ships.": "Layout for Hjem fjernet. Team fra denne skabelon åbner med det layout, TeamHub leverer.",
     "Could not save the home layout.": "Kunne ikke gemme layoutet for Hjem.",
     "Teams of this template open with the layout TeamHub ships.": "Team fra denne skabelon åbner med det layout, TeamHub leverer.",
-    "Teams of this template open with a layout of %n card.": [
+    "_Teams of this template open with a layout of %n card._::_Teams of this template open with a layout of %n cards._": [
         "Team fra denne skabelon åbner med et layout med %n kort.",
         "Team fra denne skabelon åbner med et layout med %n kort."
     ],
-    "No member of this team has an email address on their account.": "No member of this team has an email address on their account.",
-    "{n} team member has no email address and will not receive this.": [
-        "{n} team member has no email address and will not receive this.",
-        "{n} team members have no email address and will not receive this."
+    "No member of this team has an email address on their account.": "Ingen medlemmer af dette team har en e-mailadresse på deres konto.",
+    "_{n} team member has no email address and will not receive this._::_{n} team members have no email address and will not receive this._": [
+        "{n} teammedlem har ingen e-mailadresse og modtager ikke dette.",
+        "{n} teammedlemmer har ingen e-mailadresse og modtager ikke dette."
     ],
-    "Workstream name": "Workstream name",
-    "Allocated budget for {lane}": "Allocated budget for {lane}",
-    "Available hours for {name}": "Available hours for {name}",
-    "Search team members": "Search team members",
-    "Bulk team export": "Bulk team export",
-    "Write teams out to a CSV file in the importer’s own format, either all of them or a selection.": "Write teams out to a CSV file in the importer’s own format, either all of them or a selection.",
-    "Expiration date for {name}": "Expiration date for {name}",
-    "Remove the expiration date entirely": "Remove the expiration date entirely",
-    "Change the expiration date for {name}": "Change the expiration date for {name}",
-    "Set an expiration date for {name}": "Set an expiration date for {name}",
-    "Requested by": "Requested by",
-    "Requested until": "Requested until",
-    "Note to the requester": "Note to the requester",
-    "Optional: required reading if you deny": "Optional: required reading if you deny",
-    "Set date": "Set date",
-    "Expired {date}": "Expired {date}",
-    "No expiration date. Click to set one.": "No expiration date. Click to set one.",
-    "This date has passed. The team still works normally. Nothing is deleted automatically. Click to set a new date.": "This date has passed. The team still works normally. Nothing is deleted automatically. Click to set a new date.",
-    "Expires in {n} day. Click to change or clear the date.": [
-        "Expires in {n} day. Click to change or clear the date.",
-        "Expires in {n} days. Click to change or clear the date."
+    "Workstream name": "Arbejdsstrømmens navn",
+    "Allocated budget for {lane}": "Tildelt budget for {lane}",
+    "Available hours for {name}": "Timer til rådighed for {name}",
+    "Search team members": "Søg efter teammedlemmer",
+    "Bulk team export": "Masseeksport af teams",
+    "Write teams out to a CSV file in the importer’s own format, either all of them or a selection.": "Skriv teams til en CSV-fil i importfunktionens eget format, enten alle eller et udvalg.",
+    "Expiration date for {name}": "Udløbsdato for {name}",
+    "Remove the expiration date entirely": "Fjern udløbsdatoen helt",
+    "Change the expiration date for {name}": "Skift udløbsdatoen for {name}",
+    "Set an expiration date for {name}": "Angiv en udløbsdato for {name}",
+    "Requested by": "Anmodet af",
+    "Requested until": "Anmodet indtil",
+    "Note to the requester": "Note til anmoderen",
+    "Optional: required reading if you deny": "Valgfrit: anmoderen læser dette, hvis du afviser",
+    "Set date": "Angiv dato",
+    "Expired {date}": "Udløb den {date}",
+    "No expiration date. Click to set one.": "Ingen udløbsdato. Klik for at angive en.",
+    "This date has passed. The team still works normally. Nothing is deleted automatically. Click to set a new date.": "Denne dato er overskredet. Teamet fungerer stadig normalt. Intet slettes automatisk. Klik for at angive en ny dato.",
+    "_Expires in {n} day. Click to change or clear the date._::_Expires in {n} days. Click to change or clear the date._": [
+        "Udløber om {n} dag. Klik for at ændre eller rydde datoen.",
+        "Udløber om {n} dage. Klik for at ændre eller rydde datoen."
     ],
-    "Pick a date, or use Clear to remove the expiration date.": "Pick a date, or use Clear to remove the expiration date.",
-    "Expiration date saved.": "Expiration date saved.",
-    "Expiration date removed.": "Expiration date removed.",
-    "Failed to save the expiration date: {error}": "Failed to save the expiration date: {error}",
-    "Failed to save the expiration date": "Failed to save the expiration date",
-    "Failed to load extension requests": "Failed to load extension requests",
-    "Extension approved. {team} now expires on {date}.": "Extension approved. {team} now expires on {date}.",
-    "Failed to approve the request: {error}": "Failed to approve the request: {error}",
-    "Failed to approve the request": "Failed to approve the request",
-    "Extension denied. {name} has been notified.": "Extension denied. {name} has been notified.",
-    "Failed to deny the request: {error}": "Failed to deny the request: {error}",
-    "Failed to deny the request": "Failed to deny the request",
-    "Importing this file back into the same server creates nothing: every team in it already exists, and the importer skips a name it already knows. Use it to move teams to another server, to build new teams by editing the rows first, or as a record of how things are set up today.": "Importing this file back into the same server creates nothing: every team in it already exists, and the importer skips a name it already knows. Use it to move teams to another server, to build new teams by editing the rows first, or as a record of how things are set up today.",
-    "What to export": "What to export",
-    "Every team on this server": "Every team on this server",
-    "Only the teams I pick": "Only the teams I pick",
-    "Search teams…": "Search teams…",
-    "Teams to export": "Teams to export",
-    "Check what will be exported": "Check what will be exported",
-    "Download CSV": "Download CSV",
-    "What the file will contain": "What the file will contain",
-    "{n} team will be written.": [
-        "{n} team will be written.",
-        "{n} teams will be written."
+    "Pick a date, or use Clear to remove the expiration date.": "Vælg en dato, eller brug Ryd for at fjerne udløbsdatoen.",
+    "Expiration date saved.": "Udløbsdato gemt.",
+    "Expiration date removed.": "Udløbsdato fjernet.",
+    "Failed to save the expiration date: {error}": "Kunne ikke gemme udløbsdatoen: {error}",
+    "Failed to save the expiration date": "Kunne ikke gemme udløbsdatoen",
+    "Failed to load extension requests": "Kunne ikke indlæse forlængelsesanmodninger",
+    "Extension approved. {team} now expires on {date}.": "Forlængelse godkendt. {team} udløber nu den {date}.",
+    "Failed to approve the request: {error}": "Kunne ikke godkende anmodningen: {error}",
+    "Failed to approve the request": "Kunne ikke godkende anmodningen",
+    "Extension denied. {name} has been notified.": "Forlængelse afvist. {name} har fået besked.",
+    "Failed to deny the request: {error}": "Kunne ikke afvise anmodningen: {error}",
+    "Failed to deny the request": "Kunne ikke afvise anmodningen",
+    "Importing this file back into the same server creates nothing: every team in it already exists, and the importer skips a name it already knows. Use it to move teams to another server, to build new teams by editing the rows first, or as a record of how things are set up today.": "Hvis filen importeres igen på den samme server, oprettes der intet: alle teams i den findes allerede, og importen springer et navn over, den allerede kender. Brug den til at flytte teams til en anden server, til at oprette nye teams ved først at redigere rækkerne eller til at dokumentere, hvordan alt er sat op i dag.",
+    "What to export": "Hvad skal eksporteres",
+    "Every team on this server": "Alle teams på denne server",
+    "Only the teams I pick": "Kun de teams, jeg vælger",
+    "Search teams…": "Søg efter teams…",
+    "Teams to export": "Teams, der skal eksporteres",
+    "Check what will be exported": "Kontrollér, hvad der eksporteres",
+    "Download CSV": "Hent CSV",
+    "What the file will contain": "Hvad filen kommer til at indeholde",
+    "_{n} team will be written._::_{n} teams will be written._": [
+        "{n} team bliver skrevet.",
+        "{n} teams bliver skrevet."
     ],
-    "{n} of them cannot be imported again as-is: see below.": [
-        "{n} of them cannot be imported again as-is: see below.",
-        "{n} of them cannot be imported again as-is: see below."
+    "_{n} of them cannot be imported again as-is: see below._::_{n} of them cannot be imported again as-is: see below._": [
+        "{n} af dem kan ikke importeres igen uden ændringer: se nedenfor.",
+        "{n} af dem kan ikke importeres igen uden ændringer: se nedenfor."
     ],
-    "All of them can be imported again without editing.": "All of them can be imported again without editing.",
-    "What is missing": "What is missing",
-    "The file is written anyway: it is a faithful picture of what is on this server. A row that cannot be imported again is reported when you try, and the other rows are unaffected.": "The file is written anyway: it is a faithful picture of what is on this server. A row that cannot be imported again is reported when you try, and the other rows are unaffected.",
-    "The file lists the account names of every member of every exported team. Downloading one is recorded in the audit log, per team.": "The file lists the account names of every member of every exported team. Downloading one is recorded in the audit log, per team.",
-    "Checking the selection…": "Checking the selection…",
-    "Failed to load the team list": "Failed to load the team list",
-    "Failed to check the selection": "Failed to check the selection",
-    "Building the file. Your browser will save it when it is ready.": "Building the file. Your browser will save it when it is ready.",
-    "Remove this team?": "Remove this team?",
-    "Remove team": "Remove team",
+    "All of them can be imported again without editing.": "De kan alle importeres igen uden redigering.",
+    "What is missing": "Hvad der mangler",
+    "The file is written anyway: it is a faithful picture of what is on this server. A row that cannot be imported again is reported when you try, and the other rows are unaffected.": "Filen skrives alligevel: den er et nøjagtigt billede af, hvad der findes på denne server. En række, der ikke kan importeres igen, meldes, når du prøver, og de andre rækker påvirkes ikke.",
+    "The file lists the account names of every member of every exported team. Downloading one is recorded in the audit log, per team.": "Filen indeholder kontonavnene på alle medlemmer af hvert eksporteret team. En download registreres i revisionsloggen pr. team.",
+    "Checking the selection…": "Kontrollerer udvalget…",
+    "Failed to load the team list": "Kunne ikke indlæse teamlisten",
+    "Failed to check the selection": "Kunne ikke kontrollere udvalget",
+    "Building the file. Your browser will save it when it is ready.": "Filen oprettes. Din browser gemmer den, når den er klar.",
+    "Remove this team?": "Fjern dette team?",
+    "Remove team": "Fjern team",
     "Edit team layout": "Rediger teamlayout",
     "Publish team layout": "Udgiv teamlayout",
     "Team layout published": "Teamlayout udgivet",
     "Team layout saved.": "Teamlayout gemt.",
-    "Layout controls": "Layout controls",
+    "Layout controls": "Layoutindstillinger",
     "Unlock to let members arrange their own widgets, or restore the template layout.": "Unlock to let members arrange their own widgets, or restore the template layout.",
     "Lock layout": "Lås layout",
-    "Unlock layout": "Unlock layout",
-    "Unlocking will discard unpublished layout changes. Continue?": "Unlocking will discard unpublished layout changes. Continue?",
-    "Reset to template": "Reset to template",
-    "A fun fact about me": "A fun fact about me",
-    "Allow colleagues to see my interests in a future people directory": "Allow colleagues to see my interests in a future people directory",
-    "Allow my birthday in a department birthday widget": "Allow my birthday in a department birthday widget",
-    "Allow my work anniversary celebration": "Allow my work anniversary celebration",
-    "Ask me about": "Ask me about",
-    "Choose a department": "Choose a department",
-    "Choose a room": "Choose a room",
+    "Unlock layout": "Lås layout op",
+    "Unlocking will discard unpublished layout changes. Continue?": "Når layoutet låses op, kasseres ikke-udgivne layoutændringer. Fortsæt?",
+    "Reset to template": "Nulstil til skabelon",
+    "A fun fact about me": "En sjov kendsgerning om mig",
+    "Allow colleagues to see my interests in a future people directory": "Lad kolleger se mine interesser i en kommende personoversigt",
+    "Allow my birthday in a department birthday widget": "Vis min fødselsdag i afdelingens fødselsdagswidget",
+    "Allow my work anniversary celebration": "Tillad fejring af mit jubilæum",
+    "Ask me about": "Spørg mig om",
+    "Choose a department": "Vælg en afdeling",
+    "Choose a room": "Vælg et lokale",
     "Collaboration profile saved": "Collaboration profile saved",
-    "Company start date": "Company start date",
-    "Could not load your collaboration profile.": "Could not load your collaboration profile.",
-    "Could not save the collaboration profile. Try again.": "Could not save the collaboration profile. Try again.",
-    "Default department": "Default department",
-    "Department start date": "Department start date",
-    "Enable People module for all teams": "Enable People module for all teams",
-    "Enable People tab for this team": "Enable People tab for this team",
-    "Enable the People module for date/time suggestions.": "Enable the People module for date/time suggestions.",
-    "Expertise and skills": "Expertise and skills",
+    "Company start date": "Startdato i virksomheden",
+    "Could not load your collaboration profile.": "Din samarbejdsprofil kunne ikke indlæses.",
+    "Could not save the collaboration profile. Try again.": "Samarbejdsprofilen kunne ikke gemmes. Prøv igen.",
+    "Default department": "Standardafdeling",
+    "Department start date": "Startdato i afdelingen",
+    "Enable People module for all teams": "Aktivér People-modulet for alle teams",
+    "Enable People tab for this team": "Aktivér fanen People for dette team",
+    "Enable the People module for date/time suggestions.": "Aktivér People-modulet for at få forslag til dato og tid.",
+    "Expertise and skills": "Ekspertise og færdigheder",
     "Help colleagues get to know you and find you. These details are private to you until TeamHub adds a colleagues directory. Sharing options are off by default.": "Help colleagues get to know you and find you. These details are private to you until TeamHub adds a colleagues directory. Sharing options are off by default.",
-    "Hobbies and interests": "Hobbies and interests",
-    "Languages": "Languages",
-    "My collaboration profile": "My collaboration profile",
+    "Hobbies and interests": "Hobbyer og interesser",
+    "Languages": "Sprog",
+    "My collaboration profile": "Min samarbejdsprofil",
     "My usual office days": "My usual office days",
-    "Only Department teams you belong to are available.": "Only Department teams you belong to are available.",
+    "Only Department teams you belong to are available.": "Du kan kun vælge afdelingsteams, du er medlem af.",
     "People": "People",
-    "People and celebrations privacy": "People and celebrations privacy",
+    "People and celebrations privacy": "Privatliv for People og fejringer",
     "People includes collaboration profiles and the existing presence schedules. Enabled by default; team admins can turn off the People tab.": "People includes collaboration profiles and the existing presence schedules. Enabled by default; team admins can turn off the People tab.",
-    "People module": "People module",
+    "People module": "People-modul",
     "Preferred contact method": "Preferred contact method",
-    "Rooms are grouped by building and floor. Your scheduled presence may differ.": "Rooms are grouped by building and floor. Your scheduled presence may differ.",
+    "Rooms are grouped by building and floor. Your scheduled presence may differ.": "Lokaler er grupperet efter bygning og etage. Din planlagte tilstedeværelse kan afvige.",
     "Save collaboration profile": "Save collaboration profile",
     "Saved separately for each department you select.": "Saved separately for each department you select.",
     "Self-reported; not verified by HR.": "Self-reported; not verified by HR.",
-    "Show the People tab with colleagues and their presence schedules.": "Show the People tab with colleagues and their presence schedules.",
+    "Show the People tab with colleagues and their presence schedules.": "Vis fanen People med kolleger og deres tilstedeværelsesplaner.",
     "These preferences prepare for future birthday, work anniversary and people-directory features. They do not publish any data yet.": "These preferences prepare for future birthday, work anniversary and people-directory features. They do not publish any data yet.",
-    "Usual workplace": "Usual workplace",
-    "Your work, your colleagues, your connections": "Your work, your colleagues, your connections",
-    "Help colleagues get to know you and find you. Your profile details stay private until People sharing features are available. You can change sharing preferences below.": "Help colleagues get to know you and find you. Your profile details stay private until People sharing features are available. You can change sharing preferences below.",
-    "Preferred contact methods": "Preferred contact methods",
-    "In person": "In person",
+    "Usual workplace": "Normalt arbejdssted",
+    "Your work, your colleagues, your connections": "Dit arbejde, dine kolleger, dine kontakter",
+    "Help colleagues get to know you and find you. Your profile details stay private until People sharing features are available. You can change sharing preferences below.": "Hjælp kolleger med at lære dig at kende og finde dig. Dine profiloplysninger forbliver private, indtil delingsfunktionerne i People er tilgængelige. Du kan ændre dine delingsindstillinger nedenfor.",
+    "Preferred contact methods": "Foretrukne kontaktmåder",
+    "In person": "Personligt",
     "Based on your Nextcloud account creation date, when available. Not an HR employment date.": "Based on your Nextcloud account creation date, when available. Not an HR employment date.",
-    "Based on your direct membership join date in the selected department.": "Based on your direct membership join date in the selected department.",
-    "Birthdays": "Birthdays",
+    "Based on your direct membership join date in the selected department.": "Baseret på den dato, du blev direkte medlem af den valgte afdeling.",
+    "Birthdays": "Fødselsdage",
     "Loading birthdays…": "Loading birthdays…",
     "Could not load birthdays.": "Could not load birthdays.",
     "No upcoming birthdays to show.": "No upcoming birthdays to show.",
-    "Happy birthday, {name}!": "Happy birthday, {name}!",
-    "Wishing you a wonderful day from everyone at TeamHub!": "Wishing you a wonderful day from everyone at TeamHub!",
+    "Happy birthday, {name}!": "Tillykke med fødselsdagen, {name}!",
+    "Wishing you a wonderful day from all your colleagues.": "Alle dine kolleger ønsker dig en dejlig dag.",
     "Birthday sharing controls the Department birthday widget and birthday celebration. Work anniversary and people-directory sharing will be used by future features.": "Birthday sharing controls the Department birthday widget and birthday celebration. Work anniversary and people-directory sharing will be used by future features.",
     "Nextcloud account start date": "Nextcloud account start date",
-    "Account creation date when recorded; otherwise first login if known. This is not your employment start date.": "Account creation date when recorded; otherwise first login if known. This is not your employment start date.",
-    "Birthday and anniversary sharing control personal celebrations. People-directory sharing will be used by future features.": "Birthday and anniversary sharing control personal celebrations. People-directory sharing will be used by future features.",
-    "Work anniversary celebrations": "Work anniversary celebrations",
-    "Celebrate 1, 5, 10 and 25 years in this department when a member opens TeamHub.": "Celebrate 1, 5, 10 and 25 years in this department when a member opens TeamHub.",
-    "Enable work anniversary celebrations": "Enable work anniversary celebrations",
-    "Congratulations, {name}!": "Congratulations, {name}!",
-    "{years} years with {team}!": "{years} years with {team}!",
-    "Today marks {years} years since you joined {team}. Thank you for everything you bring to your colleagues!": "Today marks {years} years since you joined {team}. Thank you for everything you bring to your colleagues!",
+    "Account creation date when recorded; otherwise first login if known. This is not your employment start date.": "Datoen for oprettelse af kontoen, hvis den er registreret, ellers første login, hvis det kendes. Det er ikke din ansættelsesdato.",
+    "Birthday and anniversary sharing control personal celebrations. People-directory sharing will be used by future features.": "Deling af fødselsdag og jubilæum styrer personlige fejringer. Deling i personoversigten bruges af kommende funktioner.",
+    "Work anniversary celebrations": "Fejring af jubilæer",
+    "Celebrate 1, 5, 10 and 25 years in this department when a member opens TeamHub.": "Fejr 1, 5, 10 og 25 år i denne afdeling, når et medlem åbner TeamHub.",
+    "Enable work anniversary celebrations": "Aktivér fejring af jubilæer",
+    "Congratulations, {name}!": "Tillykke, {name}!",
+    "{years} years with {team}!": "{years} år i {team}!",
+    "Today marks {years} years since you joined {team}. Thank you for everything you bring to your colleagues!": "I dag er det {years} år siden, du kom til {team}. Tak for alt, hvad du gør for dine kolleger!",
     "No shared birthdays to show. Members must allow birthday sharing in their People profile and Nextcloud profile visibility.": "No shared birthdays to show. Members must allow birthday sharing in their People profile and Nextcloud profile visibility.",
     "Your birthday sharing is disabled in Personal settings → TeamHub → People.": "Your birthday sharing is disabled in Personal settings → TeamHub → People.",
     "Your Nextcloud birthday visibility prevents it from appearing to colleagues.": "Your Nextcloud birthday visibility prevents it from appearing to colleagues.",
     "Your Nextcloud profile does not have a valid birthday set.": "Your Nextcloud profile does not have a valid birthday set.",
-    "Collaboration profile": "Collaboration profile",
+    "Collaboration profile": "Samarbejdsprofil",
     "No shared birthdays to show.": "No shared birthdays to show.",
     "Buildings and floors marked as shared come from the room directory this instance uses. Change them there. Here you add the rooms people sit in.": "Bygninger og etager, der er markeret som delt, kommer fra lokalekataloget på denne instans. Ret dem der. Her tilføjer du de lokaler, folk sidder i.",
     "Maintained in the room directory": "Vedligeholdes i lokalekataloget",
@@ -6332,7 +6348,7 @@
     "Clear list": "Ryd listen",
     "Clear the list of recent imports": "Ryd listen over seneste importer",
     "The list could not be cleared.": "Listen kunne ikke ryddes.",
-    "{n} import removed from the list": ["{n} import fjernet fra listen", "{n} importer fjernet fra listen"],
+    "_{n} import removed from the list_::_{n} imports removed from the list_": ["{n} import fjernet fra listen", "{n} importer fjernet fra listen"],
     "Off disables Nextcloud’s own Teams app: its navigation entry, its pages and its dashboard widget stop answering, so a team is managed in TeamHub only. Leave it on if you use the Collectives app, which manages a collective’s members through that same frontend.": "Fra deaktiverer Nextclouds egen Teams-app: dens navigationspunkt, dens sider og dens dashboard-widget svarer ikke længere, så et team kun administreres i TeamHub. Lad den være slået til, hvis du bruger Collectives-appen, som administrerer et kollektivs medlemmer via samme frontend.",
     "Give every category a name of its own to save the list.": "Giv hver kategori sit eget navn for at gemme listen.",
     "Full": "Fuld",
@@ -6343,7 +6359,7 @@
     "All statuses": "Alle statusser",
     "Clear the status filter": "Ryd statusfilteret",
     "No member has the selected status this week.": "Ingen medlemmer har den valgte status i denne uge.",
-    "Showing {shown} of {total} member": ["Viser {shown} af {total} medlem", "Viser {shown} af {total} medlemmer"],
+    "_Showing {shown} of {total} member_::_Showing {shown} of {total} members_": ["Viser {shown} af {total} medlem", "Viser {shown} af {total} medlemmer"],
     "TeamHub people": "TeamHub-personer",
     "Filter members by status": "Filtrer medlemmer efter status",
     "No member has the selected status anywhere this week.": "Ingen medlemmer har den valgte status i denne uge.",
@@ -6351,7 +6367,7 @@
     "{count} member has one of the selected statuses on {day}": ["{count} medlem har en af de valgte statusser {day}", "{count} medlemmer har en af de valgte statusser {day}"],
     "{count} member in {status} on {day}": ["{count} medlem i {status} {day}", "{count} medlemmer i {status} {day}"],
     "Show the selected statuses for {day}": "Vis de valgte statusser for {day}",
-    "{status}, {count} member on {day}": ["{status}, {count} medlem {day}", "{status}, {count} medlemmer {day}"],
+    "_{status}, {count} member on {day}_::_{status}, {count} members on {day}_": ["{status}, {count} medlem {day}", "{status}, {count} medlemmer {day}"],
     "Roster": "Vagtplan",
     "Roster controls": "Vagtplanstyring",
     "Roster: week view": "Vagtplan: ugeoversigt",
@@ -6377,9 +6393,9 @@
     "Could not remove the shift.": "Vagten kunne ikke fjernes.",
     "Could not take the shift.": "Vagten kunne ikke overtages.",
     "Could not publish the roster.": "Vagtplanen kunne ikke offentliggøres.",
-    "{count} shift is still a draft": ["{count} vagt er stadig et udkast", "{count} vagter er stadig udkast"],
-    "{count} place still open on {day}": ["{count} plads stadig ledig {day}", "{count} pladser stadig ledige {day}"],
-    "{count} more person needed": ["{count} person mere nødvendig", "{count} personer mere nødvendige"],
+    "_{count} shift is still a draft_::_{count} shifts are still a draft_": ["{count} vagt er stadig et udkast", "{count} vagter er stadig udkast"],
+    "_{count} place still open on {day}_::_{count} places still open on {day}_": ["{count} plads stadig ledig {day}", "{count} pladser stadig ledige {day}"],
+    "_{count} more person needed_::_{count} more people needed_": ["{count} person mere nødvendig", "{count} personer mere nødvendige"],
     "Shifts": "Vagter",
     "Shift types": "Vagttyper",
     "Add shift type": "Tilføj vagttype",
@@ -6414,7 +6430,7 @@
     "Could not save the schedule.": "Skemaet kunne ikke gemmes.",
     "Could not delete the schedule.": "Skemaet kunne ikke slettes.",
     "Delete the schedule {name}? Rosters already planned from it stay as they are.": "Slet skemaet {name}? Vagtplaner, der allerede er lagt ud fra det, forbliver som de er.",
-    "{count} shift a week": ["{count} vagt om ugen", "{count} vagter om ugen"],
+    "_{count} shift a week_::_{count} shifts a week_": ["{count} vagt om ugen", "{count} vagter om ugen"],
     "Enable Shifts for this team": "Aktivér vagter for dette team",
     "Licensed": "Licenseret",
     "Plan who works when, in shifts an administrator defines. Adds the Roster tab and a planning section under Module settings.": "Planlæg hvem der arbejder hvornår, i vagter som en administrator fastlægger. Tilføjer fanen Vagtplan og et planlægningsafsnit under Modulindstillinger.",
@@ -6476,7 +6492,7 @@
     "{name} is asking to be replaced. Show why.": "{name} beder om afløsning. Vis hvorfor.",
     "Take the {shift} shift over from {name}": "Overtag vagten {shift} fra {name}",
     "Could not invite {names}": "Kunne ikke invitere {names}",
-    "{n} person already had an invite": [
+    "_{n} person already had an invite_::_{n} people already had an invite_": [
         "{n} person havde allerede en invitation",
         "{n} personer havde allerede en invitation"
     ],
@@ -6501,7 +6517,7 @@
     "Build one under Manage team, Module settings. A template says which roles you need on which days.": "Opret en under Administrer team, Modulindstillinger. En skabelon fortæller, hvilke roller du har brug for på hvilke dage.",
     "Pick a template": "Vælg en skabelon",
     "{name} ({count}), set by an administrator": "{name} ({count}), angivet af en administrator",
-    "{count} person": [
+    "_{count} person_::_{count} people_": [
         "{count} person",
         "{count} personer"
     ],
@@ -6522,20 +6538,20 @@
     "Failed to repair member ids: {error}": "Kunne ikke reparere medlems-id'er: {error}",
     "Repair member ids": "Reparer medlems-id'er",
     "Repairing": "Reparerer",
-    "The owner row of this team carries a member id Nextcloud Teams refuses, so the team cannot be shared with another server. {n} row will be given a valid id.": [
+    "_The owner row of this team carries a member id Nextcloud Teams refuses, so the team cannot be shared with another server. {n} row will be given a valid id._::_The owner row of this team carries a member id Nextcloud Teams refuses, so the team cannot be shared with another server. {n} rows will be given a valid id._": [
         "Ejerrækken for dette team har et medlems-id, som Nextcloud Teams afviser, så teamet ikke kan deles med en anden server. {n} række får et gyldigt id.",
         "Ejerrækken for dette team har et medlems-id, som Nextcloud Teams afviser, så teamet ikke kan deles med en anden server. {n} rækker får et gyldigt id."
     ],
-    "{n} member row of this team carries a member id Nextcloud Teams refuses.": [
+    "_{n} member row of this team carries a member id Nextcloud Teams refuses._::_{n} member rows of this team carry a member id Nextcloud Teams refuses._": [
         "{n} medlemsrække i dette team har et medlems-id, som Nextcloud Teams afviser.",
         "{n} medlemsrækker i dette team har et medlems-id, som Nextcloud Teams afviser."
     ],
-    "{n} member row repaired. The team can be shared with another server again.": [
+    "_{n} member row repaired. The team can be shared with another server again._::_{n} member rows repaired. The team can be shared with another server again._": [
         "{n} medlemsrække repareret. Teamet kan deles med en anden server igen.",
         "{n} medlemsrækker repareret. Teamet kan deles med en anden server igen."
     ],
     "Add my shifts to my calendar": "Føj mine vagter til min kalender",
-    "Add {count} shift": ["Tilføj {count} vagt", "Tilføj {count} vagter"],
+    "_Add {count} shift_::_Add {count} shifts_": ["Tilføj {count} vagt", "Tilføj {count} vagter"],
     "Already in a calendar, will be updated": "Allerede i en kalender, bliver opdateret",
     "Could not add your shifts to the calendar.": "Dine vagter kunne ikke føjes til kalenderen.",
     "Could not load your shifts.": "Dine vagter kunne ikke indlæses.",
@@ -6545,8 +6561,8 @@
     "Show these hours as": "Vis disse timer som",
     "Somebody planning a meeting sees you are not available.": "Den, der planlægger et møde, kan se, at du ikke er tilgængelig.",
     "You have no calendar of your own to add shifts to. Create one in Calendar first.": "Du har ingen egen kalender at føje vagter til. Opret først en i Kalender.",
-    "{count} shift could not be added to your calendar.": ["{count} vagt kunne ikke føjes til din kalender.", "{count} vagter kunne ikke føjes til din kalender."],
-    "{count} shift is in your calendar": ["{count} vagt er i din kalender", "{count} vagter er i din kalender"],
+    "_{count} shift could not be added to your calendar._::_{count} shifts could not be added to your calendar._": ["{count} vagt kunne ikke føjes til din kalender.", "{count} vagter kunne ikke føjes til din kalender."],
+    "_{count} shift is in your calendar_::_{count} shifts are in your calendar_": ["{count} vagt er i din kalender", "{count} vagter er i din kalender"],
     "You are already working another shift at that time.": "Du har allerede en anden vagt på det tidspunkt.",
     "That person is already working another shift at that time.": "Den person har allerede en anden vagt på det tidspunkt.",
     "Already working at this time": "Har allerede vagt på dette tidspunkt",
@@ -6592,7 +6608,7 @@
     "Intended TeamHub seats": "Planlagte TeamHub-pladser",
     "Enter a number of seats between 1 and {max}.": "Indtast et antal pladser mellem 1 og {max}.",
     "The number of people you expect to use TeamHub. An estimate is fine.": "Det antal personer, du forventer bruger TeamHub. Et skøn er fint.",
-    "Keep the comment under {n} character.": ["Hold kommentaren under {n} tegn.", "Hold kommentaren under {n} tegn."],
+    "_Keep the comment under {n} character._::_Keep the comment under {n} characters._": ["Hold kommentaren under {n} tegn.", "Hold kommentaren under {n} tegn."],
     "Billing preference, a deadline, an existing Nextcloud provider, or a question.": "Faktureringsønske, en frist, en eksisterende Nextcloud-udbyder eller et spørgsmål.",
     "The request also carries this server’s instance UUID and its number of unique team members, so the quotation can be bound to this server. No names and no team content are sent.": "Anmodningen indeholder også serverens instans-UUID og antallet af unikke teammedlemmer, så tilbuddet kan knyttes til denne server. Der sendes ingen navne og intet teamindhold.",
     "Too many requests from this server. Try again later, or send the request by email.": "For mange anmodninger fra denne server. Prøv igen senere, eller send anmodningen pr. e-mail.",
@@ -6655,5 +6671,562 @@
     "Allow emailing all members of this team": "Tillad e-mail til alle medlemmer af dette team",
     "Could not save the email setting. Try again.": "Kunne ikke gemme e-mailindstillingen. Prøv igen.",
     "Emailing all members is switched off for this team.": "E-mail til alle medlemmer er slået fra for dette team.",
+    "Expand banner": "Udvid banner",
+    "Collapse banner": "Skjul banner",
+    "You are not a participant in the team conversation.": "Du er ikke deltager i teamets samtale.",
+    "Could not load the team conversation.": "Kunne ikke indlæse teamets samtale.",
+    "Open polls": "Åbne afstemninger",
+    "_Choose up to {n} option_::_Choose up to {n} options_": ["Vælg op til {n} mulighed", "Vælg op til {n} muligheder"],
+    "Vote": "Stem",
+    "Your vote": "Din stemme",
+    "You are up to date": "Du er helt opdateret",
+    "_{n} unread message, you were mentioned_::_{n} unread messages, you were mentioned_": ["{n} ulæst besked, du blev nævnt", "{n} ulæste beskeder, du blev nævnt"],
+    "_{n} unread message_::_{n} unread messages_": ["{n} ulæst besked", "{n} ulæste beskeder"],
+    "Call in progress": "Opkald i gang",
+    "Call in progress since {time}": "Opkald i gang siden {time}",
+    "Could not send your vote.": "Kunne ikke sende din stemme.",
+    "Chat views": "Chatvisninger",
+    "_{n} poll awaits your vote_::_{n} polls await your vote_": ["{n} afstemning venter på din stemme", "{n} afstemninger venter på din stemme"],
+    "No open polls": "Ingen åbne afstemninger",
+    "Thread": "Tråd",
+    "{name}: {message}": "{name}: {message}",
+    "Threads": "Tråde",
+    "No threads yet": "Ingen tråde endnu",
+    "Communication": "Kommunikation",
+    "Meet now": "Mød nu",
+    "_%n room booked at this time_::_%n rooms booked at this time_": ["%n lokale optaget på dette tidspunkt", "%n lokaler optaget på dette tidspunkt"],
+    "_%n room is free and fits everyone_::_%n rooms are free and fit everyone_": ["%n lokale er ledigt og har plads til alle", "%n lokaler er ledige og har plads til alle"],
+    "_%n room is too small_::_%n rooms are too small_": ["%n lokale er for lille", "%n lokaler er for små"],
+    "_%n seat_::_%n seats_": ["%n plads", "%n pladser"],
+    "Availability unknown": "Tilgængelighed ukendt",
+    "Best fit": "Bedste valg",
+    "Booked": "Optaget",
+    "Booked for the rest of the day": "Optaget resten af dagen",
+    "Bookings for {room} between {start} and {end}": "Bookinger af {room} mellem {start} og {end}",
+    "Building": "Bygning",
+    "Capacity not set": "Kapacitet ikke angivet",
+    "Checking availability": "Tjekker tilgængelighed",
+    "Choose a building": "Vælg en bygning",
+    "Choose a building to see which rooms are free.": "Vælg en bygning for at se, hvilke lokaler der er ledige.",
+    "Could not check room availability": "Kunne ikke tjekke lokalernes tilgængelighed",
+    "Free again at {time}": "Ledig igen kl. {time}",
+    "_No free room fits %n person at this time_::_No free room fits %n people at this time_": ["Intet ledigt lokale til %n person på dette tidspunkt", "Intet ledigt lokale til %n personer på dette tidspunkt"],
+    "No rooms match the search.": "Ingen lokaler matcher søgningen.",
+    "Other rooms": "Andre lokaler",
+    "Pick a date and time first to see which rooms are free.": "Vælg først en dato og et tidspunkt for at se, hvilke lokaler der er ledige.",
+    "Search rooms": "Søg efter lokaler",
+    "Show %n more room": ["Vis %n lokale mere", "Vis %n lokaler mere"],
+    "Video conferencing": "Videokonference",
+    "{room} is booked at this time. Pick another room or time.": "{room} er optaget på dette tidspunkt. Vælg et andet lokale eller tidspunkt.",
+    "_%n room fits everyone_::_%n rooms fit everyone_": ["%n lokale har plads til alle", "%n lokaler har plads til alle"],
+    "_Show all %n room_::_Show all %n rooms_": ["Vis %n lokale", "Vis alle %n lokaler"],
+    "All floors": "Alle etager",
+    "Floor": "Etage",
+    "Free for the rest of the day": "Ledig resten af dagen",
+    "Free until {time}": "Ledig til kl. {time}",
+    "Picking a room on this day also moves the meeting to {date}.": "Hvis du vælger et lokale denne dag, flyttes mødet også til {date}.",
+    "Remove room": "Fjern lokale",
+    "Select the room to book it, or choose another one.": "Vælg lokalet for at booke det, eller vælg et andet.",
+    "{date} from {start} to {end}": "{date} fra {start} til {end}",
+    "After": "Efter",
+    "Choose the last date of the series.": "Vælg seriens sidste dato.",
+    "Daily": "Dagligt",
+    "Does not repeat": "Gentages ikke",
+    "Enter a number between 1 and 99.": "Angiv et tal mellem 1 og 99.",
+    "Enter a number of times between 1 and 500.": "Angiv et antal gange mellem 1 og 500.",
+    "Every": "Hver",
+    "Last date": "Sidste dato",
+    "Monthly": "Månedligt",
+    "Number of times": "Antal gange",
+    "On date": "På dato",
+    "On day {day}": "Den {day}.",
+    "On the first {weekday}": "Den første {weekday}",
+    "On the second {weekday}": "Den anden {weekday}",
+    "On the third {weekday}": "Den tredje {weekday}",
+    "On the fourth {weekday}": "Den fjerde {weekday}",
+    "On the last {weekday}": "Den sidste {weekday}",
+    "Repeat": "Gentag",
+    "Repeat on": "Gentag på",
+    "The last date is before the first meeting.": "Den sidste dato er før det første møde.",
+    "Weekly": "Ugentligt",
+    "Yearly": "Årligt",
+    "_day_::_days_": ["dag", "dage"],
+    "_week_::_weeks_": ["uge", "uger"],
+    "_month_::_months_": ["måned", "måneder"],
+    "_year_::_years_": ["år", "år"],
+    "_time_::_times_": ["gang", "gange"],
+    "_%n room is free for the next {minutes} minutes_::_%n rooms are free for the next {minutes} minutes_": ["%n lokale er ledigt de næste {minutes} minutter", "%n lokaler er ledige de næste {minutes} minutter"],
+    "Book": "Book",
+    "Book {room}": "Book {room}",
+    "Failed to book the room": "Kunne ikke booke lokalet",
+    "Failed to book the room: {error}": "Kunne ikke booke lokalet: {error}",
+    "For": "I",
+    "Free room now": "Ledigt lokale nu",
+    "No bookable rooms": "Ingen lokaler at booke",
+    "_No room is free for the next %n minute._::_No room is free for the next %n minutes._": ["Intet lokale er ledigt det næste %n minut.", "Intet lokale er ledigt de næste %n minutter."],
+    "Quick meeting": "Hurtigt møde",
+    "Rooms you can walk into now. Book one in a click.": "Lokaler du kan gå ind i nu. Book et med ét klik.",
+    "Your Nextcloud has no meeting rooms you can book.": "Din Nextcloud har ingen mødelokaler, du kan booke.",
+    "{room} is booked until {time}": "{room} er booket til kl. {time}",
+    "{room} was just booked by someone else. Pick another room.": "{room} er netop booket af en anden. Vælg et andet lokale.",
+    "_%n of {total} accepted_::_%n of {total} accepted_": ["%n af {total} har accepteret", "%n af {total} har accepteret"],
+    "Details of {room}": "Detaljer om {room}",
+    "Equipment": "Udstyr",
+    "Organizer": "Arrangør",
+    "Projector": "Projektor",
+    "Room number": "Lokalenummer",
+    "Screen": "Skærm",
+    "Wheelchair accessible": "Kørestolsvenligt",
+    "Whiteboard": "Whiteboard",
+    "Booked on {count} of {total} dates": "Optaget på {count} af {total} datoer",
+    "Free on all {total} dates": "Ledigt på alle {total} datoer",
+    "Partly booked": "Delvist optaget",
+    "_{room} is booked on %n date of this series. Pick another room._::_{room} is booked on %n dates of this series. Pick another room._": ["{room} er optaget på %n dato i denne serie. Vælg et andet lokale.", "{room} er optaget på %n datoer i denne serie. Vælg et andet lokale."],
+    "_{room} is booked on %n date of this series ({dates}). Pick another room._::_{room} is booked on %n dates of this series ({dates}). Pick another room._": ["{room} er optaget på %n dato i denne serie ({dates}). Vælg et andet lokale.", "{room} er optaget på %n datoer i denne serie ({dates}). Vælg et andet lokale."],
+    "Check the repeat settings first.": "Tjek først gentagelsesindstillingerne.",
+    "Recurring meetings need an active TeamHub licence.": "Tilbagevendende møder kræver en aktiv TeamHub-licens.",
+    "You accepted the meeting.": "Du har accepteret mødet.",
+    "You answered maybe.": "Du har svaret måske.",
+    "You declined the meeting.": "Du har afslået mødet.",
+    "Your reply": "Dit svar",
+    "Your reply could not be saved. Try again, or reply in Calendar.": "Dit svar kunne ikke gemmes. Prøv igen, eller svar i Kalender.",
+    "_%n day before_::_%n days before_": ["%n dag før", "%n dage før"],
+    "Each meeting gets its own notes file, and the attendees are mentioned in the team chat with a link to it.": "Hvert møde får sin egen notefil, og deltagerne nævnes i teamchatten med et link til den.",
+    "Notes and chat reminder": "Noter og chatpåmindelse",
+    "📅 Coming up: **%1$s** on %2$s at %3$s.\nAdd your agenda items to the meeting notes: %4$s": "📅 Kommende: **%1$s** den %2$s kl. %3$s.\nTilføj dine dagsordenspunkter til mødenoterne: %4$s",
+    "You have not set your workplace yet, so colleagues see you at the office Monday to Friday, all day. Change any day that does not match your week.": "Du har ikke angivet din arbejdsplads endnu, så kolleger ser dig på kontoret mandag til fredag hele dagen. Ret de dage, der ikke passer til din uge.",
+    "Keep this workplace": "Behold denne arbejdsplads",
+    "Show busy times": "Vis optagede tider",
+    "People whose busy times are shown": "Personer, hvis optagede tider vises",
+    "Choose people": "Vælg personer",
+    "_Busy times can be shown for %n person at a time._::_Busy times can be shown for %n people at a time._": [
+        "Optagede tider kan vises for %n person ad gangen.",
+        "Optagede tider kan vises for %n personer ad gangen."
+    ],
+    "Nobody on this team shows busy times here. Busy times need an email address on the account.": "Ingen i dette team viser optagede tider her. Det kræver en e-mailadresse på kontoen.",
+    "_%n member is not shown: they switched busy times off, keep their email private or have none._::_%n members are not shown: they switched busy times off, keep their email private or have none._": [
+        "%n medlem vises ikke: vedkommende har slået optagede tider fra, holder sin e-mailadresse privat eller har ingen.",
+        "%n medlemmer vises ikke: de har slået optagede tider fra, holder deres e-mailadresse privat eller har ingen."
+    ],
+    "The busy times could not be loaded.": "De optagede tider kunne ikke indlæses.",
+    "Team calendars": "Teamkalendere",
+    "The people on your teams can see when you are busy on the team calendar. Only the times are shown, never what the event is. Events you show as free in Calendar do not count.": "Personerne i dine teams kan se i teamkalenderen, hvornår du er optaget. Kun tiderne vises, aldrig hvad begivenheden er. Begivenheder, du viser som ledige i Kalender, tæller ikke med.",
+    "Show my busy times on team calendars": "Vis mine optagede tider i teamkalendere",
+    "This only affects TeamHub. Anyone who adds you to an event in Calendar can still see when you are busy, as Nextcloud always allows.": "Dette gælder kun TeamHub. Alle, der tilføjer dig til en begivenhed i Kalender, kan stadig se, hvornår du er optaget, som Nextcloud altid tillader.",
+    "Could not load the setting.": "Indstillingen kunne ikke indlæses.",
+    "Busy times": "Optagede tider",
+    "Busy, {when}": "Optaget, {when}",
+    "Not confirmed": "Ikke bekræftet",
+    "Not confirmed, {when}": "Ikke bekræftet, {when}",
+    "Work week": "Arbejdsuge",
+    "{name}: no busy times in this period": "{name}: ingen optagede tider i denne periode",
+    "{name}: {times}": "{name}: {times}",
+    "Any equipment": "Alt udstyr",
+    "No room in this building has all of this equipment.": "Intet lokale i denne bygning har alt dette udstyr.",
+    "Select a room to book it.": "Vælg et lokale for at booke det.",
+    "_%n of {total} accepted, your reply is needed_::_%n of {total} accepted, your reply is needed_": ["%n af {total} har accepteret, dit svar mangler", "%n af {total} har accepteret, dit svar mangler"],
+    "_%n action item was found in the notes. Check who does it and by when._::_%n action items were found in the notes. Check who does each and by when._": ["%n handlingspunkt fundet i noterne. Tjek hvem der gør det og hvornår.", "%n handlingspunkter fundet i noterne. Tjek hvem der gør hvad og hvornår."],
+    "_%n task could not be created: {titles}_::_%n tasks could not be created: {titles}_": ["%n opgave kunne ikke oprettes: {titles}", "%n opgaver kunne ikke oprettes: {titles}"],
+    "Action items": "Handlingspunkter",
+    "Action items become tasks, which need the Tasks app. Ask your administrator to install it.": "Handlingspunkter bliver til opgaver, som kræver appen Opgaver. Bed din administrator om at installere den.",
+    "Add action item": "Tilføj handlingspunkt",
+    "By when": "Senest",
+    "Each one becomes a team task for the person named, in their My Work.": "Hvert punkt bliver en teamopgave for den nævnte person, i vedkommendes Mit arbejde.",
+    "Each proposal you tick gets a link to these notes in its history. The approvers still decide in Decisions.": "Hvert forslag du markerer får et link til disse noter i sin historik. Godkenderne beslutter stadig i Beslutninger.",
+    "Meeting wrapped up": "Mødet er afsluttet",
+    "No action items were written in the notes. Add them below, or leave this empty.": "Der står ingen handlingspunkter i noterne. Tilføj dem herunder, eller lad det stå tomt.",
+    "On the agenda": "På dagsordenen",
+    "Open the notes": "Åbn noterne",
+    "Proposals discussed": "Drøftede forslag",
+    "Reading the meeting notes": "Læser mødenotaterne",
+    "Remove action item {n}": "Fjern handlingspunkt {n}",
+    "The meeting could not be wrapped up. Try again.": "Mødet kunne ikke afsluttes. Prøv igen.",
+    "The notes file could not be found. Add the action items below; nothing is written back.": "Notatfilen blev ikke fundet. Tilføj handlingspunkterne herunder; der skrives intet tilbage.",
+    "The wrap-up could not be loaded.": "Afslutningen kunne ikke indlæses.",
+    "This meeting has no wrap-up for you. Only its organiser can wrap it up, after it has ended.": "Dette møde har ingen afslutning til dig. Kun arrangøren kan afslutte det, når det er slut.",
+    "This meeting is already wrapped up.": "Dette møde er allerede afsluttet.",
+    "This meeting was marked as needing no wrap-up.": "Dette møde er markeret som uden afslutning.",
+    "What": "Hvad",
+    "Wrap up meeting": "Afslut mødet",
+    "Discussed in a meeting": "Drøftet på et møde",
+    "Meeting: {title}": "Møde: {title}",
+    "Open the meeting notes": "Åbn mødenotaterne",
+    "Meetings to wrap up": "Møder der skal afsluttes",
+    "Wrapped up meetings": "Afsluttede møder",
+    "Wrap up": "Afslut",
+    "Wrap up %1$s": "Afslut %1$s",
+    "The meeting is over. Hand out the action items and link the proposals you discussed.": "Mødet er slut. Fordel handlingspunkterne og knyt de drøftede forslag til.",
+    "Marked as needing no wrap-up": "Markeret som uden afslutning",
+    "Marked as needing no wrap-up.": "Markeret som uden afslutning.",
+    "_Wrapped up with %n task_::_Wrapped up with %n tasks_": ["Afsluttet med %n opgave", "Afsluttet med %n opgaver"],
+    "No wrap-up needed": "Ingen afslutning nødvendig",
+    "No tasks are handed out and no proposals are linked to the notes. You can still do that by hand.": "Der fordeles ingen opgaver, og ingen forslag knyttes til noterne. Det kan stadig gøres i hånden.",
+    "Meeting held": "Mødet er holdt",
+    "Organiser wraps up": "Arrangøren afslutter",
+    "Tasks are with the people named": "Opgaverne ligger hos de nævnte personer",
+    "Only the organiser can wrap up this meeting.": "Kun arrangøren kan afslutte dette møde.",
+    "This meeting was already wrapped up.": "Dette møde var allerede afsluttet.",
+    "From the meeting %1$s on %2$s.": "Fra mødet %1$s den %2$s.",
+    "Meeting notes: %1$s": "Mødenotater: %1$s",
+    "Wrap-up": "Afslutning",
+    "Wrapped up by %1$s on %2$s.": "Afsluttet af %1$s den %2$s.",
+    "No tasks were handed out.": "Der blev ikke fordelt nogen opgaver.",
+    "the team": "teamet",
+    "%1$s (%2$s, due %3$s)": "%1$s (%2$s, senest %3$s)",
+    "%1$s (%2$s)": "%1$s (%2$s)",
+    "The approvers decide on these in Decisions.": "Godkenderne beslutter om dem i Beslutninger.",
+    "Could not send your reply.": "Dit svar kunne ikke sendes.",
+    "Pinned by {name}": "Fastgjort af {name}",
+    "Reply sent": "Svar sendt",
+    "Reply to {title}": "Svar på {title}",
+    "Send reply": "Send svar",
+    "This reply is too long.": "Dette svar er for langt.",
+    "Could not end the poll.": "Afstemningen kunne ikke afsluttes.",
+    "End poll": "Afslut afstemning",
+    "End this poll?": "Afslut denne afstemning?",
+    "Nobody can vote after this, and everyone in the conversation sees the results.": "Derefter kan ingen stemme, og alle i samtalen kan se resultatet.",
+    "Poll ended": "Afstemning afsluttet",
+    "Add reaction": "Tilføj reaktion",
+    "_Remove your {emoji} reaction. %n person reacted_::_Remove your {emoji} reaction. %n people reacted_": [
+        "Fjern din {emoji}-reaktion. %n person har reageret",
+        "Fjern din {emoji}-reaktion. %n personer har reageret"
+    ],
+    "_React with {emoji}. %n person reacted_::_React with {emoji}. %n people reacted_": [
+        "Reager med {emoji}. %n person har reageret",
+        "Reager med {emoji}. %n personer har reageret"
+    ],
+    "_{names} and %n other reacted with {emoji}_::_{names} and %n others reacted with {emoji}_": [
+        "{names} og %n anden har reageret med {emoji}",
+        "{names} og %n andre har reageret med {emoji}"
+    ],
+    "{names} reacted with {emoji}": "Reageret med {emoji}: {names}",
+    "Could not add the reaction": "Kunne ikke tilføje reaktionen",
+    "Could not remove the reaction": "Kunne ikke fjerne reaktionen",
+    "Failed to link attachment {name}: {error}": "Kunne ikke tilknytte vedhæftningen {name}: {error}",
+    "_Expired %n day ago_::_Expired %n days ago_": [
+        "Udløb for %n dag siden",
+        "Udløb for %n dage siden"
+    ],
+    "_Expires in %n day_::_Expires in %n days_": [
+        "Udløber om %n dag",
+        "Udløber om %n dage"
+    ],
+    "_The roster for %s to %s is published. %n place is still open._::_The roster for %s to %s is published. %n places are still open._": [
+        "Vagtplanen fra %s til %s er offentliggjort. %n plads er stadig ledig.",
+        "Vagtplanen fra %s til %s er offentliggjort. %n pladser er stadig ledige."
+    ],
+    "_No member count has reached the licensing service for %n day, so this licence cannot be honoured. Existing Advanced teams still work read-only._::_No member count has reached the licensing service for %n days, so this licence cannot be honoured. Existing Advanced teams still work read-only._": [
+        "Intet medlemstal har nået licenstjenesten i %n dag, så denne licens kan ikke anerkendes. Eksisterende avancerede teams virker stadig skrivebeskyttet.",
+        "Intet medlemstal har nået licenstjenesten i %n dage, så denne licens kan ikke anerkendes. Eksisterende avancerede teams virker stadig skrivebeskyttet."
+    ],
+    "_No member count has reached the licensing service for %n day._::_No member count has reached the licensing service for %n days._": [
+        "Intet medlemstal har nået licenstjenesten i %n dag.",
+        "Intet medlemstal har nået licenstjenesten i %n dage."
+    ],
+    "_No member count has reached the licensing service for %n day. Check that this server can reach it, then send a report from the License tab._::_No member count has reached the licensing service for %n days. Check that this server can reach it, then send a report from the License tab._": [
+        "Intet medlemstal har nået licenstjenesten i %n dag. Kontrollér, at denne server kan nå den, og send derefter en rapport fra fanen Licens.",
+        "Intet medlemstal har nået licenstjenesten i %n dage. Kontrollér, at denne server kan nå den, og send derefter en rapport fra fanen Licens."
+    ],
+    "Links to {page}": "Linker til {page}",
+    "this page": "denne side",
+    "{tab} in {team}": "{tab} i {team}",
+    "Open the page this task was made on": "Åbn den side, hvor denne opgave blev oprettet",
+    "Open page": "Åbn side",
+    "Create follow-up task": "Opret opfølgningsopgave",
+    "this message": "denne besked",
+    "this comment": "denne kommentar",
+    "this decision": "denne beslutning",
+    "My Work views": "Visninger af Mit arbejde",
+    "Nothing is waiting on others": "Intet venter på andre",
+    "Nothing completed recently": "Intet fuldført for nylig",
+    "Work you handed to someone else, and requests waiting on another person, appear here.": "Arbejde, du har givet videre til en anden, og anmodninger, der venter på en anden person, vises her.",
+    "Work that was finished in the last few days appears here, yours and what others did for you.": "Arbejde, der er afsluttet de seneste dage, vises her, dit eget og det, andre har gjort for dig.",
+    "Team backlog": "Teamets backlog",
+    "\"{name}\" was unlinked from this team. TeamHub did not create it, so it was not deleted.": "\"{name}\" er afbrudt fra dette team. TeamHub har ikke oprettet det, så det er ikke slettet.",
+    "\"{name}\" was removed from this team. Another team still uses it, so it was not deleted.": "\"{name}\" er fjernet fra dette team. Et andet team bruger det stadig, så det er ikke slettet.",
+    "Shared with team": "Delt med teamet",
+    "Could not load what is shared with this team.": "Det, der er delt med dette team, kunne ikke indlæses.",
+    "This Nextcloud cannot list what is shared with teams.": "Denne Nextcloud kan ikke vise, hvad der er delt med teams.",
+    "Nothing else is shared with this team.": "Intet andet er delt med dette team.",
+    "Opens in a new tab": "Åbner i en ny fane",
+    "Show fewer": "Vis færre",
+    "No answer from {apps}. This list may be incomplete.": "Intet svar fra {apps}. Listen er muligvis ufuldstændig.",
+    "_Show %n more_::_Show %n more_": [
+        "Vis %n mere",
+        "Vis %n mere"
+    ],
+    "Apps that list team resources through Nextcloud's Teams API appear in the Shared with team card on every team home. Switch one off to stop its resources appearing in TeamHub. Nextcloud's own Teams page is not affected.": "Apps, der viser teamressourcer via Nextclouds Teams-API, vises i kortet Delt med teamet på hvert teams startside. Slå en app fra for at stoppe dens ressourcer i at blive vist i TeamHub. Nextclouds egen Teams-side påvirkes ikke.",
+    "The saved list of switched off apps cannot be read, so every app is switched off. Changing any switch saves a new list, with every other app switched on.": "Den gemte liste over fravalgte apps kan ikke læses, så alle apps er slået fra. Hvis du ændrer en kontakt, gemmes en ny liste, hvor alle andre apps er slået til.",
+    "No app shares team resources": "Ingen app deler teamressourcer",
+    "An installed app appears here when it lists resources for teams through Nextcloud's Teams API.": "En installeret app vises her, når den viser ressourcer for teams via Nextclouds Teams-API.",
+    "Stop showing {name} in TeamHub": "Stop med at vise {name} i TeamHub",
+    "Show {name} in TeamHub": "Vis {name} i TeamHub",
+    "Shown in TeamHub": "Vises i TeamHub",
+    "Not shown in TeamHub": "Vises ikke i TeamHub",
+    "Could not load the apps that share team resources.": "De apps, der deler teamressourcer, kunne ikke indlæses.",
+    "{name} is shown in Shared with team again.": "{name} vises igen i Delt med teamet.",
+    "{name} no longer appears in Shared with team.": "{name} vises ikke længere i Delt med teamet.",
+    "Could not save the setting.": "Indstillingen kunne ikke gemmes.",
+    "Modules enabled": "Aktiverede moduler",
+    "Announcement popup": "Popup med meddelelser",
+    "Turned off by an administrator": "Slået fra af en administrator",
+    "Not turned off": "Ikke slået fra",
+    "Folders managed by other apps": "Mapper administreret af andre apps",
+    "These apps give teams access to Team folders of their own. Team admins see such a folder as managed by the app and are not asked to review it. Switch an app off to send its folders back to the team admins' review.": "Disse apps giver teams adgang til deres egne teammapper. Teamadministratorer ser en sådan mappe som administreret af appen og bliver ikke bedt om at gennemgå den. Slå en app fra for at lade teamadministratorerne gennemgå dens mapper igen.",
+    "Let team admins review the folders of {name}": "Lad teamadministratorer gennemgå mapperne fra {name}",
+    "Let {name} manage its own folders": "Lad {name} administrere sine egne mapper",
+    "Managed by the app": "Administreret af appen",
+    "Reviewed by team admins": "Gennemgået af teamadministratorer",
+    "{name} manages its own folders again.": "{name} administrerer igen sine egne mapper.",
+    "Team admins review the folders of {name}. The folders appear in the review within an hour.": "Teamadministratorer gennemgår mapperne fra {name}. Mapperne vises i gennemgangen inden for en time.",
+    "Another app decides who can open these folders, so there is nothing to review here. Change the access in that app.": "En anden app bestemmer, hvem der kan åbne disse mapper, så der er intet at gennemgå her. Ændr adgangen i den app.",
+    "Managed by {app}": "Administreret af {app}",
+    "_Show %n folder managed by another app_::_Show %n folders managed by other apps_": ["Vis %n mappe administreret af en anden app", "Vis %n mapper administreret af andre apps"],
+    "Add field": "Tilføj felt",
+    "Ask which team the request is for": "Spørg, hvilket team anmodningen er til",
+    "Enter at most {max} options of at most 100 characters.": "Angiv højst {max} muligheder på højst 100 tegn.",
+    "Every request is personal: only the requester and this team can follow it.": "Hver anmodning er personlig: kun anmoderen og dette team kan følge den.",
+    "Explanation (optional)": "Forklaring (valgfri)",
+    "Explanation of field {n} (optional)": "Forklaring til felt {n} (valgfri)",
+    "Field name": "Feltets navn",
+    "Fields of the request form": "Felter i anmodningsformularen",
+    "Move field {n} down": "Flyt felt {n} ned",
+    "Move field {n} up": "Flyt felt {n} op",
+    "Must be filled in": "Skal udfyldes",
+    "Name of field {n}": "Navn på felt {n}",
+    "Options of field {n}, one per line": "Muligheder for felt {n}, én pr. linje",
+    "Options, one per line": "Muligheder, én pr. linje",
+    "Remove field": "Fjern felt",
+    "Remove field {n}": "Fjern felt {n}",
+    "Request form": "Anmodningsformular",
+    "The name of the service": "Tjenestens navn",
+    "The request is named after": "Anmodningen opkaldes efter",
+    "The requester may leave it empty. The members of the team they pick can follow the request.": "Anmoderen kan lade det stå tomt. Medlemmerne af det valgte team kan følge anmodningen.",
+    "Type of field {n}": "Type for felt {n}",
+    "What somebody fills in to make a request. Without fields they only read the description and send the request.": "Det, man udfylder for at lave en anmodning. Uden felter læser man kun beskrivelsen og sender anmodningen.",
+    "An admin of the team can close the request instead.": "En administrator af teamet kan lukke anmodningen i stedet.",
+    "Automatic": "Automatisk",
+    "Confirm automatically after (days)": "Bekræft automatisk efter (dage)",
+    "Confirmation": "Bekræftelse",
+    "No confirmation": "Ingen bekræftelse",
+    "The request ends without a confirmation": "Anmodningen slutter uden bekræftelse",
+    "The requester confirms the result": "Anmoderen bekræfter resultatet",
+    "The requester confirms, or it is confirmed automatically": "Anmoderen bekræfter, eller det bekræftes automatisk",
+    "When the last step is done": "Når det sidste trin er færdigt",
+    "Give every field of the request form a name.": "Giv hvert felt i anmodningsformularen et navn.",
+    "Give every field with choices at least two options.": "Giv hvert valgfelt mindst to muligheder.",
+    "Short text": "Kort tekst",
+    "Long text": "Lang tekst",
+    "One option": "Én mulighed",
+    "Several options": "Flere muligheder",
+    "Number": "Tal",
+    "Yes or no": "Ja eller nej",
+    "Person": "Person",
+    "Choose an option": "Vælg en mulighed",
+    "Search for a person": "Søg efter en person",
+    "{field} (optional)": "{field} (valgfri)",
+    "{name} ({detail})": "{name} ({detail})",
+    "Confirmed automatically from {date}.": "Bekræftes automatisk fra {date}.",
+    "Confirmed automatically": "Bekræftet automatisk",
+    "The name of a field is at most %s characters.": "Navnet på et felt må højst være på %s tegn.",
+    "The explanation of a field is at most %s characters.": "Forklaringen til et felt må højst være på %s tegn.",
+    "The request form could not be read.": "Anmodningsformularen kunne ikke læses.",
+    "Pick one of the field types.": "Vælg en af felttyperne.",
+    "Fill in \"%s\".": "Udfyld \"%s\".",
+    "This service has changed. Check your answers and send the request again.": "Denne tjeneste er ændret. Kontrollér dine svar, og send anmodningen igen.",
+    "The answers could not be read.": "Svarene kunne ikke læses.",
+    "\"%s\" contains characters that are not allowed.": "\"%s\" indeholder tegn, der ikke er tilladt.",
+    "\"%1$s\" is at most %2$s characters.": "\"%1$s\" må højst være på %2$s tegn.",
+    "\"%s\" is not a date.": "\"%s\" er ikke en dato.",
+    "\"%s\" is not a number.": "\"%s\" er ikke et tal.",
+    "Pick a person for \"%s\".": "Vælg en person til \"%s\".",
+    "An option is at most %s characters.": "En mulighed må højst være på %s tegn.",
+    "Names and options cannot contain line breaks or special characters.": "Navne og muligheder må ikke indeholde linjeskift eller specialtegn.",
+    "The answer to \"%s\" could not be read.": "Svaret på \"%s\" kunne ikke læses.",
+    "Pick one of the options for \"%s\".": "Vælg en af mulighederne for \"%s\".",
+    "The confirmation could not be read.": "Bekræftelsen kunne ikke læses.",
+    "Pick how a request is confirmed.": "Vælg, hvordan en anmodning bekræftes.",
+    "Confirm automatically after 1 to %s days.": "Bekræft automatisk efter 1 til %s dage.",
+    "_{n} field_::_{n} fields_": ["{n} felt", "{n} felter"],
+    "_Automatic after {n} day_::_Automatic after {n} days_": ["Automatisk efter {n} dag", "Automatisk efter {n} dage"],
+    "_A request form has at most %n field._::_A request form has at most %n fields._": ["En anmodningsformular har højst %n felt.", "En anmodningsformular har højst %n felter."],
+    "_A field has at most %n option._::_A field has at most %n options._": ["Et felt har højst %n mulighed.", "Et felt har højst %n muligheder."],
+    "Add a field of the type Person to the request form first.": "Tilføj først et felt af typen Person til anmodningsformularen.",
+    "Everybody in the group can answer. The first answer decides.": "Alle i gruppen kan svare. Det første svar afgør.",
+    "Field of the request form": "Felt i anmodningsformularen",
+    "Text of the approve button (optional)": "Tekst på godkend-knappen (valgfri)",
+    "Text of the approve button of step {n} (optional)": "Tekst på godkend-knappen i trin {n} (valgfri)",
+    "Text of the reject button (optional)": "Tekst på afvis-knappen (valgfri)",
+    "Text of the reject button of step {n} (optional)": "Tekst på afvis-knappen i trin {n} (valgfri)",
+    "The approver sees the request, its files and the steps so far from the moment it is their turn. They do not see the messages or your internal notes.": "Godkenderen ser anmodningen, dens filer og trinene indtil nu fra det øjeblik, det er deres tur. De ser ikke beskederne eller jeres interne noter.",
+    "The field that names who approves step {n}": "Feltet, der angiver, hvem der godkender trin {n}",
+    "The group that approves step {n}": "Gruppen, der godkender trin {n}",
+    "The manager in the requester's account, as an administrator set it.": "Lederen på anmoderens konto, som en administrator har angivet den.",
+    "The person who approves step {n}": "Personen, der godkender trin {n}",
+    "The request ends": "Anmodningen slutter",
+    "The request goes on, and the team decides what follows": "Anmodningen fortsætter, og teamet afgør, hvad der følger",
+    "Used when there is nobody else, or when the approver made the request. Nobody approves their own request.": "Bruges, når der ikke er andre, eller når godkenderen lavede anmodningen. Ingen godkender sin egen anmodning.",
+    "When the approver rejects": "Når godkenderen afviser",
+    "Who approves": "Hvem godkender",
+    "Who approves otherwise": "Hvem godkender ellers",
+    "Who approves otherwise (optional)": "Hvem godkender ellers (valgfri)",
+    "Who approves step {n}": "Hvem godkender trin {n}",
+    "Who approves step {n} otherwise": "Hvem godkender ellers trin {n}",
+    "A group": "En gruppe",
+    "A person": "En person",
+    "A person picked on the request form": "En person valgt i anmodningsformularen",
+    "Check the request": "Kontrollér anmodningen",
+    "Explanation": "Forklaring",
+    "Intake form": "Indtagsformular",
+    "Issue": "Henvendelse",
+    "Manager approves": "Leder godkender",
+    "Needed by": "Skal bruges senest",
+    "Request with approval": "Anmodning med godkendelse",
+    "Say for every approval who approves.": "Angiv for hver godkendelse, hvem der godkender.",
+    "Say who approves when there is no manager or nobody was picked.": "Angiv, hvem der godkender, når der ikke er en leder, eller ingen blev valgt.",
+    "The requester's manager": "Anmoderens leder",
+    "Approval asked of {name}": "Godkendelse bedt om hos {name}",
+    "Approval handed to {name}": "Godkendelse overdraget til {name}",
+    "Approved: {step}": "Godkendt: {step}",
+    "Approves a step": "Godkender et trin",
+    "Ask for approval": "Bed om godkendelse",
+    "Hand to somebody else": "Overdrag til en anden",
+    "What do you want approved?": "Hvad vil du have godkendt?",
+    "The requester can read this. The request waits for the answer, and a rejection comes back to you.": "Anmoderen kan læse dette. Anmodningen venter på svaret, og en afvisning kommer tilbage til dig.",
+    "Add approval step": "Tilføj godkendelsestrin",
+    "Start from": "Start fra",
+    "Waiting for the approval you asked for.": "Venter på den godkendelse, du bad om.",
+    "Whoever approves the request can view them too.": "Den, der godkender anmodningen, kan også se dem.",
+    "The last step is for the team, not an approver.": "Det sidste trin er for teamet, ikke en godkender.",
+    "No request is waiting for somebody else.": "Ingen anmodning venter på en anden.",
+    "A step is for the team, the requester or an approver.": "Et trin er for teamet, anmoderen eller en godkender.",
+    "The approval could not be read.": "Godkendelsen kunne ikke læses.",
+    "Pick who approves.": "Vælg, hvem der godkender.",
+    "Pick what happens when the approver rejects.": "Vælg, hvad der sker, når godkenderen afviser.",
+    "The text of a button is at most %s characters.": "Teksten på en knap må højst være på %s tegn.",
+    "The approver could not be read.": "Godkenderen kunne ikke læses.",
+    "An approver does not exist any more. Pick somebody else.": "En godkender findes ikke længere. Vælg en anden.",
+    "You cannot name this approver. Pick somebody else.": "Du kan ikke udpege denne godkender. Vælg en anden.",
+    "There is nobody to approve this request. Ask the service team.": "Der er ingen til at godkende denne anmodning. Spørg serviceteamet.",
+    "Wait for the approval you asked for first.": "Vent først på den godkendelse, du bad om.",
+    "Only whoever claimed this task can ask for an approval.": "Kun den, der har taget opgaven, kan bede om en godkendelse.",
+    "This task is not being worked on right now.": "Der arbejdes ikke på denne opgave lige nu.",
+    "Say what you want approved.": "Angiv, hvad du vil have godkendt.",
+    "This person was already asked.": "Denne person er allerede spurgt.",
+    "Wait for the approvals you asked for first.": "Vent først på de godkendelser, du bad om.",
+    "This step is not an approval.": "Dette trin er ikke en godkendelse.",
+    "The requester cannot approve their own request.": "Anmoderen kan ikke godkende sin egen anmodning.",
+    "Whoever asks for an approval cannot give it.": "Den, der beder om en godkendelse, kan ikke give den.",
+    "Pick somebody to approve this.": "Vælg en til at godkende dette.",
+    "Hand the approval to somebody other than yourself.": "Overdrag godkendelsen til en anden end dig selv.",
+    "You cannot approve this request yourself.": "Du kan ikke selv godkende denne anmodning.",
+    "{actor} asks for your approval of {workflow}": "{actor} beder om din godkendelse af {workflow}",
+    "%1$s asks for your approval of %2$s": "%1$s beder om din godkendelse af %2$s",
+    "{actor} approved {workflow}": "{actor} godkendte {workflow}",
+    "%1$s approved %2$s": "%1$s godkendte %2$s",
+    "{actor} did not approve {workflow}": "{actor} godkendte ikke {workflow}",
+    "%1$s did not approve %2$s": "%1$s godkendte ikke %2$s",
+    "{name} is waiting for your answer. What you send now answers their question.": "{name} venter på dit svar. Det, du sender nu, besvarer spørgsmålet.",
+    "When enabled, an admin of a service team can have a service send an email when a step is reached, done or rejected, with the team's own text and answers from the request form. It goes to accounts on this server only. Sent email is outside Nextcloud: whoever can read it reads those answers. When disabled, services still send notifications.": "Når det er slået til, kan en administrator af et serviceteam lade en service sende en e-mail, når et trin er nået, færdigt eller afvist, med teamets egen tekst og svar fra anmodningsformularen. Den går kun til konti på denne server. En sendt e-mail er uden for Nextcloud: den, der kan læse den, læser svarene. Når det er slået fra, sender services stadig notifikationer.",
+    "A field without a name": "Et felt uden navn",
+    "A group of more than 100 people is not told.": "En gruppe på mere end 100 personer får ikke besked.",
+    "A person or group that gets a notice does not exist any more. Pick somebody else.": "En person eller gruppe, der får en besked, findes ikke længere. Vælg en anden.",
+    "About email from services": "Om e-mail fra services",
+    "Add notice": "Tilføj besked",
+    "An email leaves Nextcloud. Whoever can read it reads these answers, whatever they may open here. The notification shows the subject and the text only.": "En e-mail forlader Nextcloud. Den, der kan læse den, læser disse svar, uanset hvad vedkommende må åbne her. Notifikationen viser kun emnet og teksten.",
+    "As a notification in Nextcloud": "Som notifikation i Nextcloud",
+    "By email, to the address in the account": "Via e-mail, til adressen i kontoen",
+    "Give every notice a subject.": "Giv hver besked et emne.",
+    "How it is sent": "Hvordan den sendes",
+    "It would go to more than 100 people.": "Den ville gå til mere end 100 personer.",
+    "Let services send email": "Lad services sende e-mail",
+    "No email could be sent to {names}.": "Der kunne ikke sendes e-mail til {names}.",
+    "Notice not sent: {subject}": "Besked ikke sendt: {subject}",
+    "Notice: {subject}": "Besked: {subject}",
+    "Notices": "Beskeder",
+    "Open the request": "Åbn anmodningen",
+    "Remove notice {n} of step {step}": "Fjern besked {n} fra trin {step}",
+    "Remove notice": "Fjern besked",
+    "Say for every notice how it is sent.": "Angiv for hver besked, hvordan den sendes.",
+    "Say for every notice who gets it.": "Angiv for hver besked, hvem der får den.",
+    "Services cannot send email on this server. Send the notice as a notification.": "Services kan ikke sende e-mail på denne server. Send beskeden som notifikation.",
+    "Services cannot send email on this server.": "Services kan ikke sende e-mail på denne server.",
+    "Services may send email": "Services må sende e-mail",
+    "Step": "Trin",
+    "Subject of notice {n} of step {step}": "Emne for besked {n} i trin {step}",
+    "Tell somebody about this step, in your own words. Whoever has to act is told already.": "Fortæl nogen om dette trin med dine egne ord. Den, der skal handle, får allerede besked.",
+    "Text (optional)": "Tekst (valgfrit)",
+    "Text of notice {n} of step {step} (optional)": "Tekst for besked {n} i trin {step} (valgfrit)",
+    "The approver": "Godkenderen",
+    "The group that gets notice {n} of step {step}": "Gruppen, der får besked {n} i trin {step}",
+    "The name of the requester": "Anmoderens navn",
+    "The notices could not be read.": "Beskederne kunne ikke læses.",
+    "The person who gets notice {n} of step {step}": "Personen, der får besked {n} i trin {step}",
+    "The subject of a notice is at most %s characters.": "Emnet for en besked er højst %s tegn.",
+    "The text of a notice is at most %s characters.": "Teksten i en besked er højst %s tegn.",
+    "There was nobody to send it to.": "Der var ingen at sende den til.",
+    "To {names}, as a notification and by email": "Til {names}, som notifikation og via e-mail",
+    "To {names}, as a notification": "Til {names}, som notifikation",
+    "To {names}, by email": "Til {names}, via e-mail",
+    "What the email also says": "Hvad e-mailen også siger",
+    "When notice {n} of step {step} is sent": "Hvornår besked {n} i trin {step} sendes",
+    "When the step is done": "Når trinnet er færdigt",
+    "When the step is reached": "Når trinnet er nået",
+    "When the step is rejected": "Når trinnet afvises",
+    "Who gets it": "Hvem der får den",
+    "Who gets notice {n} of step {step}": "Hvem der får besked {n} i trin {step}",
+    "Whoever has the task": "Den, der har opgaven",
+    "You cannot send a notice to this person or group. Pick somebody else.": "Du kan ikke sende en besked til denne person eller gruppe. Vælg en anden.",
+    "You get this email because the team that offers \"%s\" asked TeamHub to tell you about this step.": "Du får denne e-mail, fordi teamet, der tilbyder \"%s\", har bedt TeamHub om at give dig besked om dette trin.",
+    "_{names} and {n} more_::_{names} and {n} more_": ["{names} og {n} mere", "{names} og {n} mere"],
+    "_{n} notice_::_{n} notices_": ["{n} besked", "{n} beskeder"],
+    "_A step has at most %n notice._::_A step has at most %n notices._": ["Et trin har højst %n besked.", "Et trin har højst %n beskeder."],
+    "Notice {n}": "Besked {n}",
+    "A condition asks something its field cannot answer. Pick another comparison.": "En betingelse spørger om noget, feltet ikke kan svare på. Vælg en anden sammenligning.",
+    "A condition could not be read.": "En betingelse kunne ikke læses.",
+    "A condition uses a field that is not on the request form any more.": "En betingelse bruger et felt, der ikke længere er på anmodningsformularen.",
+    "A condition uses an answer of the request form. This form has no fields.": "En betingelse bruger et svar fra anmodningsformularen. Denne formular har ingen felter.",
+    "At least one team step runs on every request. Remove the condition from one.": "Mindst ét teamtrin kører ved hver anmodning. Fjern betingelsen fra et af dem.",
+    "Comparison": "Sammenligning",
+    "Give every condition a value.": "Giv hver betingelse en værdi.",
+    "Not needed": "Ikke nødvendig",
+    "Only on some requests": "Kun ved nogle anmodninger",
+    "Only when {field} is filled in": "Kun når {field} er udfyldt",
+    "Only when {field} {op} {value}": "Kun når {field} {op} {value}",
+    "Otherwise the step is left out and the request goes on to the next one. A field nobody answered never matches.": "Ellers springes trinnet over, og anmodningen går videre til det næste. Et felt, som ingen har udfyldt, passer aldrig.",
+    "Pick a field": "Vælg et felt",
+    "The comparison of the condition of step {n}": "Sammenligningen i betingelsen for trin {n}",
+    "The field the condition of step {n} looks at": "Feltet, som betingelsen for trin {n} ser på",
+    "The last step runs on every request. Remove its condition.": "Det sidste trin kører ved hver anmodning. Fjern dets betingelse.",
+    "The value of a condition is at most %s characters.": "Værdien i en betingelse er højst %s tegn.",
+    "The value of the condition of step {n}": "Værdien i betingelsen for trin {n}",
+    "When the answer to": "Når svaret på",
+    "does not include": "indeholder ikke",
+    "includes": "indeholder",
+    "is at least": "er mindst",
+    "is at most": "er højst",
+    "is filled in": "er udfyldt",
+    "is not": "er ikke",
+    "is on or after": "er på eller efter",
+    "is on or before": "er på eller før",
+    "is": "er",
+    "%1$s: the step \"%2$s\" is past its deadline": "%1$s: trinnet \"%2$s\" er over fristen",
+    "{workflow}: the step \"{step}\" is past its deadline": "{workflow}: trinnet \"{step}\" er over fristen",
+    "Counted from when the request reaches this step, Monday to Friday.": "Talt fra det tidspunkt, anmodningen når dette trin, mandag til fredag.",
+    "Deadline in working days (optional)": "Frist i arbejdsdage (valgfrit)",
+    "Deadline of step {n} in working days (optional)": "Frist for trin {n} i arbejdsdage (valgfrit)",
+    "Due:": "Frist:",
+    "Give a step 1 to %s working days, or no deadline.": "Giv et trin 1 til %s arbejdsdage eller ingen frist.",
+    "Overdue since {date}": "Forsinket siden {date}",
+    "Overdue since:": "Forsinket siden:",
+    "Past its deadline: {step}": "Over fristen: {step}",
+    "_Within {n} working day_::_Within {n} working days_": ["Inden for {n} arbejdsdag", "Inden for {n} arbejdsdage"],
+    "Fields of task {t} of step {n}": "Felter i opgave {t} i trin {n}",
+    "Fields the requester fills in to complete this task. Everybody on the request sees the answers.": "Felter, som anmoderen udfylder for at afslutte denne opgave. Alle på anmodningen ser svarene.",
+    "Fields whoever does this task fills in to complete it. Only the team sees the answers.": "Felter, som den, der udfører opgaven, udfylder for at afslutte den. Kun teamet ser svarene.",
+    "A condition can only use a field of the request form or of a step before it.": "En betingelse kan kun bruge et felt fra anmodningsformularen eller fra et tidligere trin.",
+    "Give every field of a task a name.": "Giv hvert felt i en opgave et navn.",
+    "Loading this team. More settings may appear in a moment.": "Teamet indlæses. Flere indstillinger kan dukke op om et øjeblik.",
+    "This needs a TeamHub licence.": "Dette kræver en TeamHub-licens.",
 },
     "nplurals=2; plural=(n != 1);");

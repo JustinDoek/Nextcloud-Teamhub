@@ -15,6 +15,7 @@ use OCP\Calendar\ICreateFromString;
 use OCP\Calendar\IManager as ICalendarManager;
 use OCP\IDBConnection;
 use OCP\IL10N;
+use OCP\IURLGenerator;
 use OCP\IUserSession;
 use Psr\Container\ContainerInterface;
 use Psr\Log\LoggerInterface;
@@ -76,7 +77,17 @@ class TaskService {
         // a compile-time dependency of this class.
         private ContainerInterface $container,
         private LoggerInterface $logger,
+        // v4.20.29 — a task made from a page carries that page's address,
+        // stored absolute (an iCalendar URL is a URI) and read back only when
+        // it points into this instance. See `absoluteLink()`.
+        private IURLGenerator $urlGenerator,
     ) {}
+
+    /** Longest page link a task accepts, in bytes. A TeamHub deep link is well under 300. */
+    public const MAX_LINK_LENGTH = 2000;
+
+    /** Whitespace, a backslash or a control character: never in a link we write or show. */
+    private const UNSAFE_LINK_CHARS = '/[\s\\\\\x00-\x1F\x7F]/';
 
     // -------------------------------------------------------------------------
     // Public API
@@ -142,6 +153,10 @@ class TaskService {
      * @param int|null    $calendarId  Target calendar ID; uses first connected calendar if null
      * @param string|null $assignee    a team member's uid, `self`, or `team` /
      *                                 null for the whole team
+     * @param string|null $link        v4.20.29: the page the task was made on,
+     *                                 as a path into this instance
+     *                                 (`/index.php/apps/teamhub/?team=…`).
+     *                                 Written as the VTODO's `URL`.
      * @return array{uri:string,title:string,assignee:string|null}
      * @throws \Exception when Tasks app missing, calendar not found, or insert fails
      */
@@ -152,8 +167,13 @@ class TaskService {
         ?string $description,
         ?int $calendarId = null,
         ?string $assignee = null,
+        ?string $link = null,
     ): array {
         $this->assertTasksApp();
+
+        // Checked first: a link that cannot be stored is the caller's mistake,
+        // and it should not cost a calendar lookup to find out.
+        $url = $this->absoluteLink($link);
 
         if ($calendarId === null) {
             $calendarId = $this->resolveCalendarId($teamId);
@@ -169,7 +189,7 @@ class TaskService {
         $assigneeUid = $this->resolveAssignee($teamId, $creator, $assignee);
 
         $uid     = $this->generateUid();
-        $icsData = $this->buildVtodoIcs($uid, $title, $duedate, $description, $creator, $assigneeUid);
+        $icsData = $this->buildVtodoIcs($uid, $title, $duedate, $description, $creator, $assigneeUid, $url);
         $uri     = $uid . '.ics';
 
         try {
@@ -200,6 +220,57 @@ class TaskService {
         }
 
         return ['uri' => $uri, 'title' => $title, 'assignee' => $assigneeUid];
+    }
+
+    /**
+     * The page link a task is created with, made absolute — v4.20.29.
+     *
+     * Only a path into this instance is accepted: it starts with one `/`, has
+     * no whitespace, backslash or control character, and is not a
+     * protocol-relative `//host`. The quick-task dialog builds it from the
+     * page the person is on, so anything else is not a page of ours, and a
+     * task is not a place to park a link to somewhere else for a colleague to
+     * click.
+     *
+     * Stored absolute because RFC 5545 types `URL` as a URI, and the Tasks app
+     * and any CalDAV client should be able to open it as it stands.
+     *
+     * @throws ValidationException when the link is not a path into this instance
+     */
+    private function absoluteLink(?string $link): ?string {
+        $link = trim((string)$link);
+        if ($link === '') {
+            return null;
+        }
+        if (strlen($link) > self::MAX_LINK_LENGTH
+            || !str_starts_with($link, '/')
+            || str_starts_with($link, '//')
+            || preg_match(self::UNSAFE_LINK_CHARS, $link) === 1) {
+            throw new ValidationException('The page link must point to a page in this Nextcloud.');
+        }
+        return $this->urlGenerator->getAbsoluteURL($link);
+    }
+
+    /**
+     * The page a task was made on, for its My Work row — v4.20.29.
+     *
+     * A VTODO's `URL` can be written by any CalDAV client, so it is shown only
+     * when it points into this instance (the same rule `absoluteLink()` writes
+     * by). A link elsewhere stays in the task, where the Tasks app shows it;
+     * TeamHub does not put a button on it.
+     *
+     * @return string|null the absolute URL, or null when it is not ours
+     */
+    public function sourceLinkFrom(string $url): ?string {
+        $url  = trim($url);
+        $base = rtrim($this->urlGenerator->getAbsoluteURL('/'), '/') . '/';
+        if ($url === ''
+            || strlen($url) > self::MAX_LINK_LENGTH
+            || !str_starts_with($url, $base)
+            || preg_match(self::UNSAFE_LINK_CHARS, $url) === 1) {
+            return null;
+        }
+        return $url;
     }
 
     /**
@@ -623,6 +694,7 @@ class TaskService {
         ?string $description,
         string $creator = '',
         ?string $assigneeUid = null,
+        ?string $url = null,
     ): string {
         $vcalendar = new \Sabre\VObject\Component\VCalendar([
             'PRODID'  => '-//TeamHub//TeamHub Tasks//EN',
@@ -647,6 +719,12 @@ class TaskService {
 
         if ($description !== null && trim($description) !== '') {
             $vtodo->add('DESCRIPTION', trim($description));
+        }
+
+        // v4.20.29 — the page the task was made on. Already absolute and
+        // checked by absoluteLink().
+        if ($url !== null) {
+            $vtodo->add('URL', $url);
         }
 
         // Who it is from and who it is for. The ORGANIZER is written even for a

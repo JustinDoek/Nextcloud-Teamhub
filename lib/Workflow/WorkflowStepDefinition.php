@@ -40,8 +40,17 @@ namespace OCA\TeamHub\Workflow;
  * together, and moves on when every task that is not `$nonBlocking` is
  * done. `$stageLabel` is the step's own name, `$label` the task's. An entry
  * without a stage is a step of its own — every built-in definition.
+ *
+ * **Approvals** (v4.20.58, § 14.4). `$type` is `approval` for a step somebody
+ * approves or rejects, and `$config` what the service said about it: the
+ * approver, the words, what a rejection does.
+ *
+ * **Notices** (v4.20.62, § 14.5). `$config['notify']`, on any kind of step: on
+ * the first task's entry when the step holds several.
  */
 final class WorkflowStepDefinition {
+
+    public const TYPE_APPROVAL = 'approval';
 
     public function __construct(
         public readonly string $key,
@@ -57,6 +66,10 @@ final class WorkflowStepDefinition {
         public readonly string $stageLabel = '',
         /** v4.10.37 — the request may move on while this task is still open. */
         public readonly bool $nonBlocking = false,
+        /** v4.20.58 — '' or TYPE_APPROVAL. */
+        public readonly string $type = '',
+        /** @var array<string, mixed> v4.20.58 */
+        public readonly array $config = [],
     ) {
         if ($key === '' || strlen($key) > 64 || !preg_match('/^[a-z][a-z0-9_]*$/', $key)) {
             throw new \InvalidArgumentException('A step key is 1–64 lowercase characters, digits or underscores: ' . $key);

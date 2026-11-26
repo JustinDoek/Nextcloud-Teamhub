@@ -119,7 +119,13 @@ class TeamController extends Controller {
         // v4.13.34 — the team's own default home layout, set here beside the
         // hidden-widgets list it belongs with (issue #109 phase 3).
         private LayoutDefaultService $layoutDefaults,
-        private \OCA\TeamHub\Service\RoomDiscoveryService $roomDiscovery,
+        // v4.20.0 — the room finder: rooms with building, floor and capacity,
+        // and whether each is free in a slot. Replaces the bare
+        // RoomDiscoveryService here; that one is now read through it.
+        private \OCA\TeamHub\Service\RoomAvailabilityService $roomAvailability,
+        // v4.20.8 — recurring meetings: the licence gate, the RRULE and the
+        // room check on every date of a series.
+        private \OCA\TeamHub\Service\MeetingSeriesService $meetingSeries,
         // v4.11.6 — the default issue process a new service team is seeded
         // with, from saveTeamType(). Beside TeamExpiryService for the same
         // reason: it follows from the template being written, not from a
@@ -1107,7 +1113,11 @@ class TeamController extends Controller {
     public function getTeamCalendarEvents(string $teamId): JSONResponse {
         try {
             $this->memberService->requireMemberLevel($teamId);
-            $events = $this->activityService->getTeamCalendarEvents($teamId);
+            // v4.20.8 — attendee replies (the acceptance pill) are licensed;
+            // an unlicensed instance is never sent them.
+            $events = $this->activityService->getTeamCalendarEvents(
+                $teamId, 10, $this->licenseService->isLicensed(),
+            );
             return new JSONResponse($events);
         } catch (\Throwable $e) {
             return $this->exceptionResponse($e, 'Team operation failed');
@@ -1787,6 +1797,8 @@ class TeamController extends Controller {
             || $e instanceof \OCA\TeamHub\Exception\NotFoundException
             || $e instanceof \OCA\TeamHub\Exception\AppNotAvailableException
             || $e instanceof \OCA\TeamHub\Exception\ValidationException
+            || $e instanceof \OCA\TeamHub\Exception\RoomBusyException
+            || $e instanceof \OCA\TeamHub\Exception\LicenseGateException
             || $e instanceof \InvalidArgumentException) {
             return $this->exceptionResponse($e);
         }
@@ -1798,7 +1810,10 @@ class TeamController extends Controller {
      *
      * Creates a VTODO task in the team calendar.
      * Body: { title: string, duedate?: string (ISO 8601), description?: string,
-     *         calendarId?: int, assignee?: string }
+     *         calendarId?: int, assignee?: string, link?: string }
+     *
+     * `link` (v4.20.29) is the page the task was made on, a path into this
+     * instance; anything else answers 400 (`TaskService::absoluteLink()`).
      *
      * `assignee` is a team member's uid, `self`, or `team` / omitted for the
      * whole team — see `TaskService`'s docblock on why a task names who it is
@@ -1814,6 +1829,8 @@ class TeamController extends Controller {
             $description = $this->request->getParam('description') ?: null;
             $calendarId  = $this->request->getParam('calendarId') ? (int)$this->request->getParam('calendarId') : null;
             $assignee    = $this->request->getParam('assignee') ?: null;
+            $link        = $this->request->getParam('link');
+            $link        = is_string($link) && trim($link) !== '' ? $link : null;
 
             if ($title === '') {
                 return new JSONResponse(['error' => 'Title is required'], Http::STATUS_BAD_REQUEST);
@@ -1822,6 +1839,7 @@ class TeamController extends Controller {
             $result = $this->taskService->createTeamTask(
                 $teamId, $title, $duedate, $description, $calendarId,
                 $assignee !== null ? (string)$assignee : null,
+                $link,
             );
             return new JSONResponse($result, Http::STATUS_CREATED);
         } catch (\Throwable $e) {
@@ -2051,10 +2069,35 @@ class TeamController extends Controller {
                 return new JSONResponse(['error' => 'title, start and end are required'], Http::STATUS_BAD_REQUEST);
             }
 
+            // v4.20.0 — a room already taken in this slot is refused before
+            // anything is written. The finder shows availability, but the slot
+            // can be taken between the picker loading and Create, and an
+            // older client does not check at all.
+            //
+            // v4.20.8 — a recurring event (licensed) is checked on every date
+            // of the series, up to a year ahead, and written with its RRULE.
+            $callerUid  = $this->userSession->getUser()?->getUID() ?? '';
+            $recurrence = $this->meetingSeries->fromRequest($body['recurrence'] ?? null);
+            $slotStart  = $this->parseInstant($start);
+            $slotEnd    = $this->parseInstant($end);
+            $rrule      = '';
+            if ($recurrence !== null) {
+                if ($slotStart === null || $slotEnd === null) {
+                    return new JSONResponse(['error' => 'start and end must be dates'], Http::STATUS_BAD_REQUEST);
+                }
+                $series = $this->meetingSeries->plan($recurrence, $slotStart, $slotEnd, $callerUid);
+                $rrule  = $series['rrule'];
+                if ($roomEmail !== '') {
+                    $this->meetingSeries->assertRoomFree($callerUid, $roomEmail, $series['occurrences']);
+                }
+            } elseif ($roomEmail !== '' && $slotStart !== null && $slotEnd !== null) {
+                $this->roomAvailability->assertRoomFree($callerUid, $roomEmail, $slotStart, $slotEnd);
+            }
+
             $uid = $this->activityService->createCalendarEvent(
                 $teamId, $title, $start, $end, $location, $description,
                 $calendarId ?: null, $includeTalk, $categories,
-                $roomEmail, $roomName, $roomId, $attendeeUids
+                $roomEmail, $roomName, $roomId, $attendeeUids, $rrule
             );
             return new JSONResponse([
                 'success'  => true,
@@ -2071,22 +2114,27 @@ class TeamController extends Controller {
     /**
      * GET /api/v1/teams/{teamId}/rooms
      *
-     * Returns the list of bookable rooms visible to the current user, used
-     * by the meeting wizard's room picker. Returns [] when RoomVox is not
-     * installed (= "if roomvox is enabled" gate per session brief) or when
-     * no rooms are discoverable.
+     * Every room the caller may book, for the room finder in the meeting
+     * wizard and Add event. [] when no room backend is installed, and the
+     * pickers fall back to a free-text location.
      *
-     * SEC: team-membership required. We do not surface rooms a user can't
-     * already see in NC Calendar — IResourceManager applies its own
-     * permission model.
+     * v4.20.0: each entry also carries `key`, `kind`, `building`, `floor`,
+     * `roomNumber`, `capacity` (null when the backend publishes none),
+     * `features` and `type`, read from the room's published metadata. A room
+     * restricted to groups the caller is in none of is left out, as Nextcloud
+     * Calendar leaves it out.
+     *
+     * SEC: team membership required.
      */
     #[NoAdminRequired]
     #[NoCSRFRequired]
     public function listRooms(string $teamId): JSONResponse {
         try {
             $this->memberService->requireMemberLevel($teamId);
-            $rooms = $this->roomDiscovery->listAvailableRooms();
-            return new JSONResponse(['rooms' => $rooms]);
+            $uid = $this->userSession->getUser()?->getUID() ?? '';
+            return new JSONResponse(['rooms' => $this->roomAvailability->catalogue($uid)]);
+        } catch (\OCA\TeamHub\Exception\AccessDeniedException $e) {
+            return $this->exceptionResponse($e);
         } catch (\Throwable $e) {
             $this->logger->warning('Failed to list rooms', [
                 'teamId'    => $teamId,
@@ -2094,6 +2142,143 @@ class TeamController extends Controller {
                 'app'       => Application::APP_ID,
             ]);
             return new JSONResponse(['rooms' => []]);
+        }
+    }
+
+    /**
+     * GET /api/v1/teams/{teamId}/rooms/availability
+     *
+     * Free or busy per room for a meeting slot, plus each room's busy blocks
+     * across a wider window for the finder's timelines (v4.20.0).
+     *
+     * Query: `start`, `end` (the slot, ISO-8601, at most 24 hours apart);
+     * optional `windowStart`, `windowEnd` (the timeline, at most 48 hours,
+     * widened to contain the slot); optional `building` (exact name) or
+     * `unplaced=1` for rooms with no building. Without either, every room,
+     * up to RoomAvailabilityService::MAX_ROOMS_PER_CHECK.
+     *
+     * Answers `{ rooms: { <key>: { status: free|busy|unknown, busy: [{start, end}] } } }`.
+     * Times only: no title, organiser or attendee of any booking.
+     *
+     * SEC: team membership required. Rooms the caller may not book are not
+     * in the catalogue and so are never checked.
+     */
+    #[NoAdminRequired]
+    public function getRoomAvailability(string $teamId): JSONResponse {
+        try {
+            $this->memberService->requireMemberLevel($teamId);
+            $uid = $this->userSession->getUser()?->getUID() ?? '';
+
+            $slotStart = $this->parseInstant((string)$this->request->getParam('start', ''));
+            $slotEnd   = $this->parseInstant((string)$this->request->getParam('end', ''));
+            if ($slotStart === null || $slotEnd === null) {
+                return new JSONResponse(['error' => 'Both start and end are required'], Http::STATUS_BAD_REQUEST);
+            }
+            if ($slotEnd <= $slotStart) {
+                return new JSONResponse(['error' => 'The end must be later than the start'], Http::STATUS_BAD_REQUEST);
+            }
+            if ($slotEnd - $slotStart > 24 * 3600) {
+                return new JSONResponse(['error' => 'A slot may be at most 24 hours long'], Http::STATUS_BAD_REQUEST);
+            }
+
+            $windowStart = $this->parseInstant((string)$this->request->getParam('windowStart', '')) ?? $slotStart;
+            $windowEnd   = $this->parseInstant((string)$this->request->getParam('windowEnd', '')) ?? $slotEnd;
+
+            $building = null;
+            if ((string)$this->request->getParam('unplaced', '') === '1') {
+                $building = '';
+            } else {
+                $requested = trim((string)$this->request->getParam('building', ''));
+                if ($requested !== '') {
+                    $building = mb_substr($requested, 0, 255);
+                }
+            }
+
+            // v4.20.8 — a recurring meeting (licensed): every date of the
+            // series is checked, and each room says on how many it is taken.
+            $series = [];
+            $recurrence = $this->meetingSeries->fromRequest($this->request->getParam('recurrence', null));
+            if ($recurrence !== null) {
+                $series = $this->meetingSeries->plan($recurrence, $slotStart, $slotEnd, $uid)['occurrences'];
+            }
+
+            $rooms = $this->roomAvailability->availability(
+                $uid, $slotStart, $slotEnd, $windowStart, $windowEnd, $building, $series,
+            );
+            return new JSONResponse(['rooms' => (object)$rooms]);
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Failed to check room availability', [
+                'teamId' => $teamId,
+            ]);
+        }
+    }
+
+    /**
+     * GET /api/v1/teams/{teamId}/rooms/free-now
+     *
+     * Free room now (v4.20.8, licensed): every room of one building with its
+     * verdict for the next `minutes` (15 to 240, default 30) from this
+     * moment, and its bookings for the rest of the next twelve hours so the
+     * dialog can say how long each free room stays free. Same shape as
+     * `/rooms/availability`; same building and `unplaced` parameters.
+     *
+     * SEC: team membership required; 403 `licenseGate` when unlicensed.
+     */
+    #[NoAdminRequired]
+    #[NoCSRFRequired]
+    public function getFreeRoomsNow(string $teamId): JSONResponse {
+        try {
+            $this->memberService->requireMemberLevel($teamId);
+            if (!$this->licenseService->isLicensed()) {
+                throw new \OCA\TeamHub\Exception\LicenseGateException(
+                    $this->licenseService->getEnforcementLevel(),
+                    'Free room now requires an active TeamHub licence.',
+                );
+            }
+            $uid = $this->userSession->getUser()?->getUID() ?? '';
+
+            $minutes = (int)$this->request->getParam('minutes', 30);
+            if ($minutes < 15 || $minutes > 240) {
+                return new JSONResponse(['error' => 'minutes must be between 15 and 240'], Http::STATUS_BAD_REQUEST);
+            }
+
+            $building = null;
+            if ((string)$this->request->getParam('unplaced', '') === '1') {
+                $building = '';
+            } else {
+                $requested = trim((string)$this->request->getParam('building', ''));
+                if ($requested !== '') {
+                    $building = mb_substr($requested, 0, 255);
+                }
+            }
+
+            // From the current minute, so a booking made now starts now.
+            $now = intdiv(time(), 60) * 60;
+            $rooms = $this->roomAvailability->availability(
+                $uid, $now, $now + $minutes * 60, $now, $now + 12 * 3600, $building,
+            );
+            return new JSONResponse([
+                'rooms' => (object)$rooms,
+                'start' => gmdate('Y-m-d\TH:i:s\Z', $now),
+                'end'   => gmdate('Y-m-d\TH:i:s\Z', $now + $minutes * 60),
+            ]);
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Failed to find a free room', [
+                'teamId' => $teamId,
+            ]);
+        }
+    }
+
+    /** A Unix timestamp from an ISO-8601 string, or null when it is empty or unreadable. */
+    private function parseInstant(string $value): ?int {
+        $value = trim($value);
+        if ($value === '') {
+            return null;
+        }
+        try {
+            return (new \DateTimeImmutable($value))->getTimestamp();
+        } catch (\Exception) {
+            return null;
         }
     }
 

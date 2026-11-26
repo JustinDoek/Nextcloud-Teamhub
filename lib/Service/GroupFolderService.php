@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace OCA\TeamHub\Service;
 
 use OCA\TeamHub\AppInfo\Application;
+use OCA\TeamHub\Db\TeamAppResource;
 use OCP\App\IAppManager;
 use OCP\DB\QueryBuilder\IQueryBuilder;
 use OCP\IConfig;
@@ -367,11 +368,20 @@ class GroupFolderService {
                 // without a shared, deterministic rule the two could pick
                 // different folders for one team and the tag would be applied to
                 // one and read from the other.
-                ->orderBy('gf.folder_id', 'ASC')
-                ->setMaxResults(1);
+                ->orderBy('gf.folder_id', 'ASC');
 
-            $r = $qb->executeQuery();
-            $row = $r->fetch();
+            // v4.20.48 — a folder another app manages is not the team folder,
+            // however low its id. The bulk read applies the same rule.
+            $managed = array_flip($this->managedFolderIds($circleUniqueId));
+
+            $r   = $qb->executeQuery();
+            $row = false;
+            while ($candidate = $r->fetch()) {
+                if (!isset($managed[(int)$candidate['folder_id']])) {
+                    $row = $candidate;
+                    break;
+                }
+            }
             $r->closeCursor();
 
             if ($row === false) {
@@ -447,6 +457,28 @@ class GroupFolderService {
             ]);
             return [];
         }
+    }
+
+    /**
+     * Folder ids of this team that another app manages (v4.20.48), from the
+     * registry. Throws when it cannot be read; callers decide.
+     *
+     * @return list<int>
+     */
+    public function managedFolderIds(string $teamId): array {
+        $qb = $this->db->getQueryBuilder();
+        $qb->select('resource_id')
+            ->from('teamhub_team_app_resources')
+            ->where($qb->expr()->eq('team_id', $qb->createNamedParameter($teamId)))
+            ->andWhere($qb->expr()->eq('app_id', $qb->createNamedParameter('files')))
+            ->andWhere($qb->expr()->eq('status', $qb->createNamedParameter(TeamAppResource::STATUS_MANAGED)));
+        $r   = $qb->executeQuery();
+        $ids = [];
+        while ($row = $r->fetch()) {
+            $ids[] = (int)substr((string)$row['resource_id'], 3);
+        }
+        $r->closeCursor();
+        return $ids;
     }
 
     /**

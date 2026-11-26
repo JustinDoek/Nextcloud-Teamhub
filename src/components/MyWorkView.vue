@@ -52,6 +52,14 @@
 				     no longer starts anything (docs/service-catalogue.md
 				     § 1). -->
 
+				<!-- v4.20.29 — the quick task, as at the end of every team's
+				     tab bar. My Work has no team, so the dialog asks for one,
+				     and no page link: a task made here would only point back
+				     at the list it lands in. -->
+				<QuickTaskButton
+					v-if="canQuickTask"
+					@created="refresh(false)" />
+
 				<NcButton
 					variant="tertiary"
 					:aria-label="t('teamhub', 'Refresh My Work')"
@@ -66,6 +74,50 @@
 			</div>
 		</header>
 
+		<!-- ── The three tabs (v4.20.31, DESIGN §2.278) ────────────────────
+		     Justin, 2026-11-18: the page "gets crazy if you don't do the
+		     work". To do is your own work (Action required, Today, Upcoming);
+		     Waiting for others and Completed are records of other people's
+		     work and of finished work, so they get their own tabs instead of
+		     the same weight in one scroll. Each tab asks the server for its
+		     own categories, so each pages on its own.
+
+		     A raw role="tab" bar, the documented carve-out (/ui-standards):
+		     NC has no component for a content tab bar. Kept in the store for
+		     the session, never saved: coming back from an item lands on the
+		     tab you left, a reload lands on To do (the v4.10.18 lesson about
+		     stored filters nobody can see). -->
+		<div
+			class="mywork__tabs"
+			role="tablist"
+			:aria-label="t('teamhub', 'My Work views')"
+			@keydown.left.prevent="moveTab(-1)"
+			@keydown.right.prevent="moveTab(1)">
+			<!-- Raw <button>: a role="tab" bar (carve-out, see above). -->
+			<button
+				v-for="entry in tabEntries"
+				:id="'mywork-tab-' + entry.key"
+				:key="entry.key"
+				:ref="'tab-' + entry.key"
+				type="button"
+				role="tab"
+				class="mywork__tab"
+				:class="{ 'mywork__tab--active': tab === entry.key }"
+				:aria-selected="tab === entry.key ? 'true' : 'false'"
+				aria-controls="mywork-tabpanel"
+				:tabindex="tab === entry.key ? 0 : -1"
+				@click="selectTab(entry.key)">
+				<component :is="entry.icon" :size="iconInline" aria-hidden="true" />
+				<span>{{ entry.label }}</span>
+				<span v-if="entry.count !== null" class="mywork__tab-count">{{ entry.count }}</span>
+			</button>
+		</div>
+
+		<div
+			id="mywork-tabpanel"
+			class="mywork__panel"
+			role="tabpanel"
+			:aria-labelledby="'mywork-tab-' + tab">
 		<!-- ── Provider failures — non-blocking ─────────────────────────── -->
 		<div v-if="failedProviders.length" class="mywork__notice" role="status" aria-live="polite">
 			<AlertCircleOutline :size="iconBody" aria-hidden="true" />
@@ -117,6 +169,7 @@
 		     rendered twice. -->
 		<div v-if="!mergeWorkflows" class="mywork__workflows">
 			<WorkflowSection
+				v-if="tab === MY_WORK_TAB.TODO"
 				:kind="WORKFLOW_SECTION.ACTION_REQUIRED"
 				:workflows="sourcedSections.actionRequired"
 				:loading="workflows.loading"
@@ -127,6 +180,7 @@
 				@action="onWorkflowAction"
 				@retry="loadWorkflows" />
 			<WorkflowSection
+				v-if="tab === MY_WORK_TAB.WAITING"
 				:kind="WORKFLOW_SECTION.WAITING"
 				:workflows="sourcedSections.waiting"
 				:loading="workflows.loading"
@@ -137,7 +191,7 @@
 				@action="onWorkflowAction"
 				@retry="loadWorkflows" />
 			<WorkflowSection
-				v-if="sourcedSections.completed.length"
+				v-if="tab === MY_WORK_TAB.COMPLETED"
 				:kind="WORKFLOW_SECTION.COMPLETED"
 				:workflows="sourcedSections.completed"
 				:loading="workflows.loading"
@@ -392,6 +446,7 @@
 		     list's own `v-else`, so an empty page still says it. -->
 		<WorkflowLicenceNote v-if="mergeWorkflows" :licensed="!licenseGated" :workflows-licensed="workflowsLicensed" />
 		</template>
+		</div>
 
 		</template>
 
@@ -540,6 +595,13 @@ import { showError, showSuccess } from '@nextcloud/dialogs'
 import { getCurrentUser } from '@nextcloud/auth'
 import axios from '@nextcloud/axios'
 import { NcButton, NcLoadingIcon, NcEmptyContent, NcModal, NcTextArea } from '@nextcloud/vue'
+import { loadState } from '@nextcloud/initial-state'
+import QuickTaskButton from './QuickTaskButton.vue'
+import {
+	FOLDED_BY_DEFAULT, MY_WORK_TAB, MY_WORK_TABS, TODO_BAND,
+	categoriesParam, normaliseTab, splitTodoGroups, tabCounts, tabShowsCategory,
+} from '../lib/myWorkTabs.js'
+import CalendarAlert from 'vue-material-design-icons/CalendarAlert.vue'
 
 import Refresh from 'vue-material-design-icons/Refresh.vue'
 import ChevronLeft from 'vue-material-design-icons/ChevronLeft.vue'
@@ -663,12 +725,13 @@ const SECTION_PREVIEW = 5
 export default {
 	name: 'MyWorkView',
 	components: {
+		QuickTaskButton,
 		  NcTextArea, NcButton, NcLoadingIcon, NcEmptyContent, NcModal,
 		TogglePill,
 		Refresh, ChevronLeft, ChevronRight, ChevronDown, ClipboardCheckOutline,
 		ViewListOutline, ViewHeadline,
 		AlertCircleOutline, InformationOutline,
-		CalendarToday, CalendarClock, AccountClock, CheckCircleOutline,
+		CalendarToday, CalendarClock, AccountClock, CheckCircleOutline, CalendarAlert,
 		ShieldAccountOutline, AccountPlusOutline,
 		ViewGrid, CardText, Folder, Gavel, Calendar, CheckboxMarkedOutline, Puzzle, FileEyeOutline, BriefcaseOutline, FlagOutline,
 		AccountGroupOutline, ShieldCrownOutline, FolderAccountOutline, ArchiveCheckOutline, Lifebuoy,
@@ -681,6 +744,7 @@ export default {
 		return {
 			ICON_LARGE,
 			WORKFLOW_SECTION,
+			MY_WORK_TAB,
 			loading: false,
 			busyItemId: null,
 			/**
@@ -740,6 +804,15 @@ export default {
 
 	computed: {
 		...mapState({ myWork: state => state.myWork, workflows: state => state.workflows }),
+
+		/**
+		 * v4.20.29 — the quick task needs the Tasks app (told by the page,
+		 * PageController) and a team to put the task in.
+		 */
+		canQuickTask() {
+			return loadState('teamhub', 'tasksAvailable', false) === true
+				&& (this.$store.state.teams || []).length > 0
+		},
 		...mapGetters('workflows', { workflowSections: 'sections', workflowActionRequiredCount: 'actionRequiredCount' }),
 		...mapGetters('serviceTeams', { hasServiceCatalogue: 'hasCatalogue' }),
 
@@ -832,6 +905,43 @@ export default {
 		},
 
 		filters() { return this.myWork.filters },
+
+		/** v4.20.31 — the open tab; see the tab bar in the template. */
+		tab() { return normaliseTab(this.myWork.tab) },
+
+		/**
+		 * The three tabs with their names, icons and numbers. The numbers are
+		 * the queue's counts (taken before the category filter, so they hold
+		 * still when the tab changes) plus the requests in the matching
+		 * workflow section, under the same source chip the list is under.
+		 * A number the page cannot stand behind yet is left off.
+		 */
+		tabEntries() {
+			const sections = this.servicesView ? this.serviceSections : this.sourcedSections
+			const queueAnswered = !!this.payload && !this.licenseGated
+			const ready = queueAnswered || (this.licenseGated && this.workflows.loaded)
+			const counts = tabCounts(
+				queueAnswered && !this.servicesView ? this.counts : null,
+				this.workflows.loaded ? sections : {},
+			)
+			const labels = {
+				// TRANSLATORS: My Work tab with your own work: action required, today and upcoming
+				[MY_WORK_TAB.TODO]: t('teamhub', 'To do'),
+				[MY_WORK_TAB.WAITING]: t('teamhub', 'Waiting for others'),
+				[MY_WORK_TAB.COMPLETED]: t('teamhub', 'Completed'),
+			}
+			const icons = {
+				[MY_WORK_TAB.TODO]: 'AlertCircleOutline',
+				[MY_WORK_TAB.WAITING]: 'AccountClock',
+				[MY_WORK_TAB.COMPLETED]: 'CheckCircleOutline',
+			}
+			return MY_WORK_TABS.map(key => ({
+				key,
+				label: labels[key],
+				icon: icons[key],
+				count: ready ? counts[key] : null,
+			}))
+		},
 		/**
 		 * v4.10.18 — fixed, not stored. My Work is one list grouped by what
 		 * the work needs from you and sorted by when it is due. These were
@@ -978,7 +1088,7 @@ export default {
 					[CATEGORY.COMPLETED]: s.completed,
 				}
 				return CATEGORY_ORDER
-					.filter(key => (byCategory[key] || []).length)
+					.filter(key => tabShowsCategory(this.tab, key) && (byCategory[key] || []).length)
 					.map(key => ({ key, label: categoryLabel(key), itemIds: [], workflows: byCategory[key] }))
 			}
 			// v4.11.41 — a workflow does have a source now. v4.10.18 said it
@@ -999,6 +1109,12 @@ export default {
 			const seen = new Set()
 			for (const group of (this.payload?.groups || [])) {
 				seen.add(group.key)
+				// v4.20.31 — only this tab's groups. The server already asked
+				// for this tab's categories; this holds while a payload from
+				// the previous tab is still on screen during the switch.
+				if (!tabShowsCategory(this.tab, group.key)) {
+					continue
+				}
 				const workflows = byCategory[group.key] || []
 				if (!this.itemsForGroup(group).length && !workflows.length) {
 					continue
@@ -1007,7 +1123,7 @@ export default {
 			}
 			for (const key of CATEGORY_ORDER) {
 				const workflows = byCategory[key] || []
-				if (seen.has(key) || !workflows.length) {
+				if (seen.has(key) || !workflows.length || !tabShowsCategory(this.tab, key)) {
 					continue
 				}
 				out.push({ key, label: categoryLabel(key), itemIds: [], workflows })
@@ -1015,9 +1131,29 @@ export default {
 			return out.sort((a, b) => CATEGORY_ORDER.indexOf(a.key) - CATEGORY_ORDER.indexOf(b.key))
 		},
 
-		/** What the list renders — merged, or the aggregated groups alone. */
+		/**
+		 * What the list renders — merged, or the aggregated groups alone.
+		 *
+		 * v4.20.32 — on To do, with the Overdue band split out of Action
+		 * required and the Team backlog out of Upcoming
+		 * (`splitTodoGroups`, DESIGN §2.279).
+		 */
 		listGroups() {
-			return this.mergeWorkflows ? this.unifiedGroups : this.visibleGroups
+			const groups = this.mergeWorkflows ? this.unifiedGroups : this.visibleGroups
+			if (this.tab !== MY_WORK_TAB.TODO) {
+				return groups
+			}
+			return splitTodoGroups(groups, this.itemsById, {
+				// TRANSLATORS: My Work section of work whose due date has passed
+				overdue: t('teamhub', 'Overdue'),
+				// TRANSLATORS: My Work section of team tasks nobody was given and that have no due date
+				teamBacklog: t('teamhub', 'Team backlog'),
+			})
+		},
+
+		/** v4.20.32 — the payload's items by id, for the band split. */
+		itemsById() {
+			return new Map(this.items.map(item => [item.id, item]))
 		},
 
 		/**
@@ -1060,7 +1196,8 @@ export default {
 		},
 
 		visibleGroups() {
-			return (this.payload?.groups || []).filter(g => this.itemsForGroup(g).length > 0)
+			return (this.payload?.groups || [])
+				.filter(g => tabShowsCategory(this.tab, g.key) && this.itemsForGroup(g).length > 0)
 		},
 
 		failedProviders() {
@@ -1188,6 +1325,13 @@ export default {
 			if (this.hasActiveFilters) {
 				return t('teamhub', 'Nothing matches these filters')
 			}
+			// v4.20.31 — each tab says what it is for when it is empty.
+			if (this.tab === MY_WORK_TAB.WAITING) {
+				return t('teamhub', 'Nothing is waiting on others')
+			}
+			if (this.tab === MY_WORK_TAB.COMPLETED) {
+				return t('teamhub', 'Nothing completed recently')
+			}
 			// v4.10.15 — with workflow rows on screen above, "caught up"
 			// would contradict them; the queue is empty, the page is not.
 			// v4.11.41 — the *visible* rows: a request filed under another
@@ -1201,6 +1345,12 @@ export default {
 		emptyBody() {
 			if (this.hasActiveFilters) {
 				return t('teamhub', 'Try widening the filters, or clear them to see everything again.')
+			}
+			if (this.tab === MY_WORK_TAB.WAITING) {
+				return t('teamhub', 'Work you handed to someone else, and requests waiting on another person, appear here.')
+			}
+			if (this.tab === MY_WORK_TAB.COMPLETED) {
+				return t('teamhub', 'Work that was finished in the last few days appears here, yours and what others did for you.')
 			}
 			return t('teamhub', 'New tasks and approvals from the teams appear here automatically.')
 		},
@@ -1251,6 +1401,13 @@ export default {
 		},
 
 		groupIcon(key) {
+			// v4.20.32 — the two bands inside To do.
+			if (key === TODO_BAND.OVERDUE) {
+				return 'CalendarAlert'
+			}
+			if (key === TODO_BAND.TEAM_BACKLOG) {
+				return 'AccountGroupOutline'
+			}
 			return CATEGORY_ICONS[key] || 'CalendarClock'
 		},
 
@@ -1309,6 +1466,10 @@ export default {
 		},
 
 		groupTone(key) {
+			// v4.20.32 — Overdue reads as the Action required it came from.
+			if (key === TODO_BAND.OVERDUE) {
+				return CATEGORY_TONES.action_required
+			}
 			return CATEGORY_TONES[key] || 'upcoming'
 		},
 
@@ -1349,13 +1510,22 @@ export default {
 		 * and means going back finds it as you left it.
 		 */
 		isExpanded(key) {
+			// v4.20.32 — a section that starts folded (the Team backlog) is
+			// open only once the person opened it, recorded as `<key>:open`
+			// in the same list, so a fresh page still arrives with it shut.
+			if (FOLDED_BY_DEFAULT.includes(key)) {
+				return this.collapsedGroups.includes(key + ':open')
+			}
 			return !this.collapsedGroups.includes(key)
 		},
 
 		toggleGroup(key) {
-			const next = this.isExpanded(key)
-				? [...this.collapsedGroups, key]
-				: this.collapsedGroups.filter(k => k !== key)
+			const marker = FOLDED_BY_DEFAULT.includes(key) ? key + ':open' : key
+			// For a normal section the marker means "closed", for a folded
+			// one "open"; either way the toggle adds it or takes it away.
+			const next = this.collapsedGroups.includes(marker)
+				? this.collapsedGroups.filter(k => k !== marker)
+				: [...this.collapsedGroups, marker]
 			this.$store.commit('SET_MYWORK_COLLAPSED_GROUPS', next)
 			this.persistPreferences()
 		},
@@ -1540,7 +1710,9 @@ export default {
 			if (f.priority) params.priorities = f.priority
 			if (f.status) params.statuses = f.status
 			if (f.resourceType) params.resourceTypes = f.resourceType
-			if (f.category) params.categories = f.category
+			// v4.20.31 — the open tab decides the categories. `f.category`
+			// was the old sticky filter (v4.10.18 stopped restoring it).
+			params.categories = categoriesParam(this.tab)
 			// v4.9.7 — source-specific narrowing.
 			if (f.projectId) params.projectIds = f.projectId
 			if (f.workType) params.workTypes = f.workType
@@ -1592,6 +1764,35 @@ export default {
 			this.expandedGroups = []
 			this.persistPreferences()
 			this.refresh(false)
+		},
+
+		/**
+		 * v4.20.31 — open a tab: its own first page, sections as they arrive,
+		 * from the top. The type chips' counts are the last answer's, which
+		 * was another tab's, so they wait for this one's.
+		 */
+		selectTab(key) {
+			const next = normaliseTab(key)
+			if (next === this.tab) {
+				return
+			}
+			this.$store.commit('SET_MYWORK_TAB', next)
+			this.$store.commit('SET_MYWORK_PAGE', 1)
+			this.expandedGroups = []
+			this.allSourceCounts = null
+			this.scrollToTop()
+			this.refresh(false)
+		},
+
+		/** Arrow keys move along the tab bar and follow focus (WAI-ARIA tabs). */
+		moveTab(direction) {
+			const index = MY_WORK_TABS.indexOf(this.tab)
+			const next = MY_WORK_TABS[(index + direction + MY_WORK_TABS.length) % MY_WORK_TABS.length]
+			this.selectTab(next)
+			this.$nextTick(() => {
+				const el = this.$refs['tab-' + next]
+				;(Array.isArray(el) ? el[0] : el)?.focus()
+			})
 		},
 
 		/** v4.10.18 — "Show all work": the one filter off. */
@@ -1731,19 +1932,21 @@ export default {
 			}
 		},
 
-		submitWorkflowAction(text, files = []) {
+		submitWorkflowAction(text, files = [], approver = '', answers = null) {
 			if (!this.workflowAction) {
 				return
 			}
 			const { workflow, action } = this.workflowAction
-			this.runWorkflowAction(workflow, action, text, files)
+			this.runWorkflowAction(workflow, action, text, files, approver, answers)
 		},
 
-		async runWorkflowAction(workflow, action, text, files = []) {
+		async runWorkflowAction(workflow, action, text, files = [], approver = '', answers = null) {
 			try {
 				const updated = await this.$store.dispatch('workflows/act', {
 					id: workflow.id, action, text, step: workflow.viewer?.stepKey || '',
 					fileIds: (files || []).map(f => f.fileId),
+					approver,
+					answers,
 				})
 				this.workflowAction = null
 				showSuccess(this.workflowActionToast(action, updated))
@@ -1751,7 +1954,7 @@ export default {
 				// or close this request's other rows: re-read the list.
 				this.$store.dispatch('workflows/refresh')
 				if (this.workflowDetailOpen && updated && this.workflows.detail?.id === updated.id) {
-					if (workflowIsOpen(updated)) {
+					if (workflowIsOpen(updated) && !updated.left) {
 						// The events changed; re-read the detail with its history.
 						this.$store.dispatch('workflows/open', { id: updated.id, step: updated.viewer?.stepKey || '' })
 					} else {
@@ -2004,6 +2207,73 @@ export default {
 	display: flex;
 	flex-direction: column;
 	gap: 16px;
+}
+
+/* ── Tabs (v4.20.31) ────────────────────────────────────────────────── */
+
+/* The panel keeps the page's own column rhythm: it holds everything that
+   used to sit directly in .mywork under the header. */
+.mywork__panel {
+	display: flex;
+	flex-direction: column;
+	gap: var(--th-space-lg);
+}
+
+.mywork__tabs {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--th-space-xs);
+	border-block-end: 1px solid var(--color-border);
+}
+
+.mywork__tab {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--th-space-sm);
+	margin: 0;
+	margin-block-end: -1px;
+	padding: var(--th-space-sm) var(--th-space-md);
+	border: none;
+	border-block-end: 2px solid transparent;
+	border-radius: var(--border-radius-element) var(--border-radius-element) 0 0;
+	background: transparent;
+	color: var(--color-text-maxcontrast);
+	font-size: var(--th-font-body);
+	/* NC's server.css makes a raw <button> bold (/ui-standards). */
+	font-weight: var(--th-font-weight-regular);
+	cursor: pointer;
+}
+
+.mywork__tab:hover {
+	background: var(--color-background-hover);
+	color: var(--color-main-text);
+}
+
+.mywork__tab:focus-visible {
+	outline: 2px solid var(--color-primary-element);
+	outline-offset: -2px;
+}
+
+/* Selection is the underline and the ink, never colour alone. */
+.mywork__tab--active {
+	border-block-end-color: var(--color-primary-element);
+	color: var(--color-main-text);
+	font-weight: var(--th-font-weight-semibold, 600);
+}
+
+.mywork__tab-count {
+	min-width: var(--th-space-lg);
+	padding: 0 var(--th-space-xs);
+	border-radius: var(--border-radius-pill);
+	background: var(--color-background-dark);
+	color: var(--color-main-text);
+	font-size: var(--th-font-meta);
+	text-align: center;
+}
+
+.mywork__tab--active .mywork__tab-count {
+	background: var(--color-primary-element-light);
+	color: var(--color-primary-element-light-text);
 }
 
 /* ── Header ─────────────────────────────────────────────────────────── */

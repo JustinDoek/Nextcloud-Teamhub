@@ -4,9 +4,6 @@
         'message-card--question-solved': isQuestionSolved,
         'message-card--pinned': isPinnedSlot,
         'message-card--decision': isDecision,
-        'message-card--decision-open':       isDecision && (decisionStatus === 'open' || decisionStatus === 'proposed'),
-        'message-card--decision-finalized':  isDecision && decisionStatus === 'finalized',
-        'message-card--decision-approved':   isDecision && (decisionStatus === 'approved' || decisionStatus === 'decided'),
         'message-card--decision-denied':     isDecision && decisionStatus === 'denied',
         'message-card--decision-withdrawn':  isDecision && decisionStatus === 'withdrawn',
     }">
@@ -83,6 +80,17 @@
                 @click="doPin">
                 <template #icon><Pin :size="ICON_BODY" /></template>
             </NcButton>
+            <!-- v4.20.30 — a follow-up task on this message: for yourself, a
+                 colleague or the team, titled from the message and linking
+                 back to it. Every member may, like the tab bar's quick task;
+                 shown only where a task can be stored. -->
+            <QuickTaskButton
+                v-if="canCreateTeamTask && !editing"
+                :team-id="$store.state.currentTeamId || ''"
+                :label="t('teamhub', 'Create follow-up task')"
+                :link="followUpLink"
+                :link-label="t('teamhub', 'this message')"
+                :initial-title="followUpTitle" />
             <!-- v4.7.4 — the author always, plus anyone clearing the team's
                  moderation floor. Hidden rather than disabled, per SKILLS.md
                  § Permissions. The service re-checks both. -->
@@ -478,8 +486,15 @@
              tells you a conversation exists somewhere you can't reach; the
              setting means the reader sees the message only. The role floor is
              the other case and still greys the composer inside the section. -->
-        <div v-if="commentsAllowedForType" class="message-card__footer">
-            <NcButton variant="tertiary" @click="toggleComments">
+        <!-- v4.20.27 — reactions sit in the footer too, and the footer now
+             renders for them even where comments are off for this type. -->
+        <div class="message-card__footer">
+            <ReactionBar
+                target-type="message"
+                :target-id="message.id"
+                :reactions="message.reactions"
+                class="message-card__reactions" />
+            <NcButton v-if="commentsAllowedForType" variant="tertiary" @click="toggleComments">
                 <template #icon><CommentOutline :size="ICON_BODY" /></template>
                 {{ commentLabel }}
             </NcButton>
@@ -700,6 +715,10 @@ import Close from 'vue-material-design-icons/Close.vue'
 import GavelIcon from 'vue-material-design-icons/Gavel.vue'
 import OpenInNew from 'vue-material-design-icons/OpenInNew.vue'
 import CommentsSection from './CommentsSection.vue'
+import QuickTaskButton from './QuickTaskButton.vue'
+import { buildPageLink } from '../lib/pageLink.js'
+import { taskTitleFrom } from '../lib/quickTask.js'
+import ReactionBar from './ReactionBar.vue'
 import PaperclipIcon from 'vue-material-design-icons/Paperclip.vue'
 // v4.8.7 — new icon sizes come from the shared scale rather than a literal,
 // per SKILLS.md § Design tokens. ICON_BODY is 16, which is what the icons
@@ -783,6 +802,8 @@ export default {
     name: 'MessageCard',
     components: {
           NcTextArea, NcChip, NcAvatar,
+        ReactionBar,
+        QuickTaskButton,
         NcButton,
         NcLoadingIcon,
         NcRichContenteditable,
@@ -865,7 +886,22 @@ export default {
     },
     computed: {
         ...mapState(['members', 'allEffectiveMembers']),
-        ...mapGetters(['commentsForMessage', 'currentUserIsTeamAdmin', 'commentsEnabledForType']),
+        ...mapGetters(['commentsForMessage', 'currentUserIsTeamAdmin', 'commentsEnabledForType', 'canCreateTeamTask']),
+
+        /** v4.20.30 — where a follow-up task on this message points: the message, on Home. */
+        followUpLink() {
+            return buildPageLink(generateUrl('/apps/teamhub/'), {
+                view: 'team',
+                teamId: this.$store.state.currentTeamId,
+                messageId: this.message.id,
+            })
+        },
+
+        /** The subject when there is one, else the opening words. */
+        followUpTitle() {
+            return taskTitleFrom(this.message.subject) || taskTitleFrom(this.message.message)
+        },
+
         isPriority() { return this.message.priority === 'priority' },
         isPollClosed() { return this.message.pollClosed === true },
         isQuestionSolved() { return this.message.questionSolved === true },
@@ -1806,23 +1842,18 @@ export default {
     box-shadow: 0 2px 8px var(--color-box-shadow);
 }
 
-/* v3.100.14: message-body background is a neutral separator, not a
-   state background — the 4px coloured border-left is the state signal.
-   Full-saturation on the whole message body would swamp the feed;
-   --color-background-dark is the SKILLS.md-permitted neutral surface
-   for visual separation on non-state rows. */
+/* A neutral separator, not a state background: the state is said by the
+   priority badge, the solved banner and the *Pinned* heading. A state fill
+   on the whole message would swamp the feed. */
 .message-card--priority {
-    border-inline-start: 4px solid var(--color-error);
     background: var(--color-background-dark);
 }
 
 .message-card--question-solved {
-    border-inline-start: 4px solid var(--color-success);
     background: var(--color-background-dark);
 }
 
 .message-card--pinned {
-    border-inline-start: 4px solid var(--color-primary-element);
     background: var(--color-background-dark);
 }
 
@@ -1997,9 +2028,19 @@ a.message-card__origin-pill:focus-visible {
 }
 
 .message-card__footer {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--th-space-sm);
     margin-top: 16px;
     padding-top: 12px;
     border-top: 1px solid var(--color-border);
+}
+
+.message-card__reactions {
+    flex: 1 1 auto;
+    min-width: 0;
 }
 
 .comments-enter-active, .comments-leave-active {
@@ -2249,29 +2290,14 @@ a.message-card__origin-pill:focus-visible {
 
 /* ── Decision card ──────────────────────────────────────────────────────── */
 .message-card--decision {
-    border-inline-start: 4px solid var(--color-primary-element);
-    padding-inline-start: calc(var(--default-clickable-area, 16px) - 4px);
-}
-
-.message-card--decision-open {
-    border-inline-start-color: var(--color-primary-element);
-}
-
-.message-card--decision-finalized {
-    border-inline-start-color: var(--color-warning);
-}
-
-.message-card--decision-approved {
-    border-inline-start-color: var(--color-success);
+    padding-inline-start: var(--default-clickable-area, 16px);
 }
 
 .message-card--decision-denied {
-    border-inline-start-color: var(--color-text-error);
     opacity: 0.95;
 }
 
 .message-card--decision-withdrawn {
-    border-inline-start-color: var(--color-text-maxcontrast);
     opacity: 0.92;
 }
 

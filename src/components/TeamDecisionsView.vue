@@ -182,7 +182,6 @@
                                     class="th-dv__card-btn"
                                     :aria-label="t('teamhub', 'View decision: {q}', { q: d.question || t('teamhub', 'Untitled') })"
                                     @click="selectFromSearch(d)">
-                                    <span class="th-dv__card-accent" aria-hidden="true" />
                                     <span class="th-dv__card-body">
                                         <span class="th-dv__card-subject">{{ d.question || t('teamhub', 'Untitled decision') }}</span>
                                         <span class="th-dv__card-meta">
@@ -348,7 +347,6 @@
                                     :aria-expanded="selected && selected.id === d.id"
                                     :aria-label="t('teamhub', 'View decision: {q}', { q: d.question || t('teamhub', 'Untitled') })"
                                     @click="selectDecision(d)">
-                                    <span class="th-dv__card-accent" aria-hidden="true" />
                                     <span class="th-dv__card-body">
                                         <span class="th-dv__card-subject">{{ d.question || t('teamhub', 'Untitled decision') }}</span>
                                         <span class="th-dv__card-meta">
@@ -1442,6 +1440,15 @@
                                     <div v-if="auditPayloadText(ev)" class="th-dv__audit-payload">
                                         {{ auditPayloadText(ev) }}
                                     </div>
+                                    <!-- v4.20.19 — a meeting's notes, from its wrap-up. -->
+                                    <a
+                                        v-if="auditNotesUrl(ev)"
+                                        :href="auditNotesUrl(ev)"
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        class="th-dv__audit-link">
+                                        {{ t('teamhub', 'Open the meeting notes') }}
+                                    </a>
                                 </div>
                             </li>
                         </ol>
@@ -1907,6 +1914,18 @@
             @close="showCreateTaskModal = false"
             @created="onTaskCreated" />
 
+        <!-- v4.20.30 — the menu's *Create follow-up task*: a task in the
+             team's task list, titled from the decision and linking back to it
+             (decisionUrl, the same address Copy link copies). -->
+        <AddPersonalTaskModal
+            v-if="showFollowUpTask && selected"
+            :team-id="currentTeamId || ''"
+            :link="decisionUrl(currentTeamId, selected.id)"
+            :link-label="t('teamhub', 'this decision')"
+            :initial-title="followUpTitle(selected)"
+            @created="$store.dispatch('fetchTeamTasks', currentTeamId)"
+            @close="showFollowUpTask = false" />
+
         <!-- v3.74.10 — Schedule approver meeting wizard.
              Mounted on demand from the "Schedule meeting" button in the
              approval block. Pre-filled with the approvers for the proposal's
@@ -1969,6 +1988,9 @@ import DownloadIcon            from 'vue-material-design-icons/Download.vue'
 import FolderOutlineIcon       from 'vue-material-design-icons/FolderOutline.vue'
 import MagnifyIcon             from 'vue-material-design-icons/Magnify.vue'
 import LinkVariantIcon          from 'vue-material-design-icons/LinkVariant.vue'
+import ClipboardPlusOutlineIcon from 'vue-material-design-icons/ClipboardPlusOutline.vue'
+import AddPersonalTaskModal     from './AddPersonalTaskModal.vue'
+import { taskTitleFrom }        from '../lib/quickTask.js'
 import FormatListBulletedIcon  from 'vue-material-design-icons/FormatListBulleted.vue'
 import CalendarPlusIcon        from 'vue-material-design-icons/CalendarPlus.vue'
 import CalendarClockIcon       from 'vue-material-design-icons/CalendarClock.vue'
@@ -2008,11 +2030,11 @@ export default {
         MessageOutlineIcon, SwapHorizontalIcon,
         AlertCircleOutlineIcon, OpenInNewIcon, FileDocumentOutlineIcon, DownloadIcon,
         FolderOutlineIcon, MagnifyIcon, FormatListBulletedIcon,
-        LinkVariantIcon, CalendarPlusIcon, CalendarClockIcon,
+        LinkVariantIcon, CalendarPlusIcon, CalendarClockIcon, ClipboardPlusOutlineIcon,
         FlagOutlineIcon,
         PencilIcon, ForumIcon,
         RefreshIcon, ArchiveOutlineIcon, FolderMoveOutlineIcon,
-        AddTaskModal, SuggestMeetingWizard, DecisionProgressRail, DecisionCategoryDialog,
+        AddTaskModal, AddPersonalTaskModal, SuggestMeetingWizard, DecisionProgressRail, DecisionCategoryDialog,
         DecisionAttachField,
     },
 
@@ -2023,6 +2045,8 @@ export default {
 
     data() {
         return {
+            // v4.20.30 — the menu's *Create follow-up task* dialog.
+            showFollowUpTask: false,
             ICON_BODY,
             ICON_INLINE,
             ICON_LARGE,
@@ -2434,6 +2458,7 @@ export default {
                 editingProposal:            this.editingProposal,
                 finalizing:                 this.finalizingProposal,
                 talkHref:                   this.selected?.talkToken ? this.talkUrl(this.selected.talkToken) : null,
+                canCreateFollowUp:          this.$store.getters.canCreateTeamTask,
             })
         },
 
@@ -3070,6 +3095,9 @@ export default {
 
     methods: {
         t, n, generateUrl,
+        // v4.20.30 — the follow-up task dialog's link and starting title.
+        decisionUrl,
+        followUpTitle(decision) { return taskTitleFrom(decision?.question) },
         ...mapMutations(['SET_VIEW', 'SET_DECISIONS_TARGET', 'SET_DECISIONS_PRESELECT_STATUS']),
 
         /**
@@ -3444,6 +3472,9 @@ export default {
                 break
             case 'copy-link':
                 this.copyDecisionLink(d)
+                break
+            case 'follow-up-task':
+                this.showFollowUpTask = true
                 break
             default:
                 // An action in the list with no handler is a bug, not a no-op.
@@ -4936,6 +4967,10 @@ export default {
                 // approver of the one it was in.
                 // TRANSLATORS: audit event verb — the decision was refiled under a different decision category
                 category_moved:   t('teamhub', 'Moved to another category'),
+                // v4.20.19 — written by a meeting's wrap-up. It decides
+                // nothing; the line and its link say where it was discussed.
+                // TRANSLATORS: audit event verb — the proposal was talked about in a team meeting
+                meeting_discussed: t('teamhub', 'Discussed in a meeting'),
             }
             return map[ev.transition] || ev.transition
         },
@@ -4944,6 +4979,13 @@ export default {
          * Returns the secondary line of text under each audit row, or ''
          * if there's nothing to show. Handles transition-specific payloads.
          */
+        /** v4.20.19 — the notes link of a `meeting_discussed` line, only when it is a web address. */
+        auditNotesUrl(ev) {
+            if (ev.transition !== 'meeting_discussed') return ''
+            const url = String(ev.payload?.notes_url || '')
+            return /^https:\/\//i.test(url) ? url : ''
+        },
+
         auditPayloadText(ev) {
             const p = ev.payload
             if (!p) return ''
@@ -5018,6 +5060,10 @@ export default {
             // v4.11.30 — both category names, because `category` on the row
             // now holds only the second of the two and "moved" without them
             // cannot answer the question it invites.
+            if (ev.transition === 'meeting_discussed' && p.meeting_title) {
+                // TRANSLATORS: audit line — names the meeting the proposal was discussed in
+                return t('teamhub', 'Meeting: {title}', { title: p.meeting_title })
+            }
             if (ev.transition === 'category_moved') {
                 if (p.from && p.to) {
                     // TRANSLATORS: audit line — the decision was refiled from one category into another
@@ -5839,7 +5885,7 @@ export default {
     align-items: center;
     gap: 8px;
     padding-bottom: 8px;
-    border-bottom: 2px solid var(--color-border-dark);
+    border-bottom: 1px solid var(--color-border);
     margin-bottom: 8px;
     color: var(--color-text-maxcontrast);
 }
@@ -5891,6 +5937,7 @@ export default {
     cursor: pointer;
     text-align: start;
     padding: 0;
+    min-height: 44px;
     border-radius: var(--border-radius-element);
     transition: background var(--animation-quick);
     gap: 0;
@@ -5898,25 +5945,6 @@ export default {
 
 .th-dv__card-btn:hover        { background: var(--color-background-hover); }
 .th-dv__card-btn:focus-visible { outline: 2px solid var(--color-primary-element); outline-offset: 1px; }
-
-/* Left accent stripe */
-.th-dv__card-accent {
-    width: 4px;
-    align-self: stretch;
-    flex-shrink: 0;
-    border-radius: var(--border-radius-element) 0 0 var(--border-radius-element);
-    background: var(--color-border);
-    min-height: 44px;
-}
-
-.th-dv__card--open       .th-dv__card-accent { background: var(--color-primary-element); }
-.th-dv__card--finalized  .th-dv__card-accent { background: var(--color-warning); }
-.th-dv__card--approved   .th-dv__card-accent { background: var(--color-success-text); }
-.th-dv__card--denied     .th-dv__card-accent { background: var(--color-error-text); }
-.th-dv__card--withdrawn  .th-dv__card-accent { background: var(--color-text-maxcontrast); opacity: 0.4; }
-/* Legacy fallbacks */
-.th-dv__card--proposed   .th-dv__card-accent { background: var(--color-primary-element); }
-.th-dv__card--decided    .th-dv__card-accent { background: var(--color-success-text); }
 
 /* Card body */
 .th-dv__card-body {
@@ -6224,8 +6252,7 @@ export default {
     padding: 12px 16px;
     background: var(--color-success);
     color: var(--color-success-text);
-    border-inline-start: 3px solid var(--color-success-text);
-    border-radius: 0 var(--border-radius-element) var(--border-radius-element) 0;
+    border-radius: var(--border-radius-element);
     display: flex;
     flex-direction: column;
     gap: 8px;
@@ -7170,6 +7197,20 @@ export default {
     color: var(--color-text-maxcontrast);
     white-space: nowrap;
     font-size: var(--th-font-micro);
+}
+
+/* v4.20.19 — a meeting's notes, on a `meeting_discussed` line. */
+.th-dv__audit-link {
+    display: inline-block;
+    margin-block-start: var(--th-space-xs);
+    font-size: var(--th-font-meta);
+    color: var(--color-primary-element);
+}
+
+.th-dv__audit-link:focus-visible {
+    outline: calc(var(--default-grid-baseline) / 2) solid var(--color-primary-element);
+    outline-offset: calc(var(--default-grid-baseline) / 2);
+    border-radius: var(--border-radius-small);
 }
 
 .th-dv__audit-payload {

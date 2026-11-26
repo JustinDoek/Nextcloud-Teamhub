@@ -1,5 +1,21 @@
 {
     "translations": {
+    "Show why %n person is not available": [
+        "Show why %n person is not available",
+        "Show why %n people are not available"
+    ],
+    "Cannot check the calendar for {name}.": "Cannot check the calendar for {name}.",
+    "{name} is not working at that time.": "{name} is not working at that time.",
+    "{name} has a calendar conflict.": "{name} has a calendar conflict.",
+    "Nextcloud checks a calendar through the account's email address. An account without one cannot be checked.": "Nextcloud checks a calendar through the account's email address. An account without one cannot be checked.",
+    "_%n is not working_::_%n are not working_": [
+        "%n is not working",
+        "%n are not working"
+    ],
+    "_%n cannot be checked_::_%n cannot be checked_": [
+        "%n cannot be checked",
+        "%n cannot be checked"
+    ],
     "{count} public holiday days were skipped": "{count} public holiday days were skipped",
     "Change a workplace or mark vacation, sickness or other non-working time. Your usual workplace remains unchanged. Public holidays are managed by administrators.": "Change a workplace or mark vacation, sickness or other non-working time. Your usual workplace remains unchanged. Public holidays are managed by administrators.",
     "Set a day or date range": "Set a day or date range",
@@ -184,7 +200,7 @@
         "Fold step": "Fold step",
         "Unfold step": "Unfold step",
         "Step {n}": "Step {n}",
-        "{n} task": [
+        "_{n} task_::_{n} tasks_": [
             "{n} task",
             "{n} tasks"
         ],
@@ -224,19 +240,19 @@
         "The file settings could not be read.": "The file settings could not be read.",
         "Share files for a whole number of days.": "Share files for a whole number of days.",
         "Share files for 1 to %s days.": "Share files for 1 to %s days.",
-        "Files are shared with {who} for {n} day, to view and edit.": [
+        "_Files are shared with {who} for {n} day, to view and edit._::_Files are shared with {who} for {n} days, to view and edit._": [
             "Files are shared with {who} for {n} day, to view and edit.",
             "Files are shared with {who} for {n} days, to view and edit."
         ],
-        "Files are shared with {who} for {n} day, to view only.": [
+        "_Files are shared with {who} for {n} day, to view only._::_Files are shared with {who} for {n} days, to view only._": [
             "Files are shared with {who} for {n} day, to view only.",
             "Files are shared with {who} for {n} days, to view only."
         ],
-        "You can attach at most {n} file.": [
+        "_You can attach at most {n} file._::_You can attach at most {n} files._": [
             "You can attach at most {n} file.",
             "You can attach at most {n} files."
         ],
-        "You can attach at most %n file.": [
+        "_You can attach at most %n file._::_You can attach at most %n files._": [
             "You can attach at most %n file.",
             "You can attach at most %n files."
         ],
@@ -263,7 +279,7 @@
         "The name of a task is at most %s characters.": "The name of a task is at most %s characters.",
         "This task is no longer open.": "This task is no longer open.",
         "This request cannot end while \"%s\" is still open.": "This request cannot end while \"%s\" is still open.",
-        "A step has at most %n task.": [
+        "_A step has at most %n task._::_A step has at most %n tasks._": [
             "A step has at most %n task.",
             "A step has at most %n tasks."
         ],
@@ -287,7 +303,7 @@
         "A link opens a page or a form.": "A link opens a page or a form.",
         "The name of a link is at most %s characters.": "The name of a link is at most %s characters.",
         "An address is at most %s characters.": "An address is at most %s characters.",
-        "A step has at most %n link.": [
+        "_A step has at most %n link._::_A step has at most %n links._": [
             "A step has at most %n link.",
             "A step has at most %n links."
         ],
@@ -344,15 +360,15 @@
         "Published": "Published",
         "Unpublished": "Unpublished",
         "Unpublished changes": "Unpublished changes",
-        "Usually within %n working day": [
+        "_Usually within %n working day_::_Usually within %n working days_": [
             "Usually within %n working day",
             "Usually within %n working days"
         ],
-        "A team can offer at most %n service.": [
+        "_A team can offer at most %n service._::_A team can offer at most %n services._": [
             "A team can offer at most %n service.",
             "A team can offer at most %n services."
         ],
-        "A service has at most %n step.": [
+        "_A service has at most %n step._::_A service has at most %n steps._": [
             "A service has at most %n step.",
             "A service has at most %n steps."
         ],
@@ -361,7 +377,7 @@
         "Give the service a name.": "Give the service a name.",
         "TeamHub services": "TeamHub services",
         "My TeamHub requests": "My TeamHub requests",
-        "%n request": [
+        "_%n request_::_%n requests_": [
             "%n request",
             "%n requests"
         ],
@@ -469,19 +485,19 @@
         "Requests": "Requests",
         "Only an admin of the service team can reassign a request.": "Only an admin of the service team can reassign a request.",
         "Choose a period of 7, 30 or 90 days.": "Choose a period of 7, 30 or 90 days.",
-        "Last {n} day": [
+        "_Last {n} day_::_Last {n} days_": [
             "Last {n} day",
             "Last {n} days"
         ],
-        "{n} hour": [
+        "_{n} hour_::_{n} hours_": [
             "{n} hour",
             "{n} hours"
         ],
-        "{n} minute": [
+        "_{n} minute_::_{n} minutes_": [
             "{n} minute",
             "{n} minutes"
         ],
-        "{n} unclaimed request": [
+        "_{n} unclaimed request_::_{n} unclaimed requests_": [
             "{n} unclaimed request",
             "{n} unclaimed requests"
         ],
@@ -607,7 +623,7 @@
         "These people are members through a group or team. Giving someone a higher role adds them to this team directly as well. They keep their group membership.": "These people are members through a group or team. Giving someone a higher role adds them to this team directly as well. They keep their group membership.",
         "via {source}": "via {source}",
         "%1$s needs review": "%1$s needs review",
-        "%n event in this period": [
+        "_%n event in this period_::_%n events in this period_": [
             "%n event in this period",
             "%n events in this period"
         ],
@@ -750,31 +766,31 @@
         "{name} (unavailable)": "{name} (unavailable)",
         "{action}: {title}": "{action}: {title}",
         "%1$s · %2$s": "%1$s · %2$s",
-        "%n attendee": [
+        "_%n attendee_::_%n attendees_": [
             "%n attendee",
             "%n attendees"
         ],
-        "%n attendee will be invited": [
+        "_%n attendee will be invited_::_%n attendees will be invited_": [
             "%n attendee will be invited",
             "%n attendees will be invited"
         ],
-        "%n could join online": [
+        "_%n could join online_::_%n could join online_": [
             "%n could join online",
             "%n could join online"
         ],
-        "%n has a calendar conflict": [
+        "_%n has a calendar conflict_::_%n have a calendar conflict_": [
             "%n has a calendar conflict",
             "%n have a calendar conflict"
         ],
-        "%n has a conflict": [
+        "_%n has a conflict_::_%n have a conflict_": [
             "%n has a conflict",
             "%n have a conflict"
         ],
-        "%n member selected": [
+        "_%n member selected_::_%n members selected_": [
             "%n member selected",
             "%n members selected"
         ],
-        "%n resource needs review.": [
+        "_%n resource needs review._::_%n resources need review._": [
             "%n resource needs review.",
             "%n resources need review."
         ],
@@ -789,7 +805,7 @@
         "+ Connect team folder": "+ Connect team folder",
         "+ Create new": "+ Create new",
         "+ Create new team folder": "+ Create new team folder",
-        "+{n} other team": [
+        "_+{n} other team_::_+{n} other teams_": [
             "+{n} other team",
             "+{n} other teams"
         ],
@@ -812,11 +828,11 @@
         "A team folder is now connected to this team": "A team folder is now connected to this team",
         "A kickoff meeting to align the team on scope, timeline, and roles. Mark as done once it's on the calendar.": "A kickoff meeting to align the team on scope, timeline, and roles. Mark as done once it's on the calendar.",
         "A message with a link to the meeting notes will be posted in the Talk room asking team members to add agenda items.": "A message with a link to the meeting notes will be posted in the Talk room asking team members to add agenda items.",
-        "A new message from TeamHub": [
+        "_A new message from TeamHub_::_{n} new messages from TeamHub_": [
             "A new message from TeamHub",
             "{n} new messages from TeamHub"
         ],
-        "A new message from TeamHub is waiting for you.": [
+        "_A new message from TeamHub is waiting for you._::_{n} new messages from TeamHub are waiting for you._": [
             "A new message from TeamHub is waiting for you.",
             "{n} new messages from TeamHub are waiting for you."
         ],
@@ -1377,7 +1393,7 @@
         "Delete time entry": "Delete time entry",
         "Delete {label}?": "Delete {label}?",
         "Delete {name}": "Delete {name}",
-        "Delete {n} event": [
+        "_Delete {n} event_::_Delete {n} events_": [
             "Delete {n} event",
             "Delete {n} events"
         ],
@@ -1626,7 +1642,7 @@
         "Loading the request…": "Loading the request…",
         "Request extension": "Request extension",
         "This request is no longer waiting for a decision. Refresh to update the list.": "This request is no longer waiting for a decision. Refresh to update the list.",
-        "{n} team is waiting for a decision on its expiration date:": [
+        "_{n} team is waiting for a decision on its expiration date:_::_{n} teams are waiting for a decision on their expiration date:_": [
             "{n} team is waiting for a decision on its expiration date:",
             "{n} teams are waiting for a decision on their expiration date:"
         ],
@@ -1826,7 +1842,7 @@
         "Ignore resource {id}": "Ignore resource {id}",
         "Image URL (https://…)": "Image URL (https://…)",
         "Image attachment": "Image attachment",
-        "Image cache cleared (%n file removed)": [
+        "_Image cache cleared (%n file removed)_::_Image cache cleared (%n files removed)_": [
             "Image cache cleared (%n file removed)",
             "Image cache cleared (%n files removed)"
         ],
@@ -2232,7 +2248,7 @@
         "Team name cannot consist only of dots.": "Team name cannot consist only of dots.",
         "A team with this name already exists. Team names must be unique.": "A team with this name already exists. Team names must be unique.",
         "Only members of the selected groups can create teams. Leave empty to allow all users.": "Only members of the selected groups can create teams. Leave empty to allow all users.",
-        "Only proposals in the %n selected category will be added.": [
+        "_Only proposals in the %n selected category will be added._::_Only proposals in the %n selected categories will be added._": [
             "Only proposals in the %n selected category will be added.",
             "Only proposals in the %n selected categories will be added."
         ],
@@ -2277,7 +2293,7 @@
         "Other": "Other",
         "Over your licensed seats: {used} of {cap} used.": "Over your licensed seats: {used} of {cap} used.",
         "Overdue": "Overdue",
-        "Overdue by {n} day": [
+        "_Overdue by {n} day_::_Overdue by {n} days_": [
             "Overdue by {n} day",
             "Overdue by {n} days"
         ],
@@ -2468,7 +2484,7 @@
         "Remove {name} from the project time budget? Their existing logs are kept for the audit trail.": "Remove {name} from the project time budget? Their existing logs are kept for the audit trail.",
         "Remove {user} from all teams": "Remove {user} from all teams",
         "Remove {user} from {team}": "Remove {user} from {team}",
-        "Removed from {n} team": [
+        "_Removed from {n} team_::_Removed from {n} teams_": [
             "Removed from {n} team",
             "Removed from {n} teams"
         ],
@@ -2511,7 +2527,7 @@
         "Resources pending review": "Resources pending review",
         "Restore": "Restore",
         "Restore team {name}": "Restore team {name}",
-        "Restricted to {n} group": [
+        "_Restricted to {n} group_::_Restricted to {n} groups_": [
             "Restricted to {n} group",
             "Restricted to {n} groups"
         ],
@@ -2649,7 +2665,7 @@
         "Short note": "Short note",
         "Short summary of the feedback": "Short summary of the feedback",
         "Show": "Show",
-        "Show %n ignored resource": [
+        "_Show %n ignored resource_::_Show %n ignored resources_": [
             "Show %n ignored resource",
             "Show %n ignored resources"
         ],
@@ -2873,13 +2889,13 @@
         "The team itself and every other resource are unaffected. Only Collectives is being removed.": "The team itself and every other resource are unaffected. Only Collectives is being removed.",
         "The team will be hidden immediately and permanently deleted in 30 days. An administrator can restore it before then. No archive will be produced.": "The team will be hidden immediately and permanently deleted in 30 days. An administrator can restore it before then. No archive will be produced.",
         "The team will be hidden immediately and permanently deleted in 60 days. An administrator can restore it before then. No archive will be produced.": "The team will be hidden immediately and permanently deleted in 60 days. An administrator can restore it before then. No archive will be produced.",
-        "The team will be hidden immediately and permanently deleted in {n} day. Administrators can restore it before that deadline.": [
+        "_The team will be hidden immediately and permanently deleted in {n} day. Administrators can restore it before that deadline._::_The team will be hidden immediately and permanently deleted in {n} days. Administrators can restore it before that deadline._": [
             "The team will be hidden immediately and permanently deleted in {n} day. Administrators can restore it before that deadline.",
             "The team will be hidden immediately and permanently deleted in {n} days. Administrators can restore it before that deadline."
         ],
         "The team will be permanently deleted immediately after the archive is produced. This cannot be undone.": "The team will be permanently deleted immediately after the archive is produced. This cannot be undone.",
         "The team will be permanently deleted immediately. No archive bundle is produced.": "The team will be permanently deleted immediately. No archive bundle is produced.",
-        "The team will be permanently deleted in {n} day. Administrators can restore it.": [
+        "_The team will be permanently deleted in {n} day. Administrators can restore it._::_The team will be permanently deleted in {n} days. Administrators can restore it._": [
             "The team will be permanently deleted in {n} day. Administrators can restore it.",
             "The team will be permanently deleted in {n} days. Administrators can restore it."
         ],
@@ -2899,7 +2915,7 @@
         "Third-party integrations": "Third-party integrations",
         "This action cannot be easily undone.": "This action cannot be easily undone.",
         "This action cannot be undone.": "This action cannot be undone.",
-        "This building has {n} floor": [
+        "_This building has {n} floor_::_This building has {n} floors_": [
             "This building has {n} floor",
             "This building has {n} floors"
         ],
@@ -2912,7 +2928,7 @@
         "This feature requires a license: ask your admin.": "This feature requires a license: ask your admin.",
         "This file no longer exists.": "This file no longer exists.",
         "This file type cannot be previewed read-only in the browser. Download it to view its contents.": "This file type cannot be previewed read-only in the browser. Download it to view its contents.",
-        "This floor has {n} room": [
+        "_This floor has {n} room_::_This floor has {n} rooms_": [
             "This floor has {n} room",
             "This floor has {n} rooms"
         ],
@@ -3163,12 +3179,12 @@
         "Yesterday": "Yesterday",
         "You approved this decision": "You approved this decision",
         "You approved this file": "You approved this file",
-        "You are about to remove {user} from {n} team. This cannot be undone.": [
+        "_You are about to remove {user} from {n} team. This cannot be undone._::_You are about to remove {user} from {n} teams. This cannot be undone._": [
             "You are about to remove {user} from {n} team. This cannot be undone.",
             "You are about to remove {user} from {n} teams. This cannot be undone."
         ],
         "You are about to withdraw this decision and open a new proposal in its place.": "You are about to withdraw this decision and open a new proposal in its place.",
-        "You are an approver and this request has been waiting %n day": [
+        "_You are an approver and this request has been waiting %n day_::_You are an approver and this request has been waiting %n days_": [
             "You are an approver and this request has been waiting %n day",
             "You are an approver and this request has been waiting %n days"
         ],
@@ -3204,7 +3220,7 @@
         "You’re all caught up": "You’re all caught up",
         "You're getting the project off the ground. Here's what to focus on:": "You're getting the project off the ground. Here's what to focus on:",
         "You're setting up your project. Here's what to focus on:": "You're setting up your project. Here's what to focus on:",
-        "Your approval request has been waiting %n day": [
+        "_Your approval request has been waiting %n day_::_Your approval request has been waiting %n days_": [
             "Your approval request has been waiting %n day",
             "Your approval request has been waiting %n days"
         ],
@@ -3270,7 +3286,7 @@
         "e.g. Weekly sync": "e.g. Weekly sync",
         "e.g. en/teamhub": "e.g. en/teamhub",
         "email address": "email address",
-        "grace: {n} day left": [
+        "_grace: {n} day left_::_grace: {n} days left_": [
             "grace: {n} day left",
             "grace: {n} days left"
         ],
@@ -3314,7 +3330,7 @@
         "{available} of {total} available": "{available} of {total} available",
         "{available} of {total} available, {count} at {building}": "{available} of {total} available, {count} at {building}",
         "{cell}: {type}. Click to change.": "{cell}: {type}. Click to change.",
-        "{count} project member": [
+        "_{count} project member_::_{count} project members_": [
             "{count} project member",
             "{count} project members"
         ],
@@ -3332,7 +3348,7 @@
         "{name} has been approved": "{name} has been approved",
         "{name} is now the team owner. You are now a moderator.": "{name} is now the team owner. You are now a moderator.",
         "{name} saved": "{name} saved",
-        "{n} altered file": [
+        "_{n} altered file_::_{n} altered files_": [
             "{n} altered file",
             "{n} altered files"
         ],
@@ -3342,71 +3358,71 @@
         ],
         "{n} boards": "{n} boards",
         "{n} calendars": "{n} calendars",
-        "{n} comment": [
+        "_{n} comment_::_{n} comments_": [
             "{n} comment",
             "{n} comments"
         ],
-        "{n} day": [
+        "_{n} day_::_{n} days_": [
             "{n} day",
             "{n} days"
         ],
-        "{n} day ago": [
+        "_{n} day ago_::_{n} days ago_": [
             "{n} day ago",
             "{n} days ago"
         ],
-        "{n} day left": [
+        "_{n} day left_::_{n} days left_": [
             "{n} day left",
             "{n} days left"
         ],
-        "{n} decision": [
+        "_{n} decision_::_{n} decisions_": [
             "{n} decision",
             "{n} decisions"
         ],
-        "{n} deleted user found in team memberships.": [
+        "_{n} deleted user found in team memberships._::_{n} deleted users found in team memberships._": [
             "{n} deleted user found in team memberships.",
             "{n} deleted users found in team memberships."
         ],
-        "{n} event could not be deleted": [
+        "_{n} event could not be deleted_::_{n} events could not be deleted_": [
             "{n} event could not be deleted",
             "{n} events could not be deleted"
         ],
-        "{n} event deleted": [
+        "_{n} event deleted_::_{n} events deleted_": [
             "{n} event deleted",
             "{n} events deleted"
         ],
-        "{n} event selected": [
+        "_{n} event selected_::_{n} events selected_": [
             "{n} event selected",
             "{n} events selected"
         ],
         "{n} hour ago": "{n} hour ago",
         "{n} hours ago": "{n} hours ago",
-        "{n} item awaiting your approval": [
+        "_{n} item awaiting your approval_::_{n} items awaiting your approval_": [
             "{n} item awaiting your approval",
             "{n} items awaiting your approval"
         ],
-        "{n} lane over budget": [
+        "_{n} lane over budget_::_{n} lanes over budget_": [
             "{n} lane over budget",
             "{n} lanes over budget"
         ],
-        "{n} member invited": [
+        "_{n} member invited_::_{n} members invited_": [
             "{n} member invited",
             "{n} members invited"
         ],
-        "{n} member over hours": [
+        "_{n} member over hours_::_{n} members over hours_": [
             "{n} member over hours",
             "{n} members over hours"
         ],
         "{n} min ago": "{n} min ago",
-        "{n} missing file": [
+        "_{n} missing file_::_{n} missing files_": [
             "{n} missing file",
             "{n} missing files"
         ],
         "{n} of {total} votes": "{n} of {total} votes",
-        "{n} open decision": [
+        "_{n} open decision_::_{n} open decisions_": [
             "{n} open decision",
             "{n} open decisions"
         ],
-        "{n} over": [
+        "_{n} over_::_{n} over_": [
             "{n} over",
             "{n} over"
         ],
@@ -3415,35 +3431,35 @@
             "{n} reply: open chat",
             "{n} replies: open chat"
         ],
-        "{n} team": [
+        "_{n} team_::_{n} teams_": [
             "{n} team",
             "{n} teams"
         ],
-        "{n} team selected": [
+        "_{n} team selected_::_{n} teams selected_": [
             "{n} team selected",
             "{n} teams selected"
         ],
-        "{n} type allowed": [
+        "_{n} type allowed_::_{n} types allowed_": [
             "{n} type allowed",
             "{n} types allowed"
         ],
-        "{n} unassigned card": [
+        "_{n} unassigned card_::_{n} unassigned cards_": [
             "{n} unassigned card",
             "{n} unassigned cards"
         ],
-        "{n} unassigned card in {board}: open board": [
+        "_{n} unassigned card in {board}: open board_::_{n} unassigned cards in {board}: open board_": [
             "{n} unassigned card in {board}: open board",
             "{n} unassigned cards in {board}: open board"
         ],
-        "{n} unexpected file": [
+        "_{n} unexpected file_::_{n} unexpected files_": [
             "{n} unexpected file",
             "{n} unexpected files"
         ],
-        "{n} unsolved question": [
+        "_{n} unsolved question_::_{n} unsolved questions_": [
             "{n} unsolved question",
             "{n} unsolved questions"
         ],
-        "{n} user": [
+        "_{n} user_::_{n} users_": [
             "{n} user",
             "{n} users"
         ],
@@ -3467,11 +3483,11 @@
         "{team} is ready": "{team} is ready",
         "{title} disabled for this team": "{title} disabled for this team",
         "{title} enabled for this team": "{title} enabled for this team",
-        "{total} total vote": [
+        "_{total} total vote_::_{total} total votes_": [
             "{total} total vote",
             "{total} total votes"
         ],
-        "{total} total vote: Poll closed": [
+        "_{total} total vote: Poll closed_::_{total} total votes: Poll closed_": [
             "{total} total vote \\u2013 Poll closed",
             "{total} total votes \\u2013 Poll closed"
         ],
@@ -3573,7 +3589,7 @@
         "Write a reply…": "Write a reply…",
         "You cannot post in this conversation.": "You cannot post in this conversation.",
         "This role does not allow commenting in this team.": "This role does not allow commenting in this team.",
-        "{n} reply": [
+        "_{n} reply_::_{n} replies_": [
             "{n} reply",
             "{n} replies"
         ],
@@ -3591,7 +3607,7 @@
         "Try widening the period, or clearing a team or type selection.": "Try widening the period, or clearing a team or type selection.",
         "Turn on at least one row under Show in the Feed control panel.": "Turn on at least one row under Show in the Feed control panel.",
         "You’ve reached the end": "You’ve reached the end",
-        "{n} item shown": [
+        "_{n} item shown_::_{n} items shown_": [
             "{n} item shown",
             "{n} items shown"
         ],
@@ -3617,7 +3633,7 @@
         "Scans every user-created team for system bits that should never appear on a user team (CFG_SINGLE, CFG_PERSONAL, CFG_SYSTEM, CFG_NO_OWNER, CFG_HIDDEN, CFG_BACKEND). Nextcloud Circles refuses any config update on a team carrying one of these, so apps can no longer change it. Use Repair to reset a team's config to clean defaults.": "Scans every user-created team for system bits that should never appear on a user team (CFG_SINGLE, CFG_PERSONAL, CFG_SYSTEM, CFG_NO_OWNER, CFG_HIDDEN, CFG_BACKEND). Nextcloud Circles refuses any config update on a team carrying one of these, so apps can no longer change it. Use Repair to reset a team's config to clean defaults.",
         "These teams carry the CFG_APP flag, which a Nextcloud app sets to mark the team as managed by it: enabling a Collective does this. It is not corruption and needs no repair. The flag stays behind if the app that set it is later removed.": "These teams carry the CFG_APP flag, which a Nextcloud app sets to mark the team as managed by it: enabling a Collective does this. It is not corruption and needs no repair. The flag stays behind if the app that set it is later removed.",
         "Current config: {config}. App flag: {appBits}": "Current config: {config}. App flag: {appBits}",
-        "{n} team is claimed by another app": [
+        "_{n} team is claimed by another app_::_{n} teams are claimed by another app_": [
             "{n} team is claimed by another app",
             "{n} teams are claimed by another app"
         ],
@@ -3680,27 +3696,27 @@
         "{message} ({error})": "{message} ({error})",
         "Bulk team import": "Bulk team import",
         "Create many teams at once from a CSV file, each with its own owner and team admins.": "Create many teams at once from a CSV file, each with its own owner and team admins.",
-        "{n} team ready": [
+        "_{n} team ready_::_{n} teams ready_": [
             "{n} team ready",
             "{n} teams ready"
         ],
-        "{n} created": [
+        "_{n} created_::_{n} created_": [
             "{n} created",
             "{n} created"
         ],
-        "{n} skipped": [
+        "_{n} skipped_::_{n} skipped_": [
             "{n} skipped",
             "{n} skipped"
         ],
-        "{n} error": [
+        "_{n} error_::_{n} errors_": [
             "{n} error",
             "{n} errors"
         ],
-        "Create {n} team": [
+        "_Create {n} team_::_Create {n} teams_": [
             "Create {n} team",
             "Create {n} teams"
         ],
-        "{n} team will be created, with its apps, privacy settings and modules. This cannot be undone from here. A team created by mistake has to be deleted individually.": [
+        "_{n} team will be created, with its apps, privacy settings and modules. This cannot be undone from here. A team created by mistake has to be deleted individually._::_{n} teams will be created, each with its apps, privacy settings and modules. This cannot be undone from here. A team created by mistake has to be deleted individually._": [
             "{n} team will be created, with its apps, privacy settings and modules. This cannot be undone from here. A team created by mistake has to be deleted individually.",
             "{n} teams will be created, each with its apps, privacy settings and modules. This cannot be undone from here. A team created by mistake has to be deleted individually."
         ],
@@ -3822,7 +3838,7 @@
         "Audit log retention details": "Audit log retention details",
         "Audit log:": "Audit log:",
         "Events are appended and purged in bulk after the retention window. No code path updates or deletes an individual row, so a record cannot be rewritten before it expires.": "Events are appended and purged in bulk after the retention window. No code path updates or deletes an individual row, so a record cannot be rewritten before it expires.",
-        "{n} day retention": [
+        "_{n} day retention_::_{n} days retention_": [
             "{n} day retention",
             "{n} days retention"
         ],
@@ -3900,7 +3916,7 @@
             "%n locked",
             "%n locked"
         ],
-        "%n setting": [
+        "_%n setting_::_%n settings_": [
             "%n setting",
             "%n settings"
         ],
@@ -3911,7 +3927,7 @@
         "Profiles": "Profiles",
         "Team expiration": "Team expiration",
         "The date the picker opens on when someone creates this kind of team. 0 leaves it on the standard six months.": "The date the picker opens on when someone creates this kind of team. 0 leaves it on the standard six months.",
-        "Default %n day": [
+        "_Default %n day_::_Default %n days_": [
             "Default %n day",
             "Default %n days"
         ],
@@ -3952,7 +3968,7 @@
         "No pages yet": "No pages yet",
         "Expand {title}": "Expand {title}",
         "Collapse {title}": "Collapse {title}",
-        "Only the first %n page is listed": [
+        "_Only the first %n page is listed_::_Only the first %n pages are listed_": [
             "Only the first %n page is listed",
             "Only the first %n pages are listed"
         ],
@@ -3989,35 +4005,35 @@
         "Teams to create": "Teams to create",
         "This template does not allow an expiration date.": "This template does not allow an expiration date.",
         "{done} of {total}": "{done} of {total}",
-        "%n created": [
+        "_%n created_::_%n created_": [
             "%n created",
             "%n created"
         ],
-        "%n failed": [
+        "_%n failed_::_%n failed_": [
             "%n failed",
             "%n failed"
         ],
-        "%n row ready": [
+        "_%n row ready_::_%n rows ready_": [
             "%n row ready",
             "%n rows ready"
         ],
-        "%n skipped": [
+        "_%n skipped_::_%n skipped_": [
             "%n skipped",
             "%n skipped"
         ],
-        "%n team": [
+        "_%n team_::_%n teams_": [
             "%n team",
             "%n teams"
         ],
-        "%n with a warning": [
+        "_%n with a warning_::_%n with warnings_": [
             "%n with a warning",
             "%n with warnings"
         ],
-        "%n with an error": [
+        "_%n with an error_::_%n with errors_": [
             "%n with an error",
             "%n with errors"
         ],
-        "Create %n team": [
+        "_Create %n team_::_Create %n teams_": [
             "Create %n team",
             "Create %n teams"
         ],
@@ -4032,7 +4048,7 @@
         "One row per team. Apps and settings come from the template and policy you pick, and can be changed per team afterwards. Rows without a name are ignored, so you can leave spare rows empty.": "One row per team. Apps and settings come from the template and policy you pick, and can be changed per team afterwards. Rows without a name are ignored, so you can leave spare rows empty.",
         "Search a person…": "Search a person…",
         "This row cannot be created.": "This row cannot be created.",
-        "%n row needs attention before these teams can be created.": [
+        "_%n row needs attention before these teams can be created._::_%n rows need attention before these teams can be created._": [
             "%n row needs attention before these teams can be created.",
             "%n rows need attention before these teams can be created."
         ],
@@ -4040,17 +4056,17 @@
         "Creating several teams at once requires a license.": "Creating several teams at once requires a license.",
         "Templates and policy profiles": "Templates and policy profiles",
         "{n} of {total} adjusted": "{n} of {total} adjusted",
-        "{n} template, none adjusted": [
+        "_{n} template, none adjusted_::_{n} templates, none adjusted_": [
             "{n} template, none adjusted",
             "{n} templates, none adjusted"
         ],
         "Templates decide which apps and modules a new team is given, and how long it may live. Adjust them under Policy → Team templates.": "Templates decide which apps and modules a new team is given, and how long it may live. Adjust them under Policy → Team templates.",
         "Policy profiles": "Policy profiles",
-        "{total} defined, {n} team classified": [
+        "_{total} defined, {n} team classified_::_{total} defined, {n} teams classified_": [
             "{total} defined, {n} team classified",
             "{total} defined, {n} teams classified"
         ],
-        "{n} profile, no team classified": [
+        "_{n} profile, no team classified_::_{n} profiles, no team classified_": [
             "{n} profile, no team classified",
             "{n} profiles, no team classified"
         ],
@@ -4060,7 +4076,7 @@
         "Team profiles:": "Team profiles:",
         "No teams classified": "No teams classified",
         "Team profile compliance details": "Team profile compliance details",
-        "{n} team classified, {ok} still matching": [
+        "_{n} team classified, {ok} still matching_::_{n} teams classified, {ok} still matching_": [
             "{n} team classified, {ok} still matching",
             "{n} teams classified, {ok} still matching"
         ],
@@ -4090,7 +4106,7 @@
         "This team already matches the profile. Applying it changes no setting.": "This team already matches the profile. Applying it changes no setting.",
         "Not changed by applying: existing members are never removed. The team will be reported as non-compliant until they are.": "Not changed by applying: existing members are never removed. The team will be reported as non-compliant until they are.",
         "These integrations are switched off for the team: {apps}. Their own data is not deleted.": "These integrations are switched off for the team: {apps}. Their own data is not deleted.",
-        "The profile also governs {n} setting this team already matches.": [
+        "_The profile also governs {n} setting this team already matches._::_The profile also governs {n} settings this team already matches._": [
             "The profile also governs {n} setting this team already matches.",
             "The profile also governs {n} settings this team already matches."
         ],
@@ -4099,7 +4115,7 @@
         "The team keeps its current settings and stops being checked against a profile.": "The team keeps its current settings and stops being checked against a profile.",
         "Apply the profile": "Apply the profile",
         "Profile applied to {team}.": "Profile applied to {team}.",
-        "Profile applied. {n} setting could not be changed and is reported instead. See the team’s profile chip.": [
+        "_Profile applied. {n} setting could not be changed and is reported instead. See the team’s profile chip._::_Profile applied. {n} settings could not be changed and are reported instead. See the team’s profile chip._": [
             "Profile applied. {n} setting could not be changed and is reported instead. See the team’s profile chip.",
             "Profile applied. {n} settings could not be changed and are reported instead. See the team’s profile chip."
         ],
@@ -4154,11 +4170,11 @@
         "This review is already closed.": "This review is already closed.",
         "This review no longer exists.": "This review no longer exists.",
         "That did not work. Try again.": "That did not work. Try again.",
-        "There is already %n open review on this file.": [
+        "_There is already %n open review on this file._::_There are already %n open reviews on this file._": [
             "There is already %n open review on this file.",
             "There are already %n open reviews on this file."
         ],
-        "%n team member will be asked.": [
+        "_%n team member will be asked._::_%n team members will be asked._": [
             "%n team member will be asked.",
             "%n team members will be asked."
         ],
@@ -4207,23 +4223,23 @@
         "failed": "failed",
         "needs {apps} added by hand": "needs {apps} added by hand",
         "no longer uses this": "no longer uses this",
-        "Apply to all {n} team": [
+        "_Apply to all {n} team_::_Apply to all {n} teams_": [
             "Apply to all {n} team",
             "Apply to all {n} teams"
         ],
-        "Apply to {n} team": [
+        "_Apply to {n} team_::_Apply to {n} teams_": [
             "Apply to {n} team",
             "Apply to {n} teams"
         ],
-        "{eligible} of {total} team still matches what this said before the change.": [
+        "_{eligible} of {total} team still matches what this said before the change._::_{eligible} of {total} teams still match what this said before the change._": [
             "{eligible} of {total} team still matches what this said before the change.",
             "{eligible} of {total} teams still match what this said before the change."
         ],
-        "{n} more team was not processed in this run. Save the change again to continue.": [
+        "_{n} more team was not processed in this run. Save the change again to continue._::_{n} more teams were not processed in this run. Save the change again to continue._": [
             "{n} more team was not processed in this run. Save the change again to continue.",
             "{n} more teams were not processed in this run. Save the change again to continue."
         ],
-        "{n} team updated.": [
+        "_{n} team updated._::_{n} teams updated._": [
             "{n} team updated.",
             "{n} teams updated."
         ],
@@ -4239,11 +4255,11 @@
         "left for you: {apps}": "left for you: {apps}",
         "not applied: {fields}": "not applied: {fields}",
         "removed {apps}": "removed {apps}",
-        "{n} needs attention.": [
+        "_{n} needs attention._::_{n} need attention._": [
             "{n} needs attention.",
             "{n} need attention."
         ],
-        "{n} setting applied": [
+        "_{n} setting applied_::_{n} settings applied_": [
             "{n} setting applied",
             "{n} settings applied"
         ],
@@ -4364,7 +4380,7 @@
         "OpenProject data could not be loaded.": "OpenProject data could not be loaded.",
         "Project info": "Project info",
         "Work package": "Work package",
-        "Show {n} more work package": [
+        "_Show {n} more work package_::_Show {n} more work packages_": [
             "Show {n} more work package",
             "Show {n} more work packages"
         ],
@@ -4390,7 +4406,7 @@
         "My OpenProject work": "My OpenProject work",
         "OpenProject project": "OpenProject project",
         "My work": "My work",
-        "Due in {n} day": [
+        "_Due in {n} day_::_Due in {n} days_": [
             "Due in {n} day",
             "Due in {n} days"
         ],
@@ -4398,7 +4414,7 @@
             "{shown} of {n} work package",
             "{shown} of {n} work packages"
         ],
-        "Showing the first {n} match. Narrow the search to find others.": [
+        "_Showing the first {n} match. Narrow the search to find others._::_Showing the first {n} matches. Narrow the search to find others._": [
             "Showing the first {n} match. Narrow the search to find others.",
             "Showing the first {n} matches. Narrow the search to find others."
         ],
@@ -4537,7 +4553,7 @@
         "TeamHub dashboard": "TeamHub dashboard",
         "Guest": "Guest",
         "Open project in OpenProject": "Open project in OpenProject",
-        "{n} member has no OpenProject account. Decide what to do with them before continuing.": [
+        "_{n} member has no OpenProject account. Decide what to do with them before continuing._::_{n} members have no OpenProject account. Decide what to do with them before continuing._": [
             "{n} member has no OpenProject account. Decide what to do with them before continuing.",
             "{n} members have no OpenProject account. Decide what to do with them before continuing."
         ],
@@ -4555,15 +4571,15 @@
         "Add to the team only": "Add to the team only",
         "Leave out": "Leave out",
         "Team page, {apps}": "Team page, {apps}",
-        "{n} attempt": [
+        "_{n} attempt_::_{n} attempts_": [
             "{n} attempt",
             "{n} attempts"
         ],
-        "{n} member could not be added in OpenProject": [
+        "_{n} member could not be added in OpenProject_::_{n} members could not be added in OpenProject_": [
             "{n} member could not be added in OpenProject",
             "{n} members could not be added in OpenProject"
         ],
-        "{n} member added in OpenProject": [
+        "_{n} member added in OpenProject_::_{n} members added in OpenProject_": [
             "{n} member added in OpenProject",
             "{n} members added in OpenProject"
         ],
@@ -4581,19 +4597,19 @@
         "Created {name}": "Created {name}",
         "The project folder OpenProject manages is linked": "The project folder OpenProject manages is linked",
         "Existing resource kept": "Existing resource kept",
-        "Add {n} missing member to OpenProject": [
+        "_Add {n} missing member to OpenProject_::_Add {n} missing members to OpenProject_": [
             "Add {n} missing member to OpenProject",
             "Add {n} missing members to OpenProject"
         ],
-        "{n} member is in step on both sides.": [
+        "_{n} member is in step on both sides._::_{n} members are in step on both sides._": [
             "{n} member is in step on both sides.",
             "{n} members are in step on both sides."
         ],
-        "OpenProject refused {n} member.": [
+        "_OpenProject refused {n} member._::_OpenProject refused {n} members._": [
             "OpenProject refused {n} member.",
             "OpenProject refused {n} members."
         ],
-        "Added {n} member to the project.": [
+        "_Added {n} member to the project._::_Added {n} members to the project._": [
             "Added {n} member to the project.",
             "Added {n} members to the project."
         ],
@@ -4667,22 +4683,22 @@
         "{source} answered slowly, so not every project was read this time. Refresh to try again.": "{source} answered slowly, so not every project was read this time. Refresh to try again.",
         "{source} no longer accepts your connection. Reconnect your account in your personal settings.": "{source} no longer accepts your connection. Reconnect your account in your personal settings.",
         "Opens in {app}, in a new tab": "Opens in {app}, in a new tab",
-        "Milestone in {n} day: {subject}": [
+        "_Milestone in {n} day: {subject}_::_Milestone in {n} days: {subject}_": [
             "Milestone in {n} day: {subject}",
             "Milestone in {n} days: {subject}"
         ],
         "Milestone today: {subject}": "Milestone today: {subject}",
         "Your attention": "Your attention",
         "{n} of your work packages due within {days} days, {today} today": "{n} of your work packages due within {days} days, {today} today",
-        "{n} of your work packages is due within {days} days": [
+        "_{n} of your work packages is due within {days} days_::_{n} of your work packages are due within {days} days_": [
             "{n} of your work packages is due within {days} days",
             "{n} of your work packages are due within {days} days"
         ],
-        "{n} of your work packages is overdue": [
+        "_{n} of your work packages is overdue_::_{n} of your work packages are overdue_": [
             "{n} of your work packages is overdue",
             "{n} of your work packages are overdue"
         ],
-        "{n} work package changed in the last 7 days": [
+        "_{n} work package changed in the last 7 days_::_{n} work packages changed in the last 7 days_": [
             "{n} work package changed in the last 7 days",
             "{n} work packages changed in the last 7 days"
         ],
@@ -4695,12 +4711,12 @@
         "All projects": "All projects",
         "All work types": "All work types",
         "Work type": "Work type",
-        "Overdue by %n day": [
+        "_Overdue by %n day_::_Overdue by %n days_": [
             "Overdue by %n day",
             "Overdue by %n days"
         ],
         "Due tomorrow": "Due tomorrow",
-        "Due in %n day": [
+        "_Due in %n day_::_Due in %n days_": [
             "Due in %n day",
             "Due in %n days"
         ],
@@ -4709,7 +4725,7 @@
         "Completed in OpenProject": "Completed in OpenProject",
         "Milestone today": "Milestone today",
         "Milestone tomorrow": "Milestone tomorrow",
-        "Milestone in %n day": [
+        "_Milestone in %n day_::_Milestone in %n days_": [
             "Milestone in %n day",
             "Milestone in %n days"
         ],
@@ -4959,7 +4975,7 @@
         "This workflow is blocked; lift the block first.": "This workflow is blocked; lift the block first.",
         "You are not part of this workflow.": "You are not part of this workflow.",
         "Workflow not found.": "Workflow not found.",
-        "You already asked for an update on this step; you can ask again in %n hour.": [
+        "_You already asked for an update on this step; you can ask again in %n hour._::_You already asked for an update on this step; you can ask again in %n hours._": [
             "You already asked for an update on this step; you can ask again in %n hour.",
             "You already asked for an update on this step; you can ask again in %n hours."
         ],
@@ -5106,15 +5122,15 @@
         "That team does not answer requests.": "That team does not answer requests.",
         "The service team creates the team": "The service team creates the team",
         "The owner or a moderator of the team you ask from approves the request; the service team then creates the team and you confirm it.": "The owner or a moderator of the team you ask from approves the request; the service team then creates the team and you confirm it.",
-        "%n person can work the queue.": [
+        "_%n person can work the queue._::_%n people can work the queue._": [
             "%n person can work the queue.",
             "%n people can work the queue."
         ],
-        "%n person can work the queue right now.": [
+        "_%n person can work the queue right now._::_%n people can work the queue right now._": [
             "%n person can work the queue right now.",
             "%n people can work the queue right now."
         ],
-        "{n} person can work the queue.": [
+        "_{n} person can work the queue._::_{n} people can work the queue._": [
             "{n} person can work the queue.",
             "{n} people can work the queue."
         ],
@@ -5171,7 +5187,7 @@
         "%s is now in TeamHub": "%s is now in TeamHub",
         "{team} was not added to TeamHub": "{team} was not added to TeamHub",
         "%s was not added to TeamHub": "%s was not added to TeamHub",
-        "{n} to review": [
+        "_{n} to review_::_{n} to review_": [
             "{n} to review",
             "{n} to review"
         ],
@@ -5352,7 +5368,7 @@
         "%s answered your review request": "%s answered your review request",
         "%s has been archived.": "%s has been archived.",
         "%s still stands.": "%s still stands.",
-        "Reviewed every month": [
+        "_Reviewed every month_::_Reviewed every {n} months_": [
             "Reviewed every month",
             "Reviewed every {n} months"
         ],
@@ -5497,7 +5513,7 @@
         "The team was created, but not everything finished: {error}": "The team was created, but not everything finished: {error}",
         "Could not create the team. Try again.": "Could not create the team. Try again.",
         "Could not decline the group. Try again.": "Could not decline the group. Try again.",
-        "%n person": [
+        "_%n person_::_%n people_": [
             "%n person",
             "%n people"
         ],
@@ -5619,7 +5635,7 @@
         "Only its own members and this team's administrators know it exists.": "Only its own members and this team's administrators know it exists.",
         "Members are picked from this team. You can invite people from outside once the sub-team exists.": "Members are picked from this team. You can invite people from outside once the sub-team exists.",
         "A sub-team is a smaller group inside this team, with its own files and its own members. You pick who is in it from this team, and you can invite people from outside. Everything about a sub-team is managed from here.": "A sub-team is a smaller group inside this team, with its own files and its own members. You pick who is in it from this team, and you can invite people from outside. Everything about a sub-team is managed from here.",
-        "{n} member": [
+        "_{n} member_::_{n} members_": [
             "{n} member",
             "{n} members"
         ],
@@ -5689,7 +5705,7 @@
         "Failed to remove banner: {error}": "Failed to remove banner: {error}",
         "Open team maintenance to request an extension": "Open team maintenance to request an extension",
         "This team passed its expiration date on {date}.": "This team passed its expiration date on {date}.",
-        "This team expires in %n day.": [
+        "_This team expires in %n day._::_This team expires in %n days._": [
             "This team expires in %n day.",
             "This team expires in %n days."
         ],
@@ -5697,7 +5713,7 @@
         "Compliment {name}": "Compliment {name}",
         "They will see this the next time they open TeamHub.": "They will see this the next time they open TeamHub.",
         "Say what they did well": "Say what they did well",
-        "%n character left": [
+        "_%n character left_::_%n characters left_": [
             "%n character left",
             "%n characters left"
         ],
@@ -5705,12 +5721,12 @@
         "Compliment sent to {name}": "Compliment sent to {name}",
         "Could not send the compliment": "Could not send the compliment",
         "Could not send the compliment: {error}": "Could not send the compliment: {error}",
-        "A compliment for you": [
+        "_A compliment for you_::_%n compliments for you_": [
             "A compliment for you",
             "%n compliments for you"
         ],
         "{name} sent you a compliment.": "{name} sent you a compliment.",
-        "%n person sent you a compliment.": [
+        "_%n person sent you a compliment._::_%n people sent you a compliment._": [
             "%n person sent you a compliment.",
             "%n people sent you a compliment."
         ],
@@ -5808,7 +5824,7 @@
         "Review became due": "Review became due",
         "Team admin confirms the list": "Team admin confirms the list",
         "Membership confirmed. The review is recorded with your name and today's date.": "Membership confirmed. The review is recorded with your name and today's date.",
-        "Reviewed every %n month. This team has not been reviewed yet.": [
+        "_Reviewed every %n month. This team has not been reviewed yet._::_Reviewed every %n months. This team has not been reviewed yet._": [
             "Reviewed every %n month. This team has not been reviewed yet.",
             "Reviewed every %n months. This team has not been reviewed yet."
         ],
@@ -5839,11 +5855,11 @@
         "Teams using it": "Teams using it",
         "Show the teams using {app}": "Show the teams using {app}",
         "Could not build the integrations register.": "Could not build the integrations register.",
-        "{n} row written since the last hourly pass is not chained yet": [
+        "_{n} row written since the last hourly pass is not chained yet_::_{n} rows written since the last hourly pass are not chained yet_": [
             "{n} row written since the last hourly pass is not chained yet",
             "{n} rows written since the last hourly pass are not chained yet"
         ],
-        "{n} row predates this feature and can never be verified": [
+        "_{n} row predates this feature and can never be verified_::_{n} rows predate this feature and can never be verified_": [
             "{n} row predates this feature and can never be verified",
             "{n} rows predate this feature and can never be verified"
         ],
@@ -5939,32 +5955,32 @@
         "{title} is included in {template}.": "{title} is included in {template}.",
         "{title} is no longer included in {template}. Nothing was deleted.": "{title} is no longer included in {template}. Nothing was deleted.",
         "{title} is shown in this team.": "{title} is shown in this team.",
-        "%n team has previously hidden one of these and will keep it hidden.": [
+        "_%n team has previously hidden one of these and will keep it hidden._::_%n teams have previously hidden one of these and will keep them hidden._": [
             "%n team has previously hidden one of these and will keep it hidden.",
             "%n teams have previously hidden one of these and will keep them hidden."
         ],
-        "%n widget": [
+        "_%n widget_::_%n widgets_": [
             "%n widget",
             "%n widgets"
         ],
-        "%n team tab": [
+        "_%n team tab_::_%n team tabs_": [
             "%n team tab",
             "%n team tabs"
         ],
-        "%n My Work source": [
+        "_%n My Work source_::_%n My Work sources_": [
             "%n My Work source",
             "%n My Work sources"
         ],
-        "The integration was notified about every team but one, which reported a problem.": [
+        "_The integration was notified about every team but one, which reported a problem._::_The integration was notified, but {failed} teams reported a problem._": [
             "The integration was notified about every team but one, which reported a problem.",
             "The integration was notified, but {failed} teams reported a problem."
         ],
-        "{n} integration enabled": [
+        "_{n} integration enabled_::_{n} integrations enabled_": [
             "{n} integration enabled",
             "{n} integrations enabled"
         ],
         "\"{name}\" will no longer be offered when someone creates a team.": "\"{name}\" will no longer be offered when someone creates a team.",
-        "%n team was created from it. It keeps every app, module and setting it was created with.": [
+        "_%n team was created from it. It keeps every app, module and setting it was created with._::_%n teams were created from it. They keep every app, module and setting they were created with._": [
             "%n team was created from it. It keeps every app, module and setting it was created with.",
             "%n teams were created from it. They keep every app, module and setting they were created with."
         ],
@@ -5981,7 +5997,7 @@
         "New template": "New template",
         "Template created. Its integrations can be included below.": "Template created. Its integrations can be included below.",
         "Template deleted.": "Template deleted.",
-        "Template deleted. %n existing team keeps what it was created with.": [
+        "_Template deleted. %n existing team keeps what it was created with._::_Template deleted. %n existing teams keep what they were created with._": [
             "Template deleted. %n existing team keeps what it was created with.",
             "Template deleted. %n existing teams keep what they were created with."
         ],
@@ -5995,15 +6011,15 @@
         "This widget has no address to load.": "This widget has no address to load.",
         "Created from the {template} template.": "Created from the {template} template.",
         "The team was created, but its template could not be saved. Integrations and the expiration date that come with the template will not apply until an administrator sets the template again.": "The team was created, but its template could not be saved. Integrations and the expiration date that come with the template will not apply until an administrator sets the template again.",
-        "No member report has reached the licensing service for {n} day.": [
+        "_No member report has reached the licensing service for {n} day._::_No member report has reached the licensing service for {n} days._": [
             "No member report has reached the licensing service for {n} day.",
             "No member report has reached the licensing service for {n} days."
         ],
-        "No member report for {n} day. Action needed.": [
+        "_No member report for {n} day. Action needed._::_No member report for {n} days. Action needed._": [
             "No member report for {n} day. Action needed.",
             "No member report for {n} days. Action needed."
         ],
-        "Advanced features are locked: no member report for {n} day.": [
+        "_Advanced features are locked: no member report for {n} day._::_Advanced features are locked: no member report for {n} days._": [
             "Advanced features are locked: no member report for {n} day.",
             "Advanced features are locked: no member report for {n} days."
         ],
@@ -6128,12 +6144,12 @@
         "Home layout removed. Teams of this template open with the layout TeamHub ships.": "Home layout removed. Teams of this template open with the layout TeamHub ships.",
         "Could not save the home layout.": "Could not save the home layout.",
         "Teams of this template open with the layout TeamHub ships.": "Teams of this template open with the layout TeamHub ships.",
-        "Teams of this template open with a layout of %n card.": [
+        "_Teams of this template open with a layout of %n card._::_Teams of this template open with a layout of %n cards._": [
             "Teams of this template open with a layout of %n card.",
             "Teams of this template open with a layout of %n cards."
         ],
         "No member of this team has an email address on their account.": "No member of this team has an email address on their account.",
-        "{n} team member has no email address and will not receive this.": [
+        "_{n} team member has no email address and will not receive this._::_{n} team members have no email address and will not receive this._": [
             "{n} team member has no email address and will not receive this.",
             "{n} team members have no email address and will not receive this."
         ],
@@ -6155,7 +6171,7 @@
         "Expired {date}": "Expired {date}",
         "No expiration date. Click to set one.": "No expiration date. Click to set one.",
         "This date has passed. The team still works normally. Nothing is deleted automatically. Click to set a new date.": "This date has passed. The team still works normally. Nothing is deleted automatically. Click to set a new date.",
-        "Expires in {n} day. Click to change or clear the date.": [
+        "_Expires in {n} day. Click to change or clear the date._::_Expires in {n} days. Click to change or clear the date._": [
             "Expires in {n} day. Click to change or clear the date.",
             "Expires in {n} days. Click to change or clear the date."
         ],
@@ -6180,11 +6196,11 @@
         "Check what will be exported": "Check what will be exported",
         "Download CSV": "Download CSV",
         "What the file will contain": "What the file will contain",
-        "{n} team will be written.": [
+        "_{n} team will be written._::_{n} teams will be written._": [
             "{n} team will be written.",
             "{n} teams will be written."
         ],
-        "{n} of them cannot be imported again as-is: see below.": [
+        "_{n} of them cannot be imported again as-is: see below._::_{n} of them cannot be imported again as-is: see below._": [
             "{n} of them cannot be imported again as-is: see below.",
             "{n} of them cannot be imported again as-is: see below."
         ],
@@ -6254,7 +6270,7 @@
         "Could not load birthdays.": "Could not load birthdays.",
         "No upcoming birthdays to show.": "No upcoming birthdays to show.",
         "Happy birthday, {name}!": "Happy birthday, {name}!",
-        "Wishing you a wonderful day from everyone at TeamHub!": "Wishing you a wonderful day from everyone at TeamHub!",
+        "Wishing you a wonderful day from all your colleagues.": "Wishing you a wonderful day from all your colleagues.",
         "Birthday sharing controls the Department birthday widget and birthday celebration. Work anniversary and people-directory sharing will be used by future features.": "Birthday sharing controls the Department birthday widget and birthday celebration. Work anniversary and people-directory sharing will be used by future features.",
         "Nextcloud account start date": "Nextcloud account start date",
         "Account creation date when recorded; otherwise first login if known. This is not your employment start date.": "Account creation date when recorded; otherwise first login if known. This is not your employment start date.",
@@ -6316,7 +6332,7 @@
         "Clear list": "Clear list",
         "Clear the list of recent imports": "Clear the list of recent imports",
         "The list could not be cleared.": "The list could not be cleared.",
-        "{n} import removed from the list": ["{n} import removed from the list", "{n} imports removed from the list"],
+        "_{n} import removed from the list_::_{n} imports removed from the list_": ["{n} import removed from the list", "{n} imports removed from the list"],
         "Off disables Nextcloud’s own Teams app: its navigation entry, its pages and its dashboard widget stop answering, so a team is managed in TeamHub only. Leave it on if you use the Collectives app, which manages a collective’s members through that same frontend.": "Off disables Nextcloud’s own Teams app: its navigation entry, its pages and its dashboard widget stop answering, so a team is managed in TeamHub only. Leave it on if you use the Collectives app, which manages a collective’s members through that same frontend.",
         "Give every category a name of its own to save the list.": "Give every category a name of its own to save the list.",
         "Full": "Full",
@@ -6327,7 +6343,7 @@
         "All statuses": "All statuses",
         "Clear the status filter": "Clear the status filter",
         "No member has the selected status this week.": "No member has the selected status this week.",
-        "Showing {shown} of {total} member": [
+        "_Showing {shown} of {total} member_::_Showing {shown} of {total} members_": [
             "Showing {shown} of {total} member",
             "Showing {shown} of {total} members"
         ],
@@ -6344,7 +6360,7 @@
             "{count} members in {status} on {day}"
         ],
         "Show the selected statuses for {day}": "Show the selected statuses for {day}",
-        "{status}, {count} member on {day}": [
+        "_{status}, {count} member on {day}_::_{status}, {count} members on {day}_": [
             "{status}, {count} member on {day}",
             "{status}, {count} members on {day}"
         ],
@@ -6373,15 +6389,15 @@
         "Could not remove the shift.": "Could not remove the shift.",
         "Could not take the shift.": "Could not take the shift.",
         "Could not publish the roster.": "Could not publish the roster.",
-        "{count} shift is still a draft": [
+        "_{count} shift is still a draft_::_{count} shifts are still a draft_": [
             "{count} shift is still a draft",
             "{count} shifts are still a draft"
         ],
-        "{count} place still open on {day}": [
+        "_{count} place still open on {day}_::_{count} places still open on {day}_": [
             "{count} place still open on {day}",
             "{count} places still open on {day}"
         ],
-        "{count} more person needed": [
+        "_{count} more person needed_::_{count} more people needed_": [
             "{count} more person needed",
             "{count} more people needed"
         ],
@@ -6419,7 +6435,7 @@
         "Could not save the schedule.": "Could not save the schedule.",
         "Could not delete the schedule.": "Could not delete the schedule.",
         "Delete the schedule {name}? Rosters already planned from it stay as they are.": "Delete the schedule {name}? Rosters already planned from it stay as they are.",
-        "{count} shift a week": [
+        "_{count} shift a week_::_{count} shifts a week_": [
             "{count} shift a week",
             "{count} shifts a week"
         ],
@@ -6484,7 +6500,7 @@
         "{name} is asking to be replaced. Show why.": "{name} is asking to be replaced. Show why.",
         "Take the {shift} shift over from {name}": "Take the {shift} shift over from {name}",
         "Could not invite {names}": "Could not invite {names}",
-        "{n} person already had an invite": [
+        "_{n} person already had an invite_::_{n} people already had an invite_": [
             "{n} person already had an invite",
             "{n} people already had an invite"
         ],
@@ -6509,7 +6525,7 @@
         "Build one under Manage team, Module settings. A template says which roles you need on which days.": "Build one under Manage team, Module settings. A template says which roles you need on which days.",
         "Pick a template": "Pick a template",
         "{name} ({count}), set by an administrator": "{name} ({count}), set by an administrator",
-        "{count} person": [
+        "_{count} person_::_{count} people_": [
             "{count} person",
             "{count} people"
         ],
@@ -6529,20 +6545,20 @@
         "Failed to repair member ids: {error}": "Failed to repair member ids: {error}",
         "Repair member ids": "Repair member ids",
         "Repairing": "Repairing",
-        "The owner row of this team carries a member id Nextcloud Teams refuses, so the team cannot be shared with another server. {n} row will be given a valid id.": [
+        "_The owner row of this team carries a member id Nextcloud Teams refuses, so the team cannot be shared with another server. {n} row will be given a valid id._::_The owner row of this team carries a member id Nextcloud Teams refuses, so the team cannot be shared with another server. {n} rows will be given a valid id._": [
             "The owner row of this team carries a member id Nextcloud Teams refuses, so the team cannot be shared with another server. {n} row will be given a valid id.",
             "The owner row of this team carries a member id Nextcloud Teams refuses, so the team cannot be shared with another server. {n} rows will be given a valid id."
         ],
-        "{n} member row of this team carries a member id Nextcloud Teams refuses.": [
+        "_{n} member row of this team carries a member id Nextcloud Teams refuses._::_{n} member rows of this team carry a member id Nextcloud Teams refuses._": [
             "{n} member row of this team carries a member id Nextcloud Teams refuses.",
             "{n} member rows of this team carry a member id Nextcloud Teams refuses."
         ],
-        "{n} member row repaired. The team can be shared with another server again.": [
+        "_{n} member row repaired. The team can be shared with another server again._::_{n} member rows repaired. The team can be shared with another server again._": [
             "{n} member row repaired. The team can be shared with another server again.",
             "{n} member rows repaired. The team can be shared with another server again."
         ],
         "Add my shifts to my calendar": "Add my shifts to my calendar",
-        "Add {count} shift": [
+        "_Add {count} shift_::_Add {count} shifts_": [
             "Add {count} shift",
             "Add {count} shifts"
         ],
@@ -6555,11 +6571,11 @@
         "Show these hours as": "Show these hours as",
         "Somebody planning a meeting sees you are not available.": "Somebody planning a meeting sees you are not available.",
         "You have no calendar of your own to add shifts to. Create one in Calendar first.": "You have no calendar of your own to add shifts to. Create one in Calendar first.",
-        "{count} shift could not be added to your calendar.": [
+        "_{count} shift could not be added to your calendar._::_{count} shifts could not be added to your calendar._": [
             "{count} shift could not be added to your calendar.",
             "{count} shifts could not be added to your calendar."
         ],
-        "{count} shift is in your calendar": [
+        "_{count} shift is in your calendar_::_{count} shifts are in your calendar_": [
             "{count} shift is in your calendar",
             "{count} shifts are in your calendar"
         ],
@@ -6611,7 +6627,7 @@
         "Intended TeamHub seats": "Intended TeamHub seats",
         "Enter a number of seats between 1 and {max}.": "Enter a number of seats between 1 and {max}.",
         "The number of people you expect to use TeamHub. An estimate is fine.": "The number of people you expect to use TeamHub. An estimate is fine.",
-        "Keep the comment under {n} character.": ["Keep the comment under {n} character.", "Keep the comment under {n} characters."],
+        "_Keep the comment under {n} character._::_Keep the comment under {n} characters._": ["Keep the comment under {n} character.", "Keep the comment under {n} characters."],
         "Billing preference, a deadline, an existing Nextcloud provider, or a question.": "Billing preference, a deadline, an existing Nextcloud provider, or a question.",
         "The request also carries this server’s instance UUID and its number of unique team members, so the quotation can be bound to this server. No names and no team content are sent.": "The request also carries this server’s instance UUID and its number of unique team members, so the quotation can be bound to this server. No names and no team content are sent.",
         "Too many requests from this server. Try again later, or send the request by email.": "Too many requests from this server. Try again later, or send the request by email.",
@@ -6652,7 +6668,589 @@
         "Let members write one email to the whole team from the team menu in the sidebar.": "Let members write one email to the whole team from the team menu in the sidebar.",
         "Allow emailing all members of this team": "Allow emailing all members of this team",
         "Could not save the email setting. Try again.": "Could not save the email setting. Try again.",
-        "Emailing all members is switched off for this team.": "Emailing all members is switched off for this team."
+        "Emailing all members is switched off for this team.": "Emailing all members is switched off for this team.",
+        "Expand banner": "Expand banner",
+        "Collapse banner": "Collapse banner",
+        "You are not a participant in the team conversation.": "You are not a participant in the team conversation.",
+        "Could not load the team conversation.": "Could not load the team conversation.",
+        "Open polls": "Open polls",
+        "_Choose up to {n} option_::_Choose up to {n} options_": ["Choose up to {n} option","Choose up to {n} options"],
+        "Vote": "Vote",
+        "Your vote": "Your vote",
+        "You are up to date": "You are up to date",
+        "_{n} unread message, you were mentioned_::_{n} unread messages, you were mentioned_": ["{n} unread message, you were mentioned","{n} unread messages, you were mentioned"],
+        "_{n} unread message_::_{n} unread messages_": ["{n} unread message","{n} unread messages"],
+        "Call in progress": "Call in progress",
+        "Call in progress since {time}": "Call in progress since {time}",
+        "Could not send your vote.": "Could not send your vote.",
+        "Chat views": "Chat views",
+        "_{n} poll awaits your vote_::_{n} polls await your vote_": ["{n} poll awaits your vote","{n} polls await your vote"],
+        "No open polls": "No open polls",
+        "Thread": "Thread",
+        "{name}: {message}": "{name}: {message}",
+        "Threads": "Threads",
+        "No threads yet": "No threads yet",
+        "Communication": "Communication",
+        "Meet now": "Meet now",
+        "_%n room booked at this time_::_%n rooms booked at this time_": ["%n room booked at this time","%n rooms booked at this time"],
+        "_%n room is free and fits everyone_::_%n rooms are free and fit everyone_": ["%n room is free and fits everyone","%n rooms are free and fit everyone"],
+        "_%n room is too small_::_%n rooms are too small_": ["%n room is too small","%n rooms are too small"],
+        "_%n seat_::_%n seats_": ["%n seat","%n seats"],
+        "Availability unknown": "Availability unknown",
+        "Best fit": "Best fit",
+        "Booked": "Booked",
+        "Booked for the rest of the day": "Booked for the rest of the day",
+        "Bookings for {room} between {start} and {end}": "Bookings for {room} between {start} and {end}",
+        "Building": "Building",
+        "Capacity not set": "Capacity not set",
+        "Checking availability": "Checking availability",
+        "Choose a building": "Choose a building",
+        "Choose a building to see which rooms are free.": "Choose a building to see which rooms are free.",
+        "Could not check room availability": "Could not check room availability",
+        "Free again at {time}": "Free again at {time}",
+        "_No free room fits %n person at this time_::_No free room fits %n people at this time_": ["No free room fits %n person at this time","No free room fits %n people at this time"],
+        "No rooms match the search.": "No rooms match the search.",
+        "Other rooms": "Other rooms",
+        "Pick a date and time first to see which rooms are free.": "Pick a date and time first to see which rooms are free.",
+        "Search rooms": "Search rooms",
+        "Show %n more room": ["Show %n more room","Show %n more rooms"],
+        "Video conferencing": "Video conferencing",
+        "{room} is booked at this time. Pick another room or time.": "{room} is booked at this time. Pick another room or time.",
+        "_%n room fits everyone_::_%n rooms fit everyone_": ["%n room fits everyone","%n rooms fit everyone"],
+        "_Show all %n room_::_Show all %n rooms_": ["Show all %n room","Show all %n rooms"],
+        "All floors": "All floors",
+        "Floor": "Floor",
+        "Free for the rest of the day": "Free for the rest of the day",
+        "Free until {time}": "Free until {time}",
+        "Picking a room on this day also moves the meeting to {date}.": "Picking a room on this day also moves the meeting to {date}.",
+        "Remove room": "Remove room",
+        "Select the room to book it, or choose another one.": "Select the room to book it, or choose another one.",
+        "{date} from {start} to {end}": "{date} from {start} to {end}",
+        "After": "After",
+        "Choose the last date of the series.": "Choose the last date of the series.",
+        "Daily": "Daily",
+        "Does not repeat": "Does not repeat",
+        "Enter a number between 1 and 99.": "Enter a number between 1 and 99.",
+        "Enter a number of times between 1 and 500.": "Enter a number of times between 1 and 500.",
+        "Every": "Every",
+        "Last date": "Last date",
+        "Monthly": "Monthly",
+        "Number of times": "Number of times",
+        "On date": "On date",
+        "On day {day}": "On day {day}",
+        "On the first {weekday}": "On the first {weekday}",
+        "On the second {weekday}": "On the second {weekday}",
+        "On the third {weekday}": "On the third {weekday}",
+        "On the fourth {weekday}": "On the fourth {weekday}",
+        "On the last {weekday}": "On the last {weekday}",
+        "Repeat": "Repeat",
+        "Repeat on": "Repeat on",
+        "The last date is before the first meeting.": "The last date is before the first meeting.",
+        "Weekly": "Weekly",
+        "Yearly": "Yearly",
+        "_day_::_days_": ["day","days"],
+        "_week_::_weeks_": ["week","weeks"],
+        "_month_::_months_": ["month","months"],
+        "_year_::_years_": ["year","years"],
+        "_time_::_times_": ["time","times"],
+        "_%n room is free for the next {minutes} minutes_::_%n rooms are free for the next {minutes} minutes_": ["%n room is free for the next {minutes} minutes","%n rooms are free for the next {minutes} minutes"],
+        "Book": "Book",
+        "Book {room}": "Book {room}",
+        "Failed to book the room": "Failed to book the room",
+        "Failed to book the room: {error}": "Failed to book the room: {error}",
+        "For": "For",
+        "Free room now": "Free room now",
+        "No bookable rooms": "No bookable rooms",
+        "_No room is free for the next %n minute._::_No room is free for the next %n minutes._": ["No room is free for the next %n minute.","No room is free for the next %n minutes."],
+        "Quick meeting": "Quick meeting",
+        "Rooms you can walk into now. Book one in a click.": "Rooms you can walk into now. Book one in a click.",
+        "Your Nextcloud has no meeting rooms you can book.": "Your Nextcloud has no meeting rooms you can book.",
+        "{room} is booked until {time}": "{room} is booked until {time}",
+        "{room} was just booked by someone else. Pick another room.": "{room} was just booked by someone else. Pick another room.",
+        "_%n of {total} accepted_::_%n of {total} accepted_": ["%n of {total} accepted","%n of {total} accepted"],
+        "Details of {room}": "Details of {room}",
+        "Equipment": "Equipment",
+        "Organizer": "Organizer",
+        "Projector": "Projector",
+        "Room number": "Room number",
+        "Screen": "Screen",
+        "Wheelchair accessible": "Wheelchair accessible",
+        "Whiteboard": "Whiteboard",
+        "Booked on {count} of {total} dates": "Booked on {count} of {total} dates",
+        "Free on all {total} dates": "Free on all {total} dates",
+        "Partly booked": "Partly booked",
+        "_{room} is booked on %n date of this series. Pick another room._::_{room} is booked on %n dates of this series. Pick another room._": ["{room} is booked on %n date of this series. Pick another room.","{room} is booked on %n dates of this series. Pick another room."],
+        "_{room} is booked on %n date of this series ({dates}). Pick another room._::_{room} is booked on %n dates of this series ({dates}). Pick another room._": ["{room} is booked on %n date of this series ({dates}). Pick another room.","{room} is booked on %n dates of this series ({dates}). Pick another room."],
+        "Check the repeat settings first.": "Check the repeat settings first.",
+        "Recurring meetings need an active TeamHub licence.": "Recurring meetings need an active TeamHub licence.",
+        "You accepted the meeting.": "You accepted the meeting.",
+        "You answered maybe.": "You answered maybe.",
+        "You declined the meeting.": "You declined the meeting.",
+        "Your reply": "Your reply",
+        "Your reply could not be saved. Try again, or reply in Calendar.": "Your reply could not be saved. Try again, or reply in Calendar.",
+        "_%n day before_::_%n days before_": ["%n day before","%n days before"],
+        "Each meeting gets its own notes file, and the attendees are mentioned in the team chat with a link to it.": "Each meeting gets its own notes file, and the attendees are mentioned in the team chat with a link to it.",
+        "Notes and chat reminder": "Notes and chat reminder",
+        "📅 Coming up: **%1$s** on %2$s at %3$s.\nAdd your agenda items to the meeting notes: %4$s": "📅 Coming up: **%1$s** on %2$s at %3$s.\nAdd your agenda items to the meeting notes: %4$s",
+        "You have not set your workplace yet, so colleagues see you at the office Monday to Friday, all day. Change any day that does not match your week.": "You have not set your workplace yet, so colleagues see you at the office Monday to Friday, all day. Change any day that does not match your week.",
+        "Keep this workplace": "Keep this workplace",
+        "Show busy times": "Show busy times",
+        "People whose busy times are shown": "People whose busy times are shown",
+        "Choose people": "Choose people",
+        "_Busy times can be shown for %n person at a time._::_Busy times can be shown for %n people at a time._": [
+            "Busy times can be shown for %n person at a time.",
+            "Busy times can be shown for %n people at a time."
+        ],
+        "Nobody on this team shows busy times here. Busy times need an email address on the account.": "Nobody on this team shows busy times here. Busy times need an email address on the account.",
+        "_%n member is not shown: they switched busy times off, keep their email private or have none._::_%n members are not shown: they switched busy times off, keep their email private or have none._": [
+            "%n member is not shown: they switched busy times off, keep their email private or have none.",
+            "%n members are not shown: they switched busy times off, keep their email private or have none."
+        ],
+        "The busy times could not be loaded.": "The busy times could not be loaded.",
+        "Team calendars": "Team calendars",
+        "The people on your teams can see when you are busy on the team calendar. Only the times are shown, never what the event is. Events you show as free in Calendar do not count.": "The people on your teams can see when you are busy on the team calendar. Only the times are shown, never what the event is. Events you show as free in Calendar do not count.",
+        "Show my busy times on team calendars": "Show my busy times on team calendars",
+        "This only affects TeamHub. Anyone who adds you to an event in Calendar can still see when you are busy, as Nextcloud always allows.": "This only affects TeamHub. Anyone who adds you to an event in Calendar can still see when you are busy, as Nextcloud always allows.",
+        "Could not load the setting.": "Could not load the setting.",
+        "Busy times": "Busy times",
+        "Busy, {when}": "Busy, {when}",
+        "Not confirmed": "Not confirmed",
+        "Not confirmed, {when}": "Not confirmed, {when}",
+        "Work week": "Work week",
+        "{name}: no busy times in this period": "{name}: no busy times in this period",
+        "{name}: {times}": "{name}: {times}",
+        "Any equipment": "Any equipment",
+        "No room in this building has all of this equipment.": "No room in this building has all of this equipment.",
+        "Select a room to book it.": "Select a room to book it.",
+        "_%n of {total} accepted, your reply is needed_::_%n of {total} accepted, your reply is needed_": ["%n of {total} accepted, your reply is needed","%n of {total} accepted, your reply is needed"],
+        "_%n action item was found in the notes. Check who does it and by when._::_%n action items were found in the notes. Check who does each and by when._": ["%n action item was found in the notes. Check who does it and by when.","%n action items were found in the notes. Check who does each and by when."],
+        "_%n task could not be created: {titles}_::_%n tasks could not be created: {titles}_": ["%n task could not be created: {titles}","%n tasks could not be created: {titles}"],
+        "Action items": "Action items",
+        "Action items become tasks, which need the Tasks app. Ask your administrator to install it.": "Action items become tasks, which need the Tasks app. Ask your administrator to install it.",
+        "Add action item": "Add action item",
+        "By when": "By when",
+        "Each one becomes a team task for the person named, in their My Work.": "Each one becomes a team task for the person named, in their My Work.",
+        "Each proposal you tick gets a link to these notes in its history. The approvers still decide in Decisions.": "Each proposal you tick gets a link to these notes in its history. The approvers still decide in Decisions.",
+        "Meeting wrapped up": "Meeting wrapped up",
+        "No action items were written in the notes. Add them below, or leave this empty.": "No action items were written in the notes. Add them below, or leave this empty.",
+        "On the agenda": "On the agenda",
+        "Open the notes": "Open the notes",
+        "Proposals discussed": "Proposals discussed",
+        "Reading the meeting notes": "Reading the meeting notes",
+        "Remove action item {n}": "Remove action item {n}",
+        "The meeting could not be wrapped up. Try again.": "The meeting could not be wrapped up. Try again.",
+        "The notes file could not be found. Add the action items below; nothing is written back.": "The notes file could not be found. Add the action items below; nothing is written back.",
+        "The wrap-up could not be loaded.": "The wrap-up could not be loaded.",
+        "This meeting has no wrap-up for you. Only its organiser can wrap it up, after it has ended.": "This meeting has no wrap-up for you. Only its organiser can wrap it up, after it has ended.",
+        "This meeting is already wrapped up.": "This meeting is already wrapped up.",
+        "This meeting was marked as needing no wrap-up.": "This meeting was marked as needing no wrap-up.",
+        "What": "What",
+        "Wrap up meeting": "Wrap up meeting",
+        "Discussed in a meeting": "Discussed in a meeting",
+        "Meeting: {title}": "Meeting: {title}",
+        "Open the meeting notes": "Open the meeting notes",
+        "Meetings to wrap up": "Meetings to wrap up",
+        "Wrapped up meetings": "Wrapped up meetings",
+        "Wrap up": "Wrap up",
+        "Wrap up %1$s": "Wrap up %1$s",
+        "The meeting is over. Hand out the action items and link the proposals you discussed.": "The meeting is over. Hand out the action items and link the proposals you discussed.",
+        "Marked as needing no wrap-up": "Marked as needing no wrap-up",
+        "Marked as needing no wrap-up.": "Marked as needing no wrap-up.",
+        "_Wrapped up with %n task_::_Wrapped up with %n tasks_": ["Wrapped up with %n task","Wrapped up with %n tasks"],
+        "No wrap-up needed": "No wrap-up needed",
+        "No tasks are handed out and no proposals are linked to the notes. You can still do that by hand.": "No tasks are handed out and no proposals are linked to the notes. You can still do that by hand.",
+        "Meeting held": "Meeting held",
+        "Organiser wraps up": "Organiser wraps up",
+        "Tasks are with the people named": "Tasks are with the people named",
+        "Only the organiser can wrap up this meeting.": "Only the organiser can wrap up this meeting.",
+        "This meeting was already wrapped up.": "This meeting was already wrapped up.",
+        "From the meeting %1$s on %2$s.": "From the meeting %1$s on %2$s.",
+        "Meeting notes: %1$s": "Meeting notes: %1$s",
+        "Wrap-up": "Wrap-up",
+        "Wrapped up by %1$s on %2$s.": "Wrapped up by %1$s on %2$s.",
+        "No tasks were handed out.": "No tasks were handed out.",
+        "the team": "the team",
+        "%1$s (%2$s, due %3$s)": "%1$s (%2$s, due %3$s)",
+        "%1$s (%2$s)": "%1$s (%2$s)",
+        "The approvers decide on these in Decisions.": "The approvers decide on these in Decisions.",
+        "Could not send your reply.": "Could not send your reply.",
+        "Pinned by {name}": "Pinned by {name}",
+        "Reply sent": "Reply sent",
+        "Reply to {title}": "Reply to {title}",
+        "Send reply": "Send reply",
+        "This reply is too long.": "This reply is too long.",
+        "Could not end the poll.": "Could not end the poll.",
+        "End poll": "End poll",
+        "End this poll?": "End this poll?",
+        "Nobody can vote after this, and everyone in the conversation sees the results.": "Nobody can vote after this, and everyone in the conversation sees the results.",
+        "Poll ended": "Poll ended",
+        "Add reaction": "Add reaction",
+        "_Remove your {emoji} reaction. %n person reacted_::_Remove your {emoji} reaction. %n people reacted_": [
+            "Remove your {emoji} reaction. %n person reacted",
+            "Remove your {emoji} reaction. %n people reacted"
+        ],
+        "_React with {emoji}. %n person reacted_::_React with {emoji}. %n people reacted_": [
+            "React with {emoji}. %n person reacted",
+            "React with {emoji}. %n people reacted"
+        ],
+        "_{names} and %n other reacted with {emoji}_::_{names} and %n others reacted with {emoji}_": [
+            "{names} and %n other reacted with {emoji}",
+            "{names} and %n others reacted with {emoji}"
+        ],
+        "{names} reacted with {emoji}": "{names} reacted with {emoji}",
+        "Could not add the reaction": "Could not add the reaction",
+        "Could not remove the reaction": "Could not remove the reaction",
+        "Current config: {config}. Bad bits: {badBits}": "Current config: {config}. Bad bits: {badBits}",
+        "Team config reset: {oldConfig} → {newConfig}": "Team config reset: {oldConfig} → {newConfig}",
+        "Failed to link attachment {name}: {error}": "Failed to link attachment {name}: {error}",
+        "_Cannot delete: in use by {n} entry_::_Cannot delete: in use by {n} entries_": [
+            "Cannot delete: in use by {n} entry",
+            "Cannot delete: in use by {n} entries"
+        ],
+        "_Cannot delete: status type is in use by {n} entry_::_Cannot delete: status type is in use by {n} entries_": [
+            "Cannot delete: status type is in use by {n} entry",
+            "Cannot delete: status type is in use by {n} entries"
+        ],
+        "_Expired %n day ago_::_Expired %n days ago_": [
+            "Expired %n day ago",
+            "Expired %n days ago"
+        ],
+        "_Expires in %n day_::_Expires in %n days_": [
+            "Expires in %n day",
+            "Expires in %n days"
+        ],
+        "_The roster for %s to %s is published. %n place is still open._::_The roster for %s to %s is published. %n places are still open._": [
+            "The roster for %s to %s is published. %n place is still open.",
+            "The roster for %s to %s is published. %n places are still open."
+        ],
+        "_No member count has reached the licensing service for %n day, so this licence cannot be honoured. Existing Advanced teams still work read-only._::_No member count has reached the licensing service for %n days, so this licence cannot be honoured. Existing Advanced teams still work read-only._": [
+            "No member count has reached the licensing service for %n day, so this licence cannot be honoured. Existing Advanced teams still work read-only.",
+            "No member count has reached the licensing service for %n days, so this licence cannot be honoured. Existing Advanced teams still work read-only."
+        ],
+        "_No member count has reached the licensing service for %n day._::_No member count has reached the licensing service for %n days._": [
+            "No member count has reached the licensing service for %n day.",
+            "No member count has reached the licensing service for %n days."
+        ],
+        "_No member count has reached the licensing service for %n day. Check that this server can reach it, then send a report from the License tab._::_No member count has reached the licensing service for %n days. Check that this server can reach it, then send a report from the License tab._": [
+            "No member count has reached the licensing service for %n day. Check that this server can reach it, then send a report from the License tab.",
+            "No member count has reached the licensing service for %n days. Check that this server can reach it, then send a report from the License tab."
+        ],
+        "Links to {page}": "Links to {page}",
+        "this page": "this page",
+        "{tab} in {team}": "{tab} in {team}",
+        "Open the page this task was made on": "Open the page this task was made on",
+        "Open page": "Open page",
+        "Create follow-up task": "Create follow-up task",
+        "this message": "this message",
+        "this comment": "this comment",
+        "this decision": "this decision",
+        "My Work views": "My Work views",
+        "Nothing is waiting on others": "Nothing is waiting on others",
+        "Nothing completed recently": "Nothing completed recently",
+        "Work you handed to someone else, and requests waiting on another person, appear here.": "Work you handed to someone else, and requests waiting on another person, appear here.",
+        "Work that was finished in the last few days appears here, yours and what others did for you.": "Work that was finished in the last few days appears here, yours and what others did for you.",
+        "Team backlog": "Team backlog",
+        "\"{name}\" was unlinked from this team. TeamHub did not create it, so it was not deleted.": "\"{name}\" was unlinked from this team. TeamHub did not create it, so it was not deleted.",
+        "\"{name}\" was removed from this team. Another team still uses it, so it was not deleted.": "\"{name}\" was removed from this team. Another team still uses it, so it was not deleted.",
+    "Shared with team": "Shared with team",
+    "Could not load what is shared with this team.": "Could not load what is shared with this team.",
+    "This Nextcloud cannot list what is shared with teams.": "This Nextcloud cannot list what is shared with teams.",
+    "Nothing else is shared with this team.": "Nothing else is shared with this team.",
+    "Opens in a new tab": "Opens in a new tab",
+    "Show fewer": "Show fewer",
+    "No answer from {apps}. This list may be incomplete.": "No answer from {apps}. This list may be incomplete.",
+    "_Show %n more_::_Show %n more_": [
+        "Show %n more",
+        "Show %n more"
+    ],
+    "Apps that list team resources through Nextcloud's Teams API appear in the Shared with team card on every team home. Switch one off to stop its resources appearing in TeamHub. Nextcloud's own Teams page is not affected.": "Apps that list team resources through Nextcloud's Teams API appear in the Shared with team card on every team home. Switch one off to stop its resources appearing in TeamHub. Nextcloud's own Teams page is not affected.",
+    "The saved list of switched off apps cannot be read, so every app is switched off. Changing any switch saves a new list, with every other app switched on.": "The saved list of switched off apps cannot be read, so every app is switched off. Changing any switch saves a new list, with every other app switched on.",
+    "No app shares team resources": "No app shares team resources",
+    "An installed app appears here when it lists resources for teams through Nextcloud's Teams API.": "An installed app appears here when it lists resources for teams through Nextcloud's Teams API.",
+    "Stop showing {name} in TeamHub": "Stop showing {name} in TeamHub",
+    "Show {name} in TeamHub": "Show {name} in TeamHub",
+    "Shown in TeamHub": "Shown in TeamHub",
+    "Not shown in TeamHub": "Not shown in TeamHub",
+    "Could not load the apps that share team resources.": "Could not load the apps that share team resources.",
+    "{name} is shown in Shared with team again.": "{name} is shown in Shared with team again.",
+    "{name} no longer appears in Shared with team.": "{name} no longer appears in Shared with team.",
+    "Could not save the setting.": "Could not save the setting.",
+    "Modules enabled": "Modules enabled",
+    "Announcement popup": "Announcement popup",
+    "Turned off by an administrator": "Turned off by an administrator",
+    "Not turned off": "Not turned off",
+    "Folders managed by other apps": "Folders managed by other apps",
+    "These apps give teams access to Team folders of their own. Team admins see such a folder as managed by the app and are not asked to review it. Switch an app off to send its folders back to the team admins' review.": "These apps give teams access to Team folders of their own. Team admins see such a folder as managed by the app and are not asked to review it. Switch an app off to send its folders back to the team admins' review.",
+    "Let team admins review the folders of {name}": "Let team admins review the folders of {name}",
+    "Let {name} manage its own folders": "Let {name} manage its own folders",
+    "Managed by the app": "Managed by the app",
+    "Reviewed by team admins": "Reviewed by team admins",
+    "{name} manages its own folders again.": "{name} manages its own folders again.",
+    "Team admins review the folders of {name}. The folders appear in the review within an hour.": "Team admins review the folders of {name}. The folders appear in the review within an hour.",
+    "Another app decides who can open these folders, so there is nothing to review here. Change the access in that app.": "Another app decides who can open these folders, so there is nothing to review here. Change the access in that app.",
+    "Managed by {app}": "Managed by {app}",
+    "_Show %n folder managed by another app_::_Show %n folders managed by other apps_": [
+        "Show %n folder managed by another app",
+        "Show %n folders managed by other apps"
+    ],
+        "Add field": "Add field",
+        "Ask which team the request is for": "Ask which team the request is for",
+        "Enter at most {max} options of at most 100 characters.": "Enter at most {max} options of at most 100 characters.",
+        "Every request is personal: only the requester and this team can follow it.": "Every request is personal: only the requester and this team can follow it.",
+        "Explanation (optional)": "Explanation (optional)",
+        "Explanation of field {n} (optional)": "Explanation of field {n} (optional)",
+        "Field name": "Field name",
+        "Fields of the request form": "Fields of the request form",
+        "Move field {n} down": "Move field {n} down",
+        "Move field {n} up": "Move field {n} up",
+        "Must be filled in": "Must be filled in",
+        "Name of field {n}": "Name of field {n}",
+        "Options of field {n}, one per line": "Options of field {n}, one per line",
+        "Options, one per line": "Options, one per line",
+        "Remove field": "Remove field",
+        "Remove field {n}": "Remove field {n}",
+        "Request form": "Request form",
+        "The name of the service": "The name of the service",
+        "The request is named after": "The request is named after",
+        "The requester may leave it empty. The members of the team they pick can follow the request.": "The requester may leave it empty. The members of the team they pick can follow the request.",
+        "Type of field {n}": "Type of field {n}",
+        "What somebody fills in to make a request. Without fields they only read the description and send the request.": "What somebody fills in to make a request. Without fields they only read the description and send the request.",
+        "An admin of the team can close the request instead.": "An admin of the team can close the request instead.",
+        "Automatic": "Automatic",
+        "Confirm automatically after (days)": "Confirm automatically after (days)",
+        "Confirmation": "Confirmation",
+        "No confirmation": "No confirmation",
+        "The request ends without a confirmation": "The request ends without a confirmation",
+        "The requester confirms the result": "The requester confirms the result",
+        "The requester confirms, or it is confirmed automatically": "The requester confirms, or it is confirmed automatically",
+        "When the last step is done": "When the last step is done",
+        "Give every field of the request form a name.": "Give every field of the request form a name.",
+        "Give every field with choices at least two options.": "Give every field with choices at least two options.",
+        "Short text": "Short text",
+        "Long text": "Long text",
+        "One option": "One option",
+        "Several options": "Several options",
+        "Number": "Number",
+        "Yes or no": "Yes or no",
+        "Person": "Person",
+        "Choose an option": "Choose an option",
+        "Search for a person": "Search for a person",
+        "{field} (optional)": "{field} (optional)",
+        "{name} ({detail})": "{name} ({detail})",
+        "Confirmed automatically from {date}.": "Confirmed automatically from {date}.",
+        "Confirmed automatically": "Confirmed automatically",
+        "The name of a field is at most %s characters.": "The name of a field is at most %s characters.",
+        "The explanation of a field is at most %s characters.": "The explanation of a field is at most %s characters.",
+        "The request form could not be read.": "The request form could not be read.",
+        "Pick one of the field types.": "Pick one of the field types.",
+        "Fill in \"%s\".": "Fill in \"%s\".",
+        "This service has changed. Check your answers and send the request again.": "This service has changed. Check your answers and send the request again.",
+        "The answers could not be read.": "The answers could not be read.",
+        "\"%s\" contains characters that are not allowed.": "\"%s\" contains characters that are not allowed.",
+        "\"%1$s\" is at most %2$s characters.": "\"%1$s\" is at most %2$s characters.",
+        "\"%s\" is not a date.": "\"%s\" is not a date.",
+        "\"%s\" is not a number.": "\"%s\" is not a number.",
+        "Pick a person for \"%s\".": "Pick a person for \"%s\".",
+        "An option is at most %s characters.": "An option is at most %s characters.",
+        "Names and options cannot contain line breaks or special characters.": "Names and options cannot contain line breaks or special characters.",
+        "The answer to \"%s\" could not be read.": "The answer to \"%s\" could not be read.",
+        "Pick one of the options for \"%s\".": "Pick one of the options for \"%s\".",
+        "The confirmation could not be read.": "The confirmation could not be read.",
+        "Pick how a request is confirmed.": "Pick how a request is confirmed.",
+        "Confirm automatically after 1 to %s days.": "Confirm automatically after 1 to %s days.",
+        "_{n} field_::_{n} fields_": ["{n} field", "{n} fields"],
+        "_Automatic after {n} day_::_Automatic after {n} days_": ["Automatic after {n} day", "Automatic after {n} days"],
+        "_A request form has at most %n field._::_A request form has at most %n fields._": ["A request form has at most %n field.", "A request form has at most %n fields."],
+        "_A field has at most %n option._::_A field has at most %n options._": ["A field has at most %n option.", "A field has at most %n options."],
+        "Add a field of the type Person to the request form first.": "Add a field of the type Person to the request form first.",
+        "Everybody in the group can answer. The first answer decides.": "Everybody in the group can answer. The first answer decides.",
+        "Field of the request form": "Field of the request form",
+        "Text of the approve button (optional)": "Text of the approve button (optional)",
+        "Text of the approve button of step {n} (optional)": "Text of the approve button of step {n} (optional)",
+        "Text of the reject button (optional)": "Text of the reject button (optional)",
+        "Text of the reject button of step {n} (optional)": "Text of the reject button of step {n} (optional)",
+        "The approver sees the request, its files and the steps so far from the moment it is their turn. They do not see the messages or your internal notes.": "The approver sees the request, its files and the steps so far from the moment it is their turn. They do not see the messages or your internal notes.",
+        "The field that names who approves step {n}": "The field that names who approves step {n}",
+        "The group that approves step {n}": "The group that approves step {n}",
+        "The manager in the requester's account, as an administrator set it.": "The manager in the requester's account, as an administrator set it.",
+        "The person who approves step {n}": "The person who approves step {n}",
+        "The request ends": "The request ends",
+        "The request goes on, and the team decides what follows": "The request goes on, and the team decides what follows",
+        "Used when there is nobody else, or when the approver made the request. Nobody approves their own request.": "Used when there is nobody else, or when the approver made the request. Nobody approves their own request.",
+        "When the approver rejects": "When the approver rejects",
+        "Who approves": "Who approves",
+        "Who approves otherwise": "Who approves otherwise",
+        "Who approves otherwise (optional)": "Who approves otherwise (optional)",
+        "Who approves step {n}": "Who approves step {n}",
+        "Who approves step {n} otherwise": "Who approves step {n} otherwise",
+        "A group": "A group",
+        "A person": "A person",
+        "A person picked on the request form": "A person picked on the request form",
+        "Check the request": "Check the request",
+        "Explanation": "Explanation",
+        "Intake form": "Intake form",
+        "Issue": "Issue",
+        "Manager approves": "Manager approves",
+        "Needed by": "Needed by",
+        "Request with approval": "Request with approval",
+        "Say for every approval who approves.": "Say for every approval who approves.",
+        "Say who approves when there is no manager or nobody was picked.": "Say who approves when there is no manager or nobody was picked.",
+        "The requester's manager": "The requester's manager",
+        "Approval asked of {name}": "Approval asked of {name}",
+        "Approval handed to {name}": "Approval handed to {name}",
+        "Approved: {step}": "Approved: {step}",
+        "Approves a step": "Approves a step",
+        "Ask for approval": "Ask for approval",
+        "Hand to somebody else": "Hand to somebody else",
+        "What do you want approved?": "What do you want approved?",
+        "The requester can read this. The request waits for the answer, and a rejection comes back to you.": "The requester can read this. The request waits for the answer, and a rejection comes back to you.",
+        "Add approval step": "Add approval step",
+        "Start from": "Start from",
+        "Waiting for the approval you asked for.": "Waiting for the approval you asked for.",
+        "Whoever approves the request can view them too.": "Whoever approves the request can view them too.",
+        "The last step is for the team, not an approver.": "The last step is for the team, not an approver.",
+        "No request is waiting for somebody else.": "No request is waiting for somebody else.",
+        "A step is for the team, the requester or an approver.": "A step is for the team, the requester or an approver.",
+        "The approval could not be read.": "The approval could not be read.",
+        "Pick who approves.": "Pick who approves.",
+        "Pick what happens when the approver rejects.": "Pick what happens when the approver rejects.",
+        "The text of a button is at most %s characters.": "The text of a button is at most %s characters.",
+        "The approver could not be read.": "The approver could not be read.",
+        "An approver does not exist any more. Pick somebody else.": "An approver does not exist any more. Pick somebody else.",
+        "You cannot name this approver. Pick somebody else.": "You cannot name this approver. Pick somebody else.",
+        "There is nobody to approve this request. Ask the service team.": "There is nobody to approve this request. Ask the service team.",
+        "Wait for the approval you asked for first.": "Wait for the approval you asked for first.",
+        "Only whoever claimed this task can ask for an approval.": "Only whoever claimed this task can ask for an approval.",
+        "This task is not being worked on right now.": "This task is not being worked on right now.",
+        "Say what you want approved.": "Say what you want approved.",
+        "This person was already asked.": "This person was already asked.",
+        "Wait for the approvals you asked for first.": "Wait for the approvals you asked for first.",
+        "This step is not an approval.": "This step is not an approval.",
+        "The requester cannot approve their own request.": "The requester cannot approve their own request.",
+        "Whoever asks for an approval cannot give it.": "Whoever asks for an approval cannot give it.",
+        "Pick somebody to approve this.": "Pick somebody to approve this.",
+        "Hand the approval to somebody other than yourself.": "Hand the approval to somebody other than yourself.",
+        "You cannot approve this request yourself.": "You cannot approve this request yourself.",
+        "{actor} asks for your approval of {workflow}": "{actor} asks for your approval of {workflow}",
+        "%1$s asks for your approval of %2$s": "%1$s asks for your approval of %2$s",
+        "{actor} approved {workflow}": "{actor} approved {workflow}",
+        "%1$s approved %2$s": "%1$s approved %2$s",
+        "{actor} did not approve {workflow}": "{actor} did not approve {workflow}",
+        "%1$s did not approve %2$s": "%1$s did not approve %2$s",
+        "{name} is waiting for your answer. What you send now answers their question.": "{name} is waiting for your answer. What you send now answers their question.",
+        "When enabled, an admin of a service team can have a service send an email when a step is reached, done or rejected, with the team's own text and answers from the request form. It goes to accounts on this server only. Sent email is outside Nextcloud: whoever can read it reads those answers. When disabled, services still send notifications.": "When enabled, an admin of a service team can have a service send an email when a step is reached, done or rejected, with the team's own text and answers from the request form. It goes to accounts on this server only. Sent email is outside Nextcloud: whoever can read it reads those answers. When disabled, services still send notifications.",
+        "A field without a name": "A field without a name",
+        "A group of more than 100 people is not told.": "A group of more than 100 people is not told.",
+        "A person or group that gets a notice does not exist any more. Pick somebody else.": "A person or group that gets a notice does not exist any more. Pick somebody else.",
+        "About email from services": "About email from services",
+        "Add notice": "Add notice",
+        "An email leaves Nextcloud. Whoever can read it reads these answers, whatever they may open here. The notification shows the subject and the text only.": "An email leaves Nextcloud. Whoever can read it reads these answers, whatever they may open here. The notification shows the subject and the text only.",
+        "As a notification in Nextcloud": "As a notification in Nextcloud",
+        "By email, to the address in the account": "By email, to the address in the account",
+        "Give every notice a subject.": "Give every notice a subject.",
+        "How it is sent": "How it is sent",
+        "It would go to more than 100 people.": "It would go to more than 100 people.",
+        "Let services send email": "Let services send email",
+        "No email could be sent to {names}.": "No email could be sent to {names}.",
+        "Notice not sent: {subject}": "Notice not sent: {subject}",
+        "Notice: {subject}": "Notice: {subject}",
+        "Notices": "Notices",
+        "Open the request": "Open the request",
+        "Remove notice {n} of step {step}": "Remove notice {n} of step {step}",
+        "Remove notice": "Remove notice",
+        "Say for every notice how it is sent.": "Say for every notice how it is sent.",
+        "Say for every notice who gets it.": "Say for every notice who gets it.",
+        "Services cannot send email on this server. Send the notice as a notification.": "Services cannot send email on this server. Send the notice as a notification.",
+        "Services cannot send email on this server.": "Services cannot send email on this server.",
+        "Services may send email": "Services may send email",
+        "Step": "Step",
+        "Subject of notice {n} of step {step}": "Subject of notice {n} of step {step}",
+        "Tell somebody about this step, in your own words. Whoever has to act is told already.": "Tell somebody about this step, in your own words. Whoever has to act is told already.",
+        "Text (optional)": "Text (optional)",
+        "Text of notice {n} of step {step} (optional)": "Text of notice {n} of step {step} (optional)",
+        "The approver": "The approver",
+        "The group that gets notice {n} of step {step}": "The group that gets notice {n} of step {step}",
+        "The name of the requester": "The name of the requester",
+        "The notices could not be read.": "The notices could not be read.",
+        "The person who gets notice {n} of step {step}": "The person who gets notice {n} of step {step}",
+        "The subject of a notice is at most %s characters.": "The subject of a notice is at most %s characters.",
+        "The text of a notice is at most %s characters.": "The text of a notice is at most %s characters.",
+        "There was nobody to send it to.": "There was nobody to send it to.",
+        "To {names}, as a notification and by email": "To {names}, as a notification and by email",
+        "To {names}, as a notification": "To {names}, as a notification",
+        "To {names}, by email": "To {names}, by email",
+        "What the email also says": "What the email also says",
+        "When notice {n} of step {step} is sent": "When notice {n} of step {step} is sent",
+        "When the step is done": "When the step is done",
+        "When the step is reached": "When the step is reached",
+        "When the step is rejected": "When the step is rejected",
+        "Who gets it": "Who gets it",
+        "Who gets notice {n} of step {step}": "Who gets notice {n} of step {step}",
+        "Whoever has the task": "Whoever has the task",
+        "You cannot send a notice to this person or group. Pick somebody else.": "You cannot send a notice to this person or group. Pick somebody else.",
+        "You get this email because the team that offers \"%s\" asked TeamHub to tell you about this step.": "You get this email because the team that offers \"%s\" asked TeamHub to tell you about this step.",
+        "_{names} and {n} more_::_{names} and {n} more_": [
+            "{names} and {n} more",
+            "{names} and {n} more"
+        ],
+        "_{n} notice_::_{n} notices_": [
+            "{n} notice",
+            "{n} notices"
+        ],
+        "_A step has at most %n notice._::_A step has at most %n notices._": [
+            "A step has at most %n notice.",
+            "A step has at most %n notices."
+        ],
+        "Notice {n}": "Notice {n}",
+        "A condition asks something its field cannot answer. Pick another comparison.": "A condition asks something its field cannot answer. Pick another comparison.",
+        "A condition could not be read.": "A condition could not be read.",
+        "A condition uses a field that is not on the request form any more.": "A condition uses a field that is not on the request form any more.",
+        "A condition uses an answer of the request form. This form has no fields.": "A condition uses an answer of the request form. This form has no fields.",
+        "At least one team step runs on every request. Remove the condition from one.": "At least one team step runs on every request. Remove the condition from one.",
+        "Comparison": "Comparison",
+        "Give every condition a value.": "Give every condition a value.",
+        "Not needed": "Not needed",
+        "Only on some requests": "Only on some requests",
+        "Only when {field} is filled in": "Only when {field} is filled in",
+        "Only when {field} {op} {value}": "Only when {field} {op} {value}",
+        "Otherwise the step is left out and the request goes on to the next one. A field nobody answered never matches.": "Otherwise the step is left out and the request goes on to the next one. A field nobody answered never matches.",
+        "Pick a field": "Pick a field",
+        "The comparison of the condition of step {n}": "The comparison of the condition of step {n}",
+        "The field the condition of step {n} looks at": "The field the condition of step {n} looks at",
+        "The last step runs on every request. Remove its condition.": "The last step runs on every request. Remove its condition.",
+        "The value of a condition is at most %s characters.": "The value of a condition is at most %s characters.",
+        "The value of the condition of step {n}": "The value of the condition of step {n}",
+        "When the answer to": "When the answer to",
+        "does not include": "does not include",
+        "includes": "includes",
+        "is at least": "is at least",
+        "is at most": "is at most",
+        "is filled in": "is filled in",
+        "is not": "is not",
+        "is on or after": "is on or after",
+        "is on or before": "is on or before",
+        "is": "is",
+        "%1$s: the step \"%2$s\" is past its deadline": "%1$s: the step \"%2$s\" is past its deadline",
+        "{workflow}: the step \"{step}\" is past its deadline": "{workflow}: the step \"{step}\" is past its deadline",
+        "Counted from when the request reaches this step, Monday to Friday.": "Counted from when the request reaches this step, Monday to Friday.",
+        "Deadline in working days (optional)": "Deadline in working days (optional)",
+        "Deadline of step {n} in working days (optional)": "Deadline of step {n} in working days (optional)",
+        "Due:": "Due:",
+        "Give a step 1 to %s working days, or no deadline.": "Give a step 1 to %s working days, or no deadline.",
+        "Overdue since {date}": "Overdue since {date}",
+        "Overdue since:": "Overdue since:",
+        "Past its deadline: {step}": "Past its deadline: {step}",
+        "_Within {n} working day_::_Within {n} working days_": [
+            "Within {n} working day",
+            "Within {n} working days"
+        ],
+        "Fields of task {t} of step {n}": "Fields of task {t} of step {n}",
+        "Fields the requester fills in to complete this task. Everybody on the request sees the answers.": "Fields the requester fills in to complete this task. Everybody on the request sees the answers.",
+        "Fields whoever does this task fills in to complete it. Only the team sees the answers.": "Fields whoever does this task fills in to complete it. Only the team sees the answers.",
+        "A condition can only use a field of the request form or of a step before it.": "A condition can only use a field of the request form or of a step before it.",
+        "Give every field of a task a name.": "Give every field of a task a name.",
+        "Loading this team. More settings may appear in a moment.": "Loading this team. More settings may appear in a moment.",
+        "This needs a TeamHub licence.": "This needs a TeamHub licence."
     },
     "pluralForm": "nplurals=2; plural=(n != 1);"
 }

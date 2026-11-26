@@ -458,9 +458,9 @@ export function internalNotes(history) {
 // so the tests can say the tabs and the numbers are right without a browser.
 
 /**
- * The queue widget's tabs. v4.10.35 — *With requester*: the desk's open
- * requests that are back with the requester (a planned requester step, or
- * the confirmation). Without it they were in no tab at all, and a request
+ * The queue widget's tabs. v4.10.35 — *Waiting for others* (*With requester*
+ * until v4.20.58): the desk's open requests that are with the requester (a
+ * planned requester step, or the confirmation) or with an approver. Without it they were in no tab at all, and a request
  * that started with the requester never showed on the team.
  */
 export const QUEUE_TAB = {
@@ -490,8 +490,8 @@ export function queueTabLabel(tab) {
 		// TRANSLATORS: queue widget tab - requests a team member has claimed
 		return t('teamhub', 'Claimed')
 	case QUEUE_TAB.WITH_REQUESTER:
-		// TRANSLATORS: queue widget tab - the team's open requests that wait for the person who asked (a step of theirs, or their confirmation)
-		return t('teamhub', 'With requester')
+		// TRANSLATORS: queue widget tab - the team's open requests that wait for somebody outside the team: the person who asked, or an approver
+		return t('teamhub', 'Waiting for others')
 	default:
 		// TRANSLATORS: queue widget tab - the handful of requests the team finished most recently
 		return t('teamhub', 'Recently closed')
@@ -505,7 +505,7 @@ export function queueTabEmptyState(tab) {
 	case QUEUE_TAB.CLAIMED:
 		return t('teamhub', 'Nobody has a request in hand.')
 	case QUEUE_TAB.WITH_REQUESTER:
-		return t('teamhub', 'No request is waiting for its requester.')
+		return t('teamhub', 'No request is waiting for somebody else.')
 	default:
 		return t('teamhub', 'Nothing was closed in the last 30 days.')
 	}

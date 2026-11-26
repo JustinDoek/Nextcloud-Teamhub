@@ -30,7 +30,9 @@ class WorkflowStepMapper extends QBMapper {
         $qb->select('*')
             ->from($this->getTableName())
             ->where($qb->expr()->eq('instance_id', $qb->createNamedParameter($instanceId, IQueryBuilder::PARAM_INT)))
-            ->orderBy('step_order', 'ASC');
+            ->orderBy('step_order', 'ASC')
+            // v4.20.58 — an approval asked for on a step comes after its tasks.
+            ->addOrderBy('id', 'ASC');
         return $this->findEntities($qb);
     }
 
@@ -51,7 +53,8 @@ class WorkflowStepMapper extends QBMapper {
             ->from($this->getTableName())
             ->where($qb->expr()->in('instance_id', $qb->createNamedParameter($instanceIds, IQueryBuilder::PARAM_INT_ARRAY)))
             ->orderBy('instance_id', 'ASC')
-            ->addOrderBy('step_order', 'ASC');
+            ->addOrderBy('step_order', 'ASC')
+            ->addOrderBy('id', 'ASC');
         $out = [];
         foreach ($this->findEntities($qb) as $step) {
             $out[$step->getInstanceId()][] = $step;
@@ -117,6 +120,52 @@ class WorkflowStepMapper extends QBMapper {
             ))
             ->orderBy('entered_at', 'DESC')
             ->addOrderBy('id', 'DESC');
+        return $this->findEntities($qb);
+    }
+
+    /**
+     * The instances waiting on one step, by key, since a moment or earlier
+     * (v4.20.54) — the requests a daily job may confirm by themselves. Each
+     * is checked again, with its own setting, before anything is written.
+     *
+     * @return int[]
+     */
+    public function findInstanceIdsWaitingOn(string $stepKey, int $enteredBefore): array {
+        $qb = $this->db->getQueryBuilder();
+        $qb->selectDistinct('instance_id')
+            ->from($this->getTableName())
+            ->where($qb->expr()->eq('step_key', $qb->createNamedParameter($stepKey)))
+            ->andWhere($qb->expr()->in('step_status', $qb->createNamedParameter(
+                ['available', 'in_progress'],
+                IQueryBuilder::PARAM_STR_ARRAY,
+            )))
+            ->andWhere($qb->expr()->lte('entered_at', $qb->createNamedParameter($enteredBefore, IQueryBuilder::PARAM_INT)));
+        $result = $qb->executeQuery();
+        $ids    = [];
+        while ($row = $result->fetch()) {
+            $ids[] = (int)$row['instance_id'];
+        }
+        $result->closeCursor();
+        return $ids;
+    }
+
+    /**
+     * Open rows whose config mentions a key (v4.20.68) — the steps a daily
+     * job looks at again, one by one, before it writes anything. `$needle` is
+     * matched literally inside the JSON, e.g. `"dueAt"`.
+     *
+     * @return WorkflowStep[]
+     */
+    public function findActiveWithConfig(string $needle): array {
+        $qb = $this->db->getQueryBuilder();
+        $qb->select('*')
+            ->from($this->getTableName())
+            ->where($qb->expr()->in('step_status', $qb->createNamedParameter(
+                ['available', 'in_progress'],
+                IQueryBuilder::PARAM_STR_ARRAY,
+            )))
+            ->andWhere($qb->expr()->isNotNull('config'))
+            ->andWhere($qb->expr()->like('config', $qb->createNamedParameter('%' . $this->db->escapeLikeParameter($needle) . '%')));
         return $this->findEntities($qb);
     }
 

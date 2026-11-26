@@ -12,6 +12,7 @@ use OCA\TeamHub\Service\DecisionService;
 use OCA\TeamHub\Service\MemberService;
 use OCA\TeamHub\Service\MessageService;
 use OCA\TeamHub\Service\MessageSubscriptionService;
+use OCA\TeamHub\Service\ReactionService;
 use OCP\AppFramework\Controller;
 use OCP\AppFramework\Http;
 use OCP\AppFramework\Http\Attribute\NoAdminRequired;
@@ -33,6 +34,9 @@ class CommentController extends Controller {
         private AuditService $auditService,
         private DecisionService $decisionService,
         private MessageSubscriptionService $subscriptionService,
+        // v4.20.27 — reactions on comments: stamped onto a thread, removed
+        // with a comment.
+        private ReactionService $reactionService,
         private IUserSession $userSession,
         private IUserManager $userManager,
         private LoggerInterface $logger,
@@ -213,6 +217,15 @@ class CommentController extends Controller {
             }
 
             $comments = $this->commentMapper->findByMessageId($messageId);
+            // v4.20.27 — each comment's reactions, one query for the thread.
+            // A non-member reading a public thread sees them; adding one is
+            // refused by ReactionService, and the card hides the control
+            // outside the team stream anyway.
+            $this->reactionService->stamp(
+                $comments,
+                ReactionService::TARGET_COMMENT,
+                $this->userSession->getUser()?->getUID() ?? '',
+            );
             return new JSONResponse($this->hydrateAuthorNames($comments));
         } catch (AccessDeniedException $e) {
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_FORBIDDEN);
@@ -413,6 +426,8 @@ class CommentController extends Controller {
 
             // Hard delete.
             $this->commentMapper->delete($commentId);
+            // v4.20.27 — and its reactions. Never throws.
+            $this->reactionService->deleteForComment($commentId);
 
             // Audit log — best-effort; AuditService swallows internal failures.
             $this->auditService->log(

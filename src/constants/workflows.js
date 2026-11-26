@@ -12,6 +12,7 @@
  * `WorkflowItemRow`, and the two never share a list.
  */
 import { translate as t, translatePlural as n } from '@nextcloud/l10n'
+import { noticeLabel } from './notices.js'
 import { formatDate, formatTime, formatDateTime, todayIso, shiftIsoDate, fromDateInput, zonedIsoDate } from '../lib/localDate.js'
 
 // ── Statuses ───────────────────────────────────────────────────────────
@@ -100,10 +101,23 @@ export function stepStatusLabel(status) {
  * `actionTaken: 'close'`; it reads *Closed*, not *Skipped*, because
  * somebody decided it.
  */
+/** v4.20.58 — somebody approves or rejects this step. */
+export function isApprovalStep(step) {
+	return step?.type === 'approval'
+}
+
 export function stepStateLabel(step) {
+	if (step?.status === STEP_STATUS.SKIPPED && step?.actionTaken === 'not_needed') {
+		// TRANSLATORS: a step of a service request a condition left out: this request did not need it
+		return t('teamhub', 'Not needed')
+	}
 	if (step?.status === STEP_STATUS.SKIPPED && step?.actionTaken === 'close') {
 		// TRANSLATORS: a workflow step an admin of the service team closed the request on
 		return t('teamhub', 'Closed')
+	}
+	if (isApprovalStep(step) && step?.status === STEP_STATUS.COMPLETED) {
+		// TRANSLATORS: a step of a service request that somebody approved
+		return t('teamhub', 'Approved')
 	}
 	return stepStatusLabel(step?.status)
 }
@@ -216,7 +230,37 @@ export function shareNote(settings, who) {
  * The tracker's three-way state for a step, the same vocabulary
  * `MyWorkItemRow`'s tracker uses (`done` / `current` / `pending`).
  */
+/**
+ * v4.20.68 — a step's deadline in words, or null without one: *Due Wed, Dec 3*,
+ * or *Overdue since Wed, Dec 3* once it has passed. `dueAt` is epoch seconds,
+ * the end of the step's last working day.
+ */
+export function dueState(dueAt, now = Date.now() / 1000, dueDate = '') {
+	if (!(dueAt > 0)) {
+		return null
+	}
+	// v4.20.69 — the day as the server counted it (`dueDate`, Y-m-d), at noon UTC
+	// so no time zone between -11 and +11 hours moves it; a request from before has only the moment.
+	const day = /^\d{4}-\d{2}-\d{2}$/.test(dueDate || '') ? dueDate.split('-').map(Number) : null
+	const ms = day ? Date.UTC(day[0], day[1] - 1, day[2], 12) : dueAt * 1000
+	const date = formatDate(ms, { weekday: 'short', month: 'short', day: 'numeric' })
+	const overdue = dueAt < now
+	return {
+		overdue,
+		date,
+		text: overdue
+			// TRANSLATORS: a step of a service request is past its deadline; {date} is the day it was due, e.g. "Wed, Dec 3"
+			? t('teamhub', 'Overdue since {date}', { date })
+			// TRANSLATORS: a step of a service request must be done by then; {date} is a day, e.g. "Wed, Dec 3"
+			: t('teamhub', 'Due {date}', { date }),
+	}
+}
+
 export function trackerState(step) {
+	// v4.20.66 — left out by a condition: not done, never to come either.
+	if (step?.status === STEP_STATUS.SKIPPED && step?.actionTaken === 'not_needed') {
+		return 'pending'
+	}
 	if (ACTIVE_STEP_STATUSES.includes(step?.status)) {
 		return 'current'
 	}
@@ -454,6 +498,8 @@ export function participantRoleLabel(role) {
 	case 'responsible': return t('teamhub', 'Responsible for a step')
 	case 'actor': return t('teamhub', 'Acted on a step')
 	case 'observer': return t('teamhub', 'Observer')
+	// TRANSLATORS: somebody who is asked to approve a service request
+	case 'approver': return t('teamhub', 'Approves a step')
 	default: return role || ''
 	}
 }
@@ -469,7 +515,13 @@ export const WORKFLOW_ACTION = {
 	REQUEST_STATUS: 'request_status',
 	// v4.10.31 — an admin of the service team closes the request, at any step.
 	CLOSE: 'close',
+	// v4.20.58 — approvals.
+	REQUEST_APPROVAL: 'request_approval',
+	DELEGATE_APPROVAL: 'delegate_approval',
 }
+
+/** v4.20.58 — the verbs that name somebody. */
+export const ACTIONS_WITH_PERSON = [WORKFLOW_ACTION.REQUEST_APPROVAL, WORKFLOW_ACTION.DELEGATE_APPROVAL]
 
 /**
  * The button's words for a workflow verb. v4.10.29: a definition may give the
@@ -497,6 +549,10 @@ export function actionLabel(action, workflow = null) {
 	case WORKFLOW_ACTION.REQUEST_STATUS: return t('teamhub', 'Ask for an update')
 	// TRANSLATORS: button - a service team admin closes a request for the team, done or not
 	case WORKFLOW_ACTION.CLOSE: return t('teamhub', 'Close request')
+	// TRANSLATORS: button — whoever handles a service request asks somebody to approve it first
+	case WORKFLOW_ACTION.REQUEST_APPROVAL: return t('teamhub', 'Ask for approval')
+	// TRANSLATORS: button — give the approval of a service request to somebody else to answer
+	case WORKFLOW_ACTION.DELEGATE_APPROVAL: return t('teamhub', 'Hand to somebody else')
 	default: return action || ''
 	}
 }
@@ -522,7 +578,14 @@ export function availableActions(workflow) {
 			// The holder is waiting on an answer; completing is refused until it comes.
 			out.push(WORKFLOW_ACTION.REJECT)
 		} else {
-			out.push(WORKFLOW_ACTION.COMPLETE, WORKFLOW_ACTION.REJECT)
+			// v4.20.58 — not while the approval this task waits for is open.
+			if (!v.waitsForApproval) {
+				out.push(WORKFLOW_ACTION.COMPLETE)
+			}
+			out.push(WORKFLOW_ACTION.REJECT)
+			if (v.canRequestApproval) {
+				out.push(WORKFLOW_ACTION.REQUEST_APPROVAL)
+			}
 			// v4.11.41 — a definition whose initiator is not a person has
 			// nobody to ask, and asking would block the step for good. The
 			// server decides; `!== false` so a view from an older server,
@@ -532,7 +595,11 @@ export function availableActions(workflow) {
 			}
 		}
 	}
-	if (v.isParticipant && waitingForInfo && workflow.status !== WORKFLOW_STATUS.BLOCKED) {
+	if (v.canDelegate) {
+		out.push(WORKFLOW_ACTION.DELEGATE_APPROVAL)
+	}
+	// v4.20.58 — an approver asks; the requester answers.
+	if ((v.canProvideInformation ?? v.isParticipant) && waitingForInfo && workflow.status !== WORKFLOW_STATUS.BLOCKED) {
 		out.push(WORKFLOW_ACTION.PROVIDE_INFORMATION)
 	}
 	if (v.canRequestStatus) {
@@ -554,11 +621,13 @@ export function actionText(action) {
 	case WORKFLOW_ACTION.REJECT:
 	case WORKFLOW_ACTION.REQUEST_INFORMATION:
 	case WORKFLOW_ACTION.PROVIDE_INFORMATION:
+	case WORKFLOW_ACTION.REQUEST_APPROVAL:
 		return 'required'
 	case WORKFLOW_ACTION.COMPLETE:
 	case WORKFLOW_ACTION.CANCEL:
 	case WORKFLOW_ACTION.REQUEST_STATUS:
 	case WORKFLOW_ACTION.CLOSE:
+	case WORKFLOW_ACTION.DELEGATE_APPROVAL:
 		return 'optional'
 	default:
 		return 'none'
@@ -573,12 +642,24 @@ export function actionTextLabel(action) {
 	case WORKFLOW_ACTION.COMPLETE:
 	case WORKFLOW_ACTION.CLOSE: return t('teamhub', 'Note (optional)')
 	case WORKFLOW_ACTION.CANCEL: return t('teamhub', 'Reason (optional)')
-	case WORKFLOW_ACTION.REQUEST_STATUS: return t('teamhub', 'Message (optional)')
+	case WORKFLOW_ACTION.REQUEST_STATUS:
+	case WORKFLOW_ACTION.DELEGATE_APPROVAL: return t('teamhub', 'Message (optional)')
+	case WORKFLOW_ACTION.REQUEST_APPROVAL: return t('teamhub', 'What do you want approved?')
 	default: return ''
 	}
 }
 
 export const DESTRUCTIVE_WORKFLOW_ACTIONS = [WORKFLOW_ACTION.REJECT, WORKFLOW_ACTION.CANCEL]
+
+/**
+ * v4.20.59 — the verb that stands out, or '' when there is none: the first one
+ * unless it refuses something. While a task waits, *Reject* can be all that is
+ * left at the top, and it was drawn as the thing to press.
+ */
+export function primaryAction(actions) {
+	const first = (actions || [])[0] || ''
+	return DESTRUCTIVE_WORKFLOW_ACTIONS.includes(first) ? '' : first
+}
 
 // ── Sections ───────────────────────────────────────────────────────────
 
@@ -641,11 +722,26 @@ export function eventLabel(event) {
 	case 'step_started': return t('teamhub', 'Step started: {step}', { step })
 	// v4.10.16 — the basic timeline of an unlicensed instance names no
 	// step, so these two also have a form without one.
-	case 'step_completed': return step
+	case 'step_completed': return event?.payload?.auto
+		// TRANSLATORS: timeline entry — the requester did not confirm in time, so the request was confirmed by itself
+		? t('teamhub', 'Confirmed automatically')
+		: event?.payload?.approval
+			// TRANSLATORS: timeline entry — somebody approved a step of a service request
+			? t('teamhub', 'Approved: {step}', { step })
+			: step
 		// TRANSLATORS: timeline entry — a workflow step was completed; %s is the step's name
 		? t('teamhub', 'Step completed: {step}', { step })
 		// TRANSLATORS: timeline entry — a workflow step was completed, on an instance that does not show which step
 		: t('teamhub', 'Step completed')
+	// TRANSLATORS: timeline entry — whoever handles a service request asked somebody to approve it
+	case 'approval_requested': return t('teamhub', 'Approval asked of {name}', { name: event?.toName || event?.payload?.to || '' })
+	// TRANSLATORS: timeline entry — an approval was handed to somebody else
+	case 'approval_delegated': return t('teamhub', 'Approval handed to {name}', { name: event?.toName || event?.payload?.to || '' })
+	// TRANSLATORS: history of a service request, for the service team: a step went past its deadline and whoever has it was reminded; {step} is its name
+	case 'step_overdue': return t('teamhub', 'Past its deadline: {step}', { step })
+	// v4.20.62 — only the service team is sent these two.
+	case 'notice_sent':
+	case 'notice_failed': return noticeLabel(event)
 	case 'step_rejected': return step
 		// TRANSLATORS: timeline entry — a workflow step was rejected; %s is the step's name
 		? t('teamhub', 'Step rejected: {step}', { step })
@@ -679,6 +775,12 @@ export const TIMELINE_EVENT_TYPES = [
 	'created', 'step_completed', 'step_rejected', 'information_requested',
 	'information_provided', 'status_requested', 'blocked', 'unblocked',
 	'completed', 'rejected', 'cancelled', 'closed',
+	// v4.20.59 — who was asked to approve, and to whom it was handed.
+	'approval_requested', 'approval_delegated',
+	// v4.20.62 — what the service told whom; the service team's own.
+	'notice_sent', 'notice_failed',
+	// v4.20.68 — a step past its deadline; the service team's own.
+	'step_overdue',
 ]
 
 /**
@@ -720,6 +822,24 @@ export function conversation(history) {
 		.filter(e => CONVERSATION_EVENT_TYPES.includes(e?.type))
 		.slice()
 		.sort((a, b) => (a.occurredAt || 0) - (b.occurredAt || 0))
+}
+
+/**
+ * v4.20.61 — the question the requester answers next: the key of the task
+ * that waits, and who asked (a uid, or '' when the history does not say).
+ * The task the view answers for comes first, so the name above the box, and
+ * the task the answer goes to, are the same one.
+ */
+export function openQuestion(workflow) {
+	const waiting = (workflow?.steps || []).filter(s => s?.status === STEP_STATUS.WAITING_FOR_INFORMATION)
+	const step = waiting.find(s => s.key === workflow?.viewer?.stepKey) || waiting[0]
+	if (!step) {
+		return { stepKey: '', askedBy: '' }
+	}
+	const asked = conversation(workflow?.history)
+		.filter(e => e.type === 'information_requested' && e.stepKey === step.key)
+		.pop()
+	return { stepKey: step.key, askedBy: asked?.actorUid || '' }
 }
 
 // ── Time ───────────────────────────────────────────────────────────────
@@ -807,6 +927,7 @@ export function eventTone(event) {
 		return 'error'
 	case 'information_requested':
 	case 'blocked':
+	case 'notice_failed':
 		return 'warning'
 	default:
 		return 'neutral'

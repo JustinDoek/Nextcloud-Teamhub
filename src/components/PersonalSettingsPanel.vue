@@ -17,14 +17,49 @@
                 {{ t('teamhub', 'Getting started') }}
             </NcCheckboxRadioSwitch>
 
-            <p v-if="saveError" class="th-personal__error" role="alert">
-                {{ saveError }}
-            </p>
+            <!-- v4.20.12 (DESIGN §2.265) — every section on this page saves
+                 itself and says so in the same line. A failed write puts the
+                 switch back, so Retry asks for the other position again. -->
+            <AutosaveStatus
+                :saving="saving"
+                :saved="saved"
+                :error="saveError"
+                @retry="onToggle(!gettingStartedHint)" />
             <!-- The reminder only exists on instances without a licence, so
                  say so rather than letting a licensed user wonder why the
                  switch appears to do nothing. -->
             <p class="th-personal__note">
                 {{ t('teamhub', 'The reminder only appears on instances without a TeamHub license.') }}
+            </p>
+        </section>
+
+        <!-- v4.20.15 (DESIGN §2.267) — whether the team calendar may show
+             this person's busy times to their teammates. Read on mount
+             rather than seeded from the template, because the same panel
+             also renders inside the app's settings dialog. -->
+        <section class="th-personal__section">
+            <h2 class="th-personal__title">{{ t('teamhub', 'Team calendars') }}</h2>
+            <p class="th-personal__desc">
+                {{ t('teamhub', 'The people on your teams can see when you are busy on the team calendar. Only the times are shown, never what the event is. Events you show as free in Calendar do not count.') }}
+            </p>
+
+            <NcCheckboxRadioSwitch
+                :model-value="showBusy"
+                :disabled="!busyPrefLoaded || busySaving"
+                type="switch"
+                @update:model-value="onBusyToggle">
+                {{ t('teamhub', 'Show my busy times on team calendars') }}
+            </NcCheckboxRadioSwitch>
+
+            <AutosaveStatus
+                :saving="busySaving"
+                :saved="busySaved"
+                :error="busySaveError"
+                @retry="onBusyRetry" />
+            <!-- Said plainly so the switch is not mistaken for more than it
+                 is: Nextcloud's own free/busy is not TeamHub's to turn off. -->
+            <p class="th-personal__note">
+                {{ t('teamhub', 'This only affects TeamHub. Anyone who adds you to an event in Calendar can still see when you are busy, as Nextcloud always allows.') }}
             </p>
         </section>
 
@@ -102,6 +137,7 @@ import { generateUrl } from '@nextcloud/router'
 import { translate as t, translatePlural as n } from '@nextcloud/l10n'
 import { NcButton, NcCheckboxRadioSwitch } from '@nextcloud/vue'
 import { integrationAppSettingsUrl } from '../lib/openProject.js'
+import AutosaveStatus from './AutosaveStatus.vue'
 import MyPresencePanel from './MyPresencePanel.vue'
 import PeopleProfilePanel from './PeopleProfilePanel.vue'
 import ShiftAvailabilityPanel from './ShiftAvailabilityPanel.vue'
@@ -109,7 +145,7 @@ import ShiftAvailabilityPanel from './ShiftAvailabilityPanel.vue'
 export default {
     name: 'PersonalSettingsPanel',
     components: {
-        NcButton, NcCheckboxRadioSwitch, MyPresencePanel, PeopleProfilePanel,
+        AutosaveStatus, NcButton, NcCheckboxRadioSwitch, MyPresencePanel, PeopleProfilePanel,
         ShiftAvailabilityPanel,
     },
     props: {
@@ -129,7 +165,18 @@ export default {
             // of the default-on state for a user who turned it off.
             gettingStartedHint: this.initialGettingStartedHint,
             saving: false,
+            saved: false,
             saveError: '',
+            savedTimer: null,
+            // v4.20.15 — busy times on team calendars. Default on, the
+            // server's default too; the switch stays disabled until the GET
+            // says what this user chose.
+            showBusy: true,
+            busyPrefLoaded: false,
+            busySaving: false,
+            busySaved: false,
+            busySaveError: '',
+            busySavedTimer: null,
             // v4.13.5 — the viewer's own OpenProject connection.
             opConn: {
                 configured: false,
@@ -174,8 +221,13 @@ export default {
         },
     },
     mounted() {
+        this.loadBusyPreference()
         this.loadOpenProjectConnection()
         this.readOpenProjectCallbackResult()
+    },
+    beforeUnmount() {
+        clearTimeout(this.savedTimer)
+        clearTimeout(this.busySavedTimer)
     },
     methods: {
         t,
@@ -186,17 +238,66 @@ export default {
             const previous = this.gettingStartedHint
             this.gettingStartedHint = value
             this.saving = true
+            this.saved = false
             this.saveError = ''
             try {
                 await axios.put(generateUrl('/apps/teamhub/api/v1/preferences'), {
                     gettingStartedHint: value,
                 })
+                this.saved = true
+                clearTimeout(this.savedTimer)
+                this.savedTimer = setTimeout(() => { this.saved = false }, 2000)
             } catch (error) {
                 // Revert so the switch never shows a state the server rejected.
                 this.gettingStartedHint = previous
                 this.saveError = t('teamhub', 'Could not save the setting. Try again.')
             } finally {
                 this.saving = false
+            }
+        },
+
+        // ── Busy times on team calendars (v4.20.15) ──────────────────────
+
+        async loadBusyPreference() {
+            try {
+                const { data } = await axios.get(generateUrl('/apps/teamhub/api/v1/preferences'))
+                this.showBusy = data?.showBusyOnTeamCalendars !== false
+                this.busyPrefLoaded = true
+            } catch (error) {
+                // Left disabled: a switch whose position is a guess must not
+                // be the one somebody flips.
+                this.busySaveError = t('teamhub', 'Could not load the setting.')
+            }
+        },
+
+        /** Retry loads when the load failed, and otherwise repeats the write. */
+        onBusyRetry() {
+            if (!this.busyPrefLoaded) {
+                this.busySaveError = ''
+                this.loadBusyPreference()
+                return
+            }
+            this.onBusyToggle(!this.showBusy)
+        },
+
+        async onBusyToggle(value) {
+            const previous = this.showBusy
+            this.showBusy = value
+            this.busySaving = true
+            this.busySaved = false
+            this.busySaveError = ''
+            try {
+                await axios.put(generateUrl('/apps/teamhub/api/v1/preferences'), {
+                    showBusyOnTeamCalendars: value,
+                })
+                this.busySaved = true
+                clearTimeout(this.busySavedTimer)
+                this.busySavedTimer = setTimeout(() => { this.busySaved = false }, 2000)
+            } catch (error) {
+                this.showBusy = previous
+                this.busySaveError = t('teamhub', 'Could not save the setting. Try again.')
+            } finally {
+                this.busySaving = false
             }
         },
 

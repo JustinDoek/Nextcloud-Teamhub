@@ -15,6 +15,8 @@ use OCA\TeamHub\Listener\PeopleAccountCreatedListener;
 use OCA\TeamHub\Integration\CapabilityType;
 use OCA\TeamHub\Integration\IntegrationRegistry;
 use OCA\TeamHub\Integration\ITeamHubIntegrationRegistry;
+use OCA\TeamHub\Integration\ITeamHubManagedFolderRegistry;
+use OCA\TeamHub\Integration\ManagedFolderRegistry;
 use OCA\TeamHub\Integration\MyWorkCapabilityDefinition;
 use OCA\TeamHub\MyWork\IWorkProvider;
 use OCA\TeamHub\MyWork\Provider\PackageWorkProvider;
@@ -39,6 +41,8 @@ use OCA\TeamHub\MyWork\Provider\TeamSpaceAdminWorkProvider;
 use OCA\TeamHub\MyWork\ProviderRegistry;
 use OCA\TeamHub\Workflow\Definition\QuotaRequestDefinition;
 use OCA\TeamHub\Constants\ServiceCatalogue;
+use OCA\TeamHub\Service\ServiceTeam\ApproverResolver;
+use OCA\TeamHub\Service\ServiceTeam\RequestForm;
 use OCA\TeamHub\Service\ServiceTeam\ServiceTeamService;
 use OCA\TeamHub\Workflow\Definition\ServiceRequestDefinition;
 use OCA\TeamHub\Workflow\Definition\IdpGroupAdoptionDefinition;
@@ -108,6 +112,11 @@ class Application extends App implements IBootstrap {
             );
         });
         $context->registerServiceAlias(ITeamHubIntegrationRegistry::class, IntegrationRegistry::class);
+
+        // v4.20.48 — apps that claim Team folders as their own. Shared for the
+        // same reason: what an app registers during boot() is the claim.
+        $context->registerService(ManagedFolderRegistry::class, static fn (): ManagedFolderRegistry => new ManagedFolderRegistry());
+        $context->registerServiceAlias(ITeamHubManagedFolderRegistry::class, ManagedFolderRegistry::class);
 
         // Auto-deregister any integration whose app is disabled or removed.
         $context->registerEventListener(AppDisabledEvent::class, AppDisabledListener::class);
@@ -251,6 +260,13 @@ class Application extends App implements IBootstrap {
                 $c->get(\OCA\TeamHub\Service\TimezoneService::class),
                 $c->get(\OCA\TeamHub\Service\NextcloudAvailabilityService::class),
                 $c->get(\OCA\TeamHub\Db\HolidayMapper::class),
+                $c->get(\OCA\TeamHub\Service\PresenceDefaultService::class),
+                // v4.20.14 added this parameter to the constructor and not
+                // here; every presence read 500'd on claudius until 4.20.16.
+                // tests/Unit/AppInfo/ManualRegistrationTest.php now compares
+                // every hand-written `new X(...)` in this file with X's
+                // constructor.
+                $c->get(\OCA\TeamHub\Service\Suggestion\AttendeeAvailability::class),
                 $c->get(\Psr\Log\LoggerInterface::class),
                 [],
             );
@@ -511,6 +527,8 @@ class Application extends App implements IBootstrap {
             // too: during an upgrade the table may not exist yet.
             try {
                 $serviceTeams = $c->get(ServiceTeamService::class);
+                $requestForm  = $c->get(RequestForm::class);
+                $approvers    = $c->get(ApproverResolver::class);
                 foreach ($c->get(TeamServiceMapper::class)->findEverPublished() as $row) {
                     try {
                         $registry->register(new TeamServiceDefinition(
@@ -520,6 +538,8 @@ class Application extends App implements IBootstrap {
                             $row->getPubVersion(),
                             $row->isListed(),
                             $row->publishedDocument(),
+                            $requestForm,
+                            $approvers,
                         ));
                     } catch (\Throwable $e) {
                         $c->get(\Psr\Log\LoggerInterface::class)->error(

@@ -155,8 +155,10 @@ class PolicyObservationMapper {
         $out = [];
 
         foreach (array_chunk($teamIds, self::CHUNK) as $chunk) {
+            $managed = $this->managedFolderKeys($chunk);
+
             $qb = $this->db->getQueryBuilder();
-            $qb->select('gfg.circle_id', 'gf.root_id')
+            $qb->select('gfg.circle_id', 'gf.root_id', 'gf.folder_id')
                 ->from('group_folders_groups', 'gfg')
                 ->innerJoin(
                     'gfg',
@@ -181,6 +183,11 @@ class PolicyObservationMapper {
             $result = $qb->executeQuery();
             while ($row = $result->fetch()) {
                 $rootId = (int)$row['root_id'];
+                // v4.20.48 — another app's folder is not the team folder, the
+                // same rule as findGroupFolderForCircle().
+                if (isset($managed[$row['circle_id'] . "\0" . (int)$row['folder_id']])) {
+                    continue;
+                }
                 if ($rootId <= 0) {
                     // GroupFolders has the folder but has not materialised its
                     // root yet. Same treatment as no folder at all — there is
@@ -193,5 +200,30 @@ class PolicyObservationMapper {
         }
 
         return $out;
+    }
+
+    /**
+     * `team\0folder` for every Team folder another app manages (v4.20.48).
+     *
+     * @param list<string> $teamIds
+     * @return array<string, true>
+     */
+    private function managedFolderKeys(array $teamIds): array {
+        $qb = $this->db->getQueryBuilder();
+        $qb->select('team_id', 'resource_id')
+            ->from('teamhub_team_app_resources')
+            ->where($qb->expr()->eq('app_id', $qb->createNamedParameter('files')))
+            ->andWhere($qb->expr()->eq('status', $qb->createNamedParameter(TeamAppResource::STATUS_MANAGED)))
+            ->andWhere($qb->expr()->in(
+                'team_id',
+                $qb->createNamedParameter($teamIds, IQueryBuilder::PARAM_STR_ARRAY),
+            ));
+        $keys   = [];
+        $result = $qb->executeQuery();
+        while ($row = $result->fetch()) {
+            $keys[$row['team_id'] . "\0" . (int)substr((string)$row['resource_id'], 3)] = true;
+        }
+        $result->closeCursor();
+        return $keys;
     }
 }

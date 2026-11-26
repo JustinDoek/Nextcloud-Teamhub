@@ -47,6 +47,12 @@ use OCP\AppFramework\Db\Entity;
  * @method void    setLinks(?string $v)
  * @method void    setStageLabel(?string $v)
  * @method void    setNonBlocking(?int $v)
+ * @method ?string getStepType()
+ * @method void    setStepType(?string $v)
+ * @method ?string getConfig()
+ * @method void    setConfig(?string $v)
+ * @method ?string getAnswers()
+ * @method void    setAnswers(?string $v)
  */
 class WorkflowStep extends Entity {
 
@@ -99,6 +105,12 @@ class WorkflowStep extends Entity {
     protected ?string $stageLabel  = '';
     /** v4.10.37 — 1: the request may move on while this task is open. */
     protected ?int    $nonBlocking = 0;
+    /** v4.20.58 — 'approval', or null for every other step. */
+    protected ?string $stepType    = null;
+    /** v4.20.58 — JSON; read through `configMap()`. */
+    protected ?string $config      = null;
+    /** v4.20.71 — JSON; what was filled in when the task was completed. Read through `answerList()`. */
+    protected ?string $answers     = null;
 
     public function __construct() {
         $this->addType('instanceId',  'integer');
@@ -131,6 +143,43 @@ class WorkflowStep extends Entity {
     /** Whether the request may move on while this task is still open (v4.10.37). */
     public function isNonBlocking(): bool {
         return (int)($this->nonBlocking ?? 0) === 1;
+    }
+
+    /** Somebody approves or rejects this step (v4.20.58). */
+    public function isApproval(): bool {
+        return $this->stepType === 'approval';
+    }
+
+    /**
+     * What the row knows about its approval (v4.20.58). Not `getConfig()`,
+     * which stays the raw column the mapper writes (see `linkList()`).
+     *
+     * @return array<string, mixed>
+     */
+    public function configMap(): array {
+        $decoded = $this->config === null || $this->config === '' ? null : json_decode($this->config, true);
+        return is_array($decoded) ? $decoded : [];
+    }
+
+    /**
+     * What was filled in when the task was completed (v4.20.71), as
+     * `RequestForm::answers()` returned it; `[]` for a task without fields.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function answerList(): array {
+        $decoded = $this->answers === null || $this->answers === '' ? null : json_decode($this->answers, true);
+        return is_array($decoded) ? array_values(array_filter($decoded, 'is_array')) : [];
+    }
+
+    /** The fields this task asks to fill in (v4.20.71), from its config. */
+    public function fieldList(): array {
+        return array_values(array_filter((array)($this->configMap()['fields'] ?? []), 'is_array'));
+    }
+
+    /** @param array<string, mixed> $values */
+    public function mergeConfig(array $values): void {
+        $this->setConfig(json_encode($values + $this->configMap(), JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
     }
 
     /** The role the step needs, or '' (v4.10.31). */

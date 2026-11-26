@@ -1315,6 +1315,8 @@ class MaintenanceService {
     private function deleteTeamHubData(string $teamId): void {
         $tables = [
             'teamhub_messages'              => 'team_id',
+            // v4.20.27 — reactions carry their team, so they go with it.
+            'teamhub_reactions'             => 'team_id',
             'teamhub_web_links'             => 'team_id',
             'teamhub_layout'                => 'team_id',
             'teamhub_team_apps'             => 'team_id',

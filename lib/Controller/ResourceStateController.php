@@ -196,7 +196,11 @@ class ResourceStateController extends Controller {
 
     // -------------------------------------------------------------------------
     // DELETE /api/v1/teams/{teamId}/resources/{app}/{resourceId}/delete
-    // Destroys the underlying NC resource and removes the registry row.
+    // Destroys the underlying NC resource and removes the registry row only
+    // when the row is active, no other team holds the resource and TeamHub
+    // created it; otherwise answers `mode: 'released' | 'detached' |
+    // 'unlinked'` and keeps the resource. The decision lives in
+    // ResourceService::deleteSpecificResource() (v4.20.38).
     // -------------------------------------------------------------------------
 
     #[NoAdminRequired]
@@ -214,6 +218,30 @@ class ResourceStateController extends Controller {
             if (!($result['success'] ?? false)) {
                 return new JSONResponse(['error' => $result['error'] ?? 'Delete failed'], Http::STATUS_BAD_REQUEST);
             }
+            if (in_array($result['mode'] ?? '', ['unlinked', 'released', 'detached'], true)) {
+                $this->auditService->log(
+                    $teamId,
+                    'resource.access_removed',
+                    $uid,
+                    'resource',
+                    "{$app}:{$resourceId}",
+                    [
+                        'app_id'      => $app,
+                        'resource_id' => $resourceId,
+                        'requested'   => 'delete',
+                        'reason'      => $result['reason'] ?? 'not_created_by_teamhub',
+                        'origin'      => $result['origin'] ?? '',
+                        'status'      => $result['status'] ?? 'active',
+                        'shared_with_other_teams' => $result['sharedWithOther'] ?? false,
+                        'other_team_count'        => $result['otherTeamCount']  ?? 0,
+                    ],
+                );
+                return new JSONResponse([
+                    'status'      => 'ok',
+                    'mode'        => $result['mode'],
+                    'aclStripped' => $result['aclStripped'] ?? false,
+                ]);
+            }
             $this->auditService->log(
                 $teamId,
                 'resource.deleted',
@@ -222,7 +250,7 @@ class ResourceStateController extends Controller {
                 "{$app}:{$resourceId}",
                 ['app_id' => $app, 'resource_id' => $resourceId],
             );
-            return new JSONResponse(['status' => 'ok']);
+            return new JSONResponse(['status' => 'ok', 'mode' => 'destroyed']);
         } catch (\Throwable $e) {
             $this->logger->error('[TeamHub][ResourceStateController] deleteResource failed', [
                 // 'app' is the logger's own channel key, so the resource's app has

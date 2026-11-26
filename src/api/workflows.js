@@ -52,7 +52,7 @@ export async function startWorkflow(teamId, definitionKey, payload) {
  * `step` (v4.10.37) the task it acts on — without it the server picks the
  * caller's own.
  */
-export async function actOnWorkflow(id, action, text = '', step = '', fileIds = []) {
+export async function actOnWorkflow(id, action, text = '', step = '', fileIds = [], approver = '', answers = null) {
 	const path = {
 		complete: '/complete',
 		reject: '/reject',
@@ -64,6 +64,9 @@ export async function actOnWorkflow(id, action, text = '', step = '', fileIds = 
 		close: '/close-request',
 		// v4.11.0 — a message on a service request; changes no status.
 		message: '/message',
+		// v4.20.58 — approvals; both name somebody.
+		request_approval: '/approval',
+		delegate_approval: '/approval/delegate',
 	}[action]
 	if (!path) {
 		throw new Error('Unknown workflow action: ' + action)
@@ -71,6 +74,13 @@ export async function actOnWorkflow(id, action, text = '', step = '', fileIds = 
 	const body = ['reject', 'cancel'].includes(action) ? { reason: text } : { note: text }
 	if (step) {
 		body.step = step
+	}
+	if (approver) {
+		body.approver = approver
+	}
+	// v4.20.71 — what was filled in on a task with fields.
+	if (answers && action === 'complete') {
+		body.answers = answers
 	}
 	// v4.10.38 — the paperclip: files of the caller's to share with the other side.
 	if (fileIds && fileIds.length) {

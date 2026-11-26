@@ -5,10 +5,12 @@ namespace OCA\TeamHub\Controller;
 
 use OCA\TeamHub\Service\DateContextService;
 use OCA\TeamHub\Service\MemberService;
+use OCP\App\IAppManager;
 use OCP\AppFramework\Controller;
 use OCP\AppFramework\Http\Attribute\NoAdminRequired;
 use OCP\AppFramework\Http\Attribute\NoCSRFRequired;
 use OCP\AppFramework\Http\TemplateResponse;
+use OCP\AppFramework\Services\IInitialState;
 use OCP\IRequest;
 use OCP\IURLGenerator;
 use OCP\Util;
@@ -20,6 +22,8 @@ class PageController extends Controller {
         private MemberService $memberService,
         private IURLGenerator $urlGenerator,
         private DateContextService $dateContext,
+        private IInitialState $initialState,
+        private IAppManager $appManager,
     ) {
         parent::__construct($appName, $request);
     }
@@ -29,6 +33,12 @@ class PageController extends Controller {
     public function index(): TemplateResponse {
         Util::addScript('teamhub', 'teamhub');
         $this->dateContext->provideInitialState();
+        // v4.20.29 — whether a task can be stored at all, for the quick-task
+        // button on My Work. A team page knows from the team's resources; My
+        // Work has no team to ask. The same test as
+        // `TaskService::isTasksAppAvailable()`, asked directly so rendering the
+        // page does not construct the task service and everything behind it.
+        $this->initialState->provideInitialState('tasksAvailable', $this->appManager->isInstalled('tasks'));
 
         return new TemplateResponse('teamhub', 'main');
     }

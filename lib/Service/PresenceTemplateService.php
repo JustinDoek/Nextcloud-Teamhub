@@ -31,6 +31,7 @@ class PresenceTemplateService {
         private PresenceTypeMapper             $typeMapper,
         private PresenceMaterialisationService $materialisation,
         private LoggerInterface                $logger,
+        private PresenceDefaultService         $defaults,
     ) {}
 
     // -------------------------------------------------------------------------
@@ -41,10 +42,21 @@ class PresenceTemplateService {
      * Return the full 14-cell template as a plain array.
      * Missing cells are included with presence_type_id=null.
      *
+     * A user who has never saved a template gets the default instead
+     * (office, Monday to Friday; PresenceDefaultService), every cell marked
+     * `is_default: true` so the panel can say so. A saved template, empty or
+     * not, is returned as stored with `is_default: false`.
+     *
      * @return array<int, array<string, mixed>>
      */
     public function getTemplate(string $userId): array {
         $rows = $this->templateMapper->findByUser($userId);
+        if (!$this->defaults->isConfigured($userId, $rows)) {
+            $cells = $this->defaults->defaultCells();
+            if ($cells !== []) {
+                return $cells;
+            }
+        }
 
         $indexed = [];
         foreach ($rows as $r) {
@@ -68,6 +80,7 @@ class PresenceTemplateService {
                     'presence_type_id' => isset($availableTypes[$row?->getPresenceTypeId() ?? -1]) ? $row->getPresenceTypeId() : null,
                     'location_room_id' => isset($availableTypes[$row?->getPresenceTypeId() ?? -1]) ? $row->getLocationRoomId() : null,
                     'updated_at'       => $row?->getUpdatedAt(),
+                    'is_default'       => false,
                 ];
             }
         }
@@ -93,6 +106,11 @@ class PresenceTemplateService {
      */
     public function setBulk(string $userId, array $cells): array {
         $now = time();
+
+        // A partial save on top of the default starts from the default, so
+        // the days the payload leaves out keep the office rather than going
+        // blank.
+        $this->seedDefaultRowsIfUnconfigured($userId, $now);
 
         foreach ($cells as $data) {
             $dayOfWeek = $this->validateDayOfWeek($data['day_of_week'] ?? null);
@@ -131,6 +149,10 @@ class PresenceTemplateService {
             }
         }
 
+        // Any save ends the default, including one that clears every day
+        // (PresenceDefaultService, "Saved once means saved").
+        $this->defaults->markConfigured($userId);
+
         // Single rematerialisation after all cells are saved.
         $this->materialisation->rematerialiseForUser($userId);
 
@@ -159,6 +181,8 @@ class PresenceTemplateService {
             : null;
 
         $now      = time();
+        $this->seedDefaultRowsIfUnconfigured($userId, $now);
+        $this->defaults->markConfigured($userId);
         $existing = $this->templateMapper->findCell($userId, $dayOfWeek, $halfDay);
 
         if ($typeId === null) {
@@ -250,6 +274,32 @@ class PresenceTemplateService {
     // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
+
+    /**
+     * Turn the read-time default into rows before the first edit lands on
+     * it. Without this, changing Monday morning through the single-cell
+     * endpoint would leave a template of one cell and every other day blank,
+     * when what the user saw and edited was Monday to Friday at the office.
+     */
+    private function seedDefaultRowsIfUnconfigured(string $userId, int $now): void {
+        if ($this->defaults->isConfigured($userId)) {
+            return;
+        }
+        foreach ($this->defaults->defaultCells() as $cell) {
+            if ($cell['presence_type_id'] === null) {
+                continue;
+            }
+            $t = new PresenceTemplate();
+            $t->setUserId($userId);
+            $t->setDayOfWeek($cell['day_of_week']);
+            $t->setHalfDay($cell['half_day']);
+            $t->setPresenceTypeId($cell['presence_type_id']);
+            $t->setLocationRoomId(null);
+            $t->setCreatedAt($now);
+            $t->setUpdatedAt($now);
+            $this->templateMapper->insert($t);
+        }
+    }
 
     /** ISO date → 0=Mon … 6=Sun */
     private function isoDayOfWeek(string $isoDate): int {

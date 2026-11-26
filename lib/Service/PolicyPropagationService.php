@@ -520,7 +520,9 @@ class PolicyPropagationService {
 
             $result = $this->resourceService->deleteTeamResource($teamId, $appId);
 
-            return !empty($result['deleted']);
+            // v4.20.34 — a resource the team did not create is unlinked, not
+            // destroyed; it has still left the team.
+            return !empty($result['deleted']) || !empty($result['unlinked']) || !empty($result['detached']);
         } catch (\Throwable $e) {
             $this->logger->warning('[TeamHub][PolicyPropagationService] could not remove app', [
                 'teamId' => $teamId,

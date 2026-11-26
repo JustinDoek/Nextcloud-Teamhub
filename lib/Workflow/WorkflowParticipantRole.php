@@ -22,7 +22,13 @@ final class WorkflowParticipantRole {
     /** Added to watch, without a step. Not written by phase 1; reserved. */
     public const OBSERVER    = 'observer';
 
-    public const ALL = [self::INITIATOR, self::RESPONSIBLE, self::ACTOR, self::OBSERVER];
+    /**
+     * v4.20.58 — approves a step, from the moment it is reached. Sees less
+     * than everybody else on the request (`WorkflowEngine::seesAsApprover()`).
+     */
+    public const APPROVER    = 'approver';
+
+    public const ALL = [self::INITIATOR, self::RESPONSIBLE, self::ACTOR, self::OBSERVER, self::APPROVER];
 
     public static function isValid(string $role): bool {
         return in_array($role, self::ALL, true);

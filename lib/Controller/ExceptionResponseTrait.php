@@ -6,6 +6,7 @@ namespace OCA\TeamHub\Controller;
 use OCA\TeamHub\Exception\AccessDeniedException;
 use OCA\TeamHub\Exception\AppNotAvailableException;
 use OCA\TeamHub\Exception\NotFoundException;
+use OCA\TeamHub\Exception\RoomBusyException;
 use OCA\TeamHub\Exception\ValidationException;
 use OCP\AppFramework\Http;
 use OCP\AppFramework\Http\JSONResponse;
@@ -38,6 +39,7 @@ trait ExceptionResponseTrait {
      *   AccessDeniedException → 403, message passed through (user-facing).
      *   NotFoundException      → 404, message passed through.
      *   ValidationException    → 400, message passed through.
+     *   RoomBusyException      → 409, `code: room_busy` and the room's name.
      *   Anything else          → 500, generic $fallbackMessage, exception
      *                             logged at error level with $context.
      */
@@ -54,6 +56,26 @@ trait ExceptionResponseTrait {
         }
         if ($e instanceof AppNotAvailableException) {
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_UNPROCESSABLE_ENTITY);
+        }
+        // v4.20.0 — the picked room is taken in that slot. `code` lets the
+        // client show its own translated sentence; `room` names the room.
+        if ($e instanceof RoomBusyException) {
+            return new JSONResponse([
+                'error' => $e->getMessage(),
+                'code'  => 'room_busy',
+                'room'  => $e->getRoomName(),
+                // v4.20.8 — the clashing dates of a recurring meeting.
+                'dates' => $e->getDates(),
+            ], Http::STATUS_CONFLICT);
+        }
+        // v4.20.8 — a licensed feature asked for on an unlicensed instance.
+        // Same body the per-controller catches already send.
+        if ($e instanceof \OCA\TeamHub\Exception\LicenseGateException) {
+            return new JSONResponse([
+                'error'            => $e->getMessage(),
+                'licenseGate'      => true,
+                'enforcementLevel' => $e->getEnforcementLevel(),
+            ], Http::STATUS_FORBIDDEN);
         }
         if ($e instanceof ValidationException) {
             return new JSONResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);

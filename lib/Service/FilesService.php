@@ -607,6 +607,19 @@ class FilesService {
     ): array {
         $out = [];
 
+        // v4.20.48 — a folder another app manages is never offered.
+        $managed = [];
+        if ($teamId !== '') {
+            try {
+                $managed = array_flip($groupFolderService->managedFolderIds($teamId));
+            } catch (\Throwable $e) {
+                // The connect itself asks the managing app and refuses.
+                $this->logger->warning('[TeamHub][FilesService] listConnectableFileFolders: managed folders could not be read', [
+                    'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+                ]);
+            }
+        }
+
         // ── 1. Group Folders where this team's circle is a member ─────────────
         // Always shown UNLESS a GF is already the active resource (nothing to switch to).
         if ($groupFolderService->isGroupFoldersAvailable() && $teamId !== '' && $activeFilesType !== 'gf') {
@@ -626,6 +639,9 @@ class FilesService {
 
                 $r = $qb->executeQuery();
                 while ($row = $r->fetch()) {
+                    if (isset($managed[(int)$row['folder_id']])) {
+                        continue;
+                    }
                     $out[] = [
                         'id'   => 'gf:' . (int)$row['folder_id'],
                         'name' => (string)$row['mount_point'],
@@ -799,46 +815,39 @@ class FilesService {
     }
 
     public function removeFilesAccess(string $teamId, int $fileId, \OCP\IDBConnection $db): bool {
-        try {
-            // Find the share ID for this specific file_source + teamId circle share.
-            $qb  = $db->getQueryBuilder();
-            $res = $qb->select('id')
-                ->from('share')
-                ->where($qb->expr()->eq('share_with',  $qb->createNamedParameter($teamId)))
-                ->andWhere($qb->expr()->eq('share_type',  $qb->createNamedParameter(7, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
-                ->andWhere($qb->expr()->eq('file_source', $qb->createNamedParameter($fileId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
-                ->setMaxResults(1)
-                ->executeQuery();
-            $row = $res->fetch();
-            $res->closeCursor();
+        // v4.20.38: a failure throws. It used to return false, the same answer as "nothing to remove", so a caller could not tell a refused strip from a done one.
+        // Find the share ID for this specific file_source + teamId circle share.
+        $qb  = $db->getQueryBuilder();
+        $res = $qb->select('id')
+            ->from('share')
+            ->where($qb->expr()->eq('share_with',  $qb->createNamedParameter($teamId)))
+            ->andWhere($qb->expr()->eq('share_type',  $qb->createNamedParameter(7, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+            ->andWhere($qb->expr()->eq('file_source', $qb->createNamedParameter($fileId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+            ->setMaxResults(1)
+            ->executeQuery();
+        $row = $res->fetch();
+        $res->closeCursor();
 
-            if (!$row) {
-                $this->logger->warning('[TeamHub][FilesService] removeFilesAccess: share not found', [
-                    'teamId' => $teamId, 'fileId' => $fileId, 'app' => Application::APP_ID,
-                ]);
-                return false;
-            }
-            $shareId = (int)$row['id'];
-
-            // v3.100.8 — revert of the W-4 migration for this site. See
-            // suspendFilesAccess above for rationale.
-            $dqb = $db->getQueryBuilder();
-            $dqb->delete('share')
-                ->where($dqb->expr()->eq('id', $dqb->createNamedParameter($shareId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
-                ->executeStatement();
-
-            $this->logger->debug('[TeamHub][FilesService] removeFilesAccess: share removed', [
-                'teamId' => $teamId, 'fileId' => $fileId, 'shareId' => $shareId,
-                'app' => Application::APP_ID,
-            ]);
-            return true;
-        } catch (\Throwable $e) {
-            $this->logger->error('[TeamHub][FilesService] removeFilesAccess failed', [
-                'teamId' => $teamId, 'fileId' => $fileId,
-                'error' => $e->getMessage(), 'app' => Application::APP_ID,
+        if (!$row) {
+            $this->logger->warning('[TeamHub][FilesService] removeFilesAccess: share not found', [
+                'teamId' => $teamId, 'fileId' => $fileId, 'app' => Application::APP_ID,
             ]);
             return false;
         }
+        $shareId = (int)$row['id'];
+
+        // v3.100.8 — revert of the W-4 migration for this site. See
+        // suspendFilesAccess above for rationale.
+        $dqb = $db->getQueryBuilder();
+        $dqb->delete('share')
+            ->where($dqb->expr()->eq('id', $dqb->createNamedParameter($shareId, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
+            ->executeStatement();
+
+        $this->logger->debug('[TeamHub][FilesService] removeFilesAccess: share removed', [
+            'teamId' => $teamId, 'fileId' => $fileId, 'shareId' => $shareId,
+            'app' => Application::APP_ID,
+        ]);
+        return true;
     }
 
     /**
@@ -871,63 +880,6 @@ class FilesService {
                 'fileId' => $fileId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
             return ['deleted' => false, 'detail' => $e->getMessage()];
-        }
-    }
-
-    public function deleteSharedFolder(string $teamId, \OCP\IDBConnection $db): array {
-        try {
-            $qb  = $db->getQueryBuilder();
-            $res = $qb->select('id', 'uid_initiator', 'file_source')
-                ->from('share')
-                ->where($qb->expr()->eq('share_with', $qb->createNamedParameter($teamId)))
-                ->andWhere($qb->expr()->eq('share_type', $qb->createNamedParameter(7, \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_INT)))
-                ->andWhere($qb->expr()->eq('item_type', $qb->createNamedParameter('folder')))
-                ->setMaxResults(1)
-                ->executeQuery();
-            $row = $res->fetch();
-            $res->closeCursor();
-
-            if (!$row) {
-                return ['deleted' => false, 'detail' => 'No Files share found for this team'];
-            }
-
-            $shareId  = (int)$row['id'];
-            $ownerUid = $row['uid_initiator'];
-            $fileId   = (int)$row['file_source'];
-
-            try {
-                $shareManager = $this->container->get(\OCP\Share\IManager::class);
-                $share = $shareManager->getShareById('ocinternal:' . $shareId);
-                $shareManager->deleteShare($share);
-            } catch (\Throwable $e) {
-                $this->logger->warning('[TeamHub][FilesService] deleteSharedFolder: IManager delete failed, using QB', [
-                    'error' => $e->getMessage(), 'app' => Application::APP_ID,
-                ]);
-                $dqb = $db->getQueryBuilder();
-                $dqb->delete('share')
-                    ->where($dqb->expr()->eq('id', $dqb->createNamedParameter($shareId)))
-                    ->executeStatement();
-            }
-
-            try {
-                $userFolder = $this->container->get(IRootFolder::class)->getUserFolder($ownerUid);
-                $nodes = $userFolder->getById($fileId);
-                if (!empty($nodes)) {
-                    $nodes[0]->delete();
-                }
-            } catch (\Throwable $e) {
-                $this->logger->warning('[TeamHub][FilesService] deleteSharedFolder: folder node delete failed', [
-                    'fileId' => $fileId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
-                ]);
-            }
-
-            return ['deleted' => true, 'detail' => "Files folder {$fileId} and share deleted"];
-
-        } catch (\Throwable $e) {
-            $this->logger->error('[TeamHub][FilesService] deleteSharedFolder failed', [
-                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
-            ]);
-            return ['deleted' => false, 'detail' => 'Operation failed — see server log for details'];
         }
     }
 

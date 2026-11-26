@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace OCA\TeamHub\Db;
 
+use OCA\TeamHub\Constants\TeamApps;
 use OCP\AppFramework\Db\DoesNotExistException;
 use OCP\AppFramework\Db\QBMapper;
 use OCP\DB\QueryBuilder\IQueryBuilder;
@@ -160,6 +161,33 @@ class TeamAppResourceMapper extends QBMapper {
         } catch (DoesNotExistException) {
             return null;
         }
+    }
+
+    /**
+     * Which of these resources did TeamHub make, for any team? (v4.20.48)
+     *
+     * @param list<string> $resourceIds
+     * @return list<string>
+     */
+    public function findTeamHubCreatedIds(string $appId, array $resourceIds): array {
+        $out = [];
+        foreach (array_chunk($resourceIds, 500) as $chunk) {
+            $qb = $this->db->getQueryBuilder();
+            $qb->selectDistinct('resource_id')
+                ->from($this->getTableName())
+                ->where($qb->expr()->eq('app_id', $qb->createNamedParameter($appId)))
+                ->andWhere($qb->expr()->eq('origin', $qb->createNamedParameter(TeamApps::ORIGIN_CREATED)))
+                ->andWhere($qb->expr()->in(
+                    'resource_id',
+                    $qb->createNamedParameter($chunk, IQueryBuilder::PARAM_STR_ARRAY)
+                ));
+            $result = $qb->executeQuery();
+            while ($row = $result->fetch()) {
+                $out[] = (string)$row['resource_id'];
+            }
+            $result->closeCursor();
+        }
+        return $out;
     }
 
     // -------------------------------------------------------------------------

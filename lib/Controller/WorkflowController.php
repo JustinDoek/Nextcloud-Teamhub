@@ -130,7 +130,11 @@ class WorkflowController extends Controller {
             // v4.10.37 — `?step=` is the task the caller opened it from.
             $workflow            = $this->engine->get($id, $uid, $step !== '' ? $step : null);
             $workflow['history'] = $this->engine->listEvents($id, $uid);
-            $workflow['people']  = ($workflow['people'] ?? []) + $this->engine->describePeople(array_column($workflow['history'], 'actorUid'));
+            $workflow['people']  = ($workflow['people'] ?? []) + $this->engine->describePeople(array_merge(
+                array_column($workflow['history'], 'actorUid'),
+                // v4.20.62 — whom a notice went to.
+                ...array_map(static fn (array $e): array => (array)($e['payload']['uids'] ?? []), array_values($workflow['history'])),
+            ));
             return new JSONResponse([
                 'workflow'     => $workflow,
                 'tier'         => $this->tier->tier(),
@@ -186,8 +190,9 @@ class WorkflowController extends Controller {
      * completes the workflow.
      */
     #[NoAdminRequired]
-    public function complete(int $id, string $note = '', string $step = '', array $fileIds = []): JSONResponse {
-        return $this->act($id, fn (string $uid): array => $this->engine->completeStep($id, $uid, $note, $this->stepKey($step), $fileIds), 'complete the step');
+    public function complete(int $id, string $note = '', string $step = '', array $fileIds = [], mixed $answers = []): JSONResponse {
+        // v4.20.71 — `answers` (field key → value) for a task with fields.
+        return $this->act($id, fn (string $uid): array => $this->engine->completeStep($id, $uid, $note, $this->stepKey($step), $fileIds, $answers ?? []), 'complete the step');
     }
 
     /**
@@ -236,6 +241,33 @@ class WorkflowController extends Controller {
     #[UserRateLimit(limit: 60, period: 3600)]
     public function message(int $id, string $note = '', array $fileIds = []): JSONResponse {
         return $this->act($id, fn (string $uid): array => $this->engine->postMessage($id, $uid, $note, $fileIds), 'send the message');
+    }
+
+    /**
+     * POST /api/v1/workflows/{id}/approval   Body: { "approver": "<uid>", "note": "…", "step": "…" }
+     *
+     * v4.20.58 — whoever claimed a task of a service request asks somebody
+     * to approve before they go on. The request waits for the answer; a
+     * rejection comes back to them. `note` is what they ask, and the
+     * requester can read it. 403 for anybody else, 400 for somebody who may
+     * not be asked. At most thirty an hour per user: each rings a bell.
+     */
+    #[NoAdminRequired]
+    #[UserRateLimit(limit: 30, period: 3600)]
+    public function requestApproval(int $id, string $approver = '', string $note = '', string $step = ''): JSONResponse {
+        return $this->act($id, fn (string $uid): array => $this->engine->requestApproval($id, $uid, trim($approver), $note, $this->stepKey($step)), 'ask for an approval');
+    }
+
+    /**
+     * POST /api/v1/workflows/{id}/approval/delegate   Body: { "approver": "<uid>", "note": "…" (optional), "step": "…" }
+     *
+     * v4.20.58 — hand an approval to somebody else: whoever was asked, or an
+     * admin of the service team. Whoever had it leaves the request.
+     */
+    #[NoAdminRequired]
+    #[UserRateLimit(limit: 30, period: 3600)]
+    public function delegateApproval(int $id, string $approver = '', string $note = '', string $step = ''): JSONResponse {
+        return $this->act($id, fn (string $uid): array => $this->engine->delegateApproval($id, $uid, trim($approver), $note, $this->stepKey($step)), 'hand over the approval');
     }
 
     /**

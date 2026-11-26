@@ -50,6 +50,16 @@
                                 @click="$emit('mark-decision-best', c.id)">
                                 <template #icon><GavelIcon :size="ICON_INLINE" /></template>
                             </NcButton>
+                            <!-- v4.20.30 — a follow-up task on this comment,
+                                 titled from it and linking to its thread. -->
+                            <QuickTaskButton
+                                v-if="canCreateTeamTask && editingCommentId !== c.id"
+                                :team-id="$store.state.currentTeamId || ''"
+                                :label="t('teamhub', 'Create follow-up task')"
+                                :link="followUpLink"
+                                :link-label="t('teamhub', 'this comment')"
+                                :initial-title="followUpTitle(c)"
+                                :icon-size="ICON_INLINE" />
                             <!-- Edit button (own comments only, hidden when locked) -->
                             <NcButton
                                 v-if="canEditComment(c) && editingCommentId !== c.id"
@@ -96,6 +106,16 @@
                         <div v-if="editingCommentId !== c.id && editedLine(c)" class="comment__edited">
                             {{ editedLine(c) }}
                         </div>
+
+                        <!-- v4.20.27 — reactions on a comment. The thread is
+                             only shown inside the team stream, which is
+                             members-only, so every reader may react. -->
+                        <ReactionBar
+                            v-if="editingCommentId !== c.id"
+                            target-type="comment"
+                            :target-id="c.id"
+                            :reactions="c.reactions"
+                            compact />
                     </div>
                 </div>
             </div>
@@ -243,6 +263,11 @@ import {
 import { getCurrentUser } from '@nextcloud/auth'
 import { showError } from '@nextcloud/dialogs'
 import { NcAvatar, NcLoadingIcon, NcButton, NcRichContenteditable, NcDialog, NcTextArea } from '@nextcloud/vue'
+import ReactionBar from './ReactionBar.vue'
+import QuickTaskButton from './QuickTaskButton.vue'
+import { generateUrl } from '@nextcloud/router'
+import { buildPageLink } from '../lib/pageLink.js'
+import { taskTitleFrom } from '../lib/quickTask.js'
 import CheckCircle from 'vue-material-design-icons/CheckCircle.vue'
 import Close from 'vue-material-design-icons/Close.vue'
 import CodeBraces from 'vue-material-design-icons/CodeBraces.vue'
@@ -311,6 +336,8 @@ export default {
     name: 'CommentsSection',
     components: { 
          NcTextArea, NcAvatar, 
+        ReactionBar,
+        QuickTaskButton,
         NcLoadingIcon, 
         NcButton, 
         NcRichContenteditable,
@@ -369,8 +396,20 @@ export default {
         }
     },
     computed: {
-        ...mapGetters(['commentsForMessage', 'currentUserIsTeamAdmin', 'canComment', 'canManageMessages']),
+        ...mapGetters(['commentsForMessage', 'currentUserIsTeamAdmin', 'canComment', 'canManageMessages', 'canCreateTeamTask']),
         comments() { return this.commentsForMessage(this.messageId) },
+
+        /**
+         * v4.20.30 — a follow-up task on a comment links to its message: a
+         * comment has no address of its own, and the link opens the thread.
+         */
+        followUpLink() {
+            return buildPageLink(generateUrl('/apps/teamhub/'), {
+                view: 'team',
+                teamId: this.$store.state.currentTeamId,
+                messageId: this.messageId,
+            })
+        },
         /**
          * Memoized map of comment id → sanitized HTML body (perf pass V6).
          *
@@ -471,6 +510,8 @@ export default {
     methods: {
         t,
         formatDate(ts) { return formatDateTime(ts * 1000) },
+        /** v4.20.30 — a follow-up task starts from the comment's words. */
+        followUpTitle(comment) { return taskTitleFrom(comment?.comment) },
 
         /**
          * "Edited by Inge NC on 28 August 2026 at 14:03" for a comment that

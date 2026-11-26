@@ -220,6 +220,12 @@ export const ACTION = {
 	// listed in DESTRUCTIVE_ACTIONS for exactly those reasons. See
 	// ActionType::CLOSE.
 	CLOSE: 'close',
+	// v4.20.10 — answering a meeting invitation from the row. Source actions:
+	// each records the reply through Nextcloud's own iTIP broker
+	// (MeetingReplyService). See ActionType::ACCEPT.
+	ACCEPT: 'accept',
+	TENTATIVE: 'tentative',
+	DECLINE: 'decline',
 }
 
 /**
@@ -255,6 +261,8 @@ export const FORM_ACTIONS = [ACTION.REQUEST_EXTENSION]
  */
 export const PRIMARY_ACTIONS = [
 	ACTION.OPEN,
+	// v4.20.10 — an unanswered invitation's most likely answer, ranked first.
+	ACTION.ACCEPT,
 	ACTION.APPROVE,
 	ACTION.REJECT,
 	ACTION.COMPLETE,
@@ -318,6 +326,15 @@ export function actionLabel(action) {
 	case ACTION.CLOSE:
 		// TRANSLATORS: button — the person who asked for a file review ends it; this also deletes the review's chat conversation
 		return t('teamhub', 'Close review')
+	case ACTION.ACCEPT:
+		// TRANSLATORS: button — accept a meeting invitation
+		return t('teamhub', 'Accept')
+	case ACTION.TENTATIVE:
+		// TRANSLATORS: button — answer a meeting invitation with "maybe"
+		return t('teamhub', 'Maybe')
+	case ACTION.DECLINE:
+		// TRANSLATORS: button — decline a meeting invitation
+		return t('teamhub', 'Decline')
 	default:
 		return action
 	}
@@ -339,6 +356,9 @@ export const ACTION_ICONS = {
 	[ACTION.EMAIL]: 'EmailOutline',
 	[ACTION.REQUEST_EXTENSION]: 'CalendarClock',
 	[ACTION.CLOSE]: 'ArchiveCheckOutline',
+	[ACTION.ACCEPT]: 'Check',
+	[ACTION.TENTATIVE]: 'HelpCircleOutline',
+	[ACTION.DECLINE]: 'Close',
 }
 
 /**
@@ -432,6 +452,9 @@ export const OPEN_KIND = {
 	// v4.5.45 — Manage team at a tab/section. Not a team *tab*, which is why
 	// TEAMHUB_VIEW could not describe it. Mirror of OpenTarget::MANAGE_TEAM.
 	MANAGE_TEAM: 'manage_team',
+	// v4.20.19 — the wrap-up dialog of a finished meeting, over the team.
+	// Mirror of OpenTarget::MEETING_WRAP_UP.
+	MEETING_WRAP_UP: 'meeting_wrap_up',
 	EXTERNAL: 'external',
 }
 
@@ -1023,6 +1046,13 @@ export function statusLabel(status) {
 		return t('teamhub', 'Upcoming milestone')
 	case 'completed':
 		return t('teamhub', 'Completed')
+	// v4.20.19 — meeting wrap-ups.
+	case 'meeting_wrap_up':
+		// TRANSLATORS: My Work status filter option — meetings that are over and still to be wrapped up by the viewer, who organised them
+		return t('teamhub', 'Meetings to wrap up')
+	case 'meeting_wrapped':
+		// TRANSLATORS: My Work status filter option — meetings the viewer wrapped up
+		return t('teamhub', 'Wrapped up meetings')
 	// v4.11.15 — team tasks. A task names who it is for, so the statuses are
 	// the three answers to "whose is it" plus overdue and done.
 	case 'task_assigned':

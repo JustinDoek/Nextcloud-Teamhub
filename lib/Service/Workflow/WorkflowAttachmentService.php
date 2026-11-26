@@ -8,6 +8,7 @@ use OCA\TeamHub\Db\WorkflowAttachment;
 use OCA\TeamHub\Db\WorkflowAttachmentMapper;
 use OCA\TeamHub\Db\WorkflowInstance;
 use OCA\TeamHub\Db\WorkflowInstanceMapper;
+use OCA\TeamHub\Db\WorkflowParticipant;
 use OCA\TeamHub\Db\WorkflowParticipantMapper;
 use OCA\TeamHub\Db\WorkflowStep;
 use OCA\TeamHub\Db\WorkflowStepMapper;
@@ -21,6 +22,7 @@ use OCA\TeamHub\Workflow\WorkflowActor;
 use OCA\TeamHub\Workflow\WorkflowAttachmentVisibility;
 use OCA\TeamHub\Workflow\WorkflowCapability;
 use OCA\TeamHub\Workflow\WorkflowEventType;
+use OCA\TeamHub\Workflow\WorkflowParticipantRole;
 use OCA\TeamHub\Workflow\WorkflowStatus;
 use OCA\TeamHub\Workflow\WorkflowStepStatus;
 use OCP\AppFramework\Utility\ITimeFactory;
@@ -318,10 +320,14 @@ class WorkflowAttachmentService {
         return $instance;
     }
 
+    /** Not somebody who is only asked to approve a step (v4.20.58): they see the request, not its documents' list. */
     private function isParticipant(string $uid, WorkflowInstance $instance): bool {
         return $this->resolver->isAmongParticipants(
             $uid,
-            $this->participants->findByInstance((int)$instance->getId()),
+            array_values(array_filter(
+                $this->participants->findByInstance((int)$instance->getId()),
+                static fn (WorkflowParticipant $p): bool => $p->getWfRole() !== WorkflowParticipantRole::APPROVER,
+            )),
             $instance->getTeamId(),
         );
     }

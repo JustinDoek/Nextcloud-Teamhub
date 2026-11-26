@@ -66,6 +66,14 @@ final class OpenTarget {
      */
     public const MANAGE_TEAM = 'manage_team';
 
+    /**
+     * v4.20.19 — the wrap-up dialog of a finished meeting (DESIGN §2.271).
+     * Keys: `objectId` (the calendar object) and `start` (the occurrence),
+     * the pair the wrap-up endpoints take. A sixth way of opening, because
+     * the shell grew one: a dialog over the team, not a tab.
+     */
+    public const MEETING_WRAP_UP = 'meeting_wrap_up';
+
     /** Anything TeamHub cannot host: `resourceUrl` in a new browser tab. */
     public const EXTERNAL = 'external';
 
@@ -75,6 +83,7 @@ final class OpenTarget {
         self::TEAMHUB_VIEW,
         self::CALENDAR_EVENT,
         self::MANAGE_TEAM,
+        self::MEETING_WRAP_UP,
         self::EXTERNAL,
     ];
 
@@ -138,6 +147,11 @@ final class OpenTarget {
     }
 
     /** @return array<string,mixed> */
+    public static function meetingWrapUp(int $objectId, int $start): array {
+        return ['kind' => self::MEETING_WRAP_UP, 'objectId' => $objectId, 'start' => $start];
+    }
+
+    /** @return array<string,mixed> */
     public static function external(): array {
         return ['kind' => self::EXTERNAL];
     }
@@ -172,6 +186,9 @@ final class OpenTarget {
                 (string)($value['boardName'] ?? ''),
             ),
             self::FILE => self::file((int)($value['fileId'] ?? 0)),
+            self::MEETING_WRAP_UP => (int)($value['objectId'] ?? 0) > 0
+                ? self::meetingWrapUp((int)$value['objectId'], (int)($value['start'] ?? 0))
+                : self::external(),
             // v4.6.18 — MANAGE_TEAM was in KINDS but had no arm here, so every
             // `manageTeam()` target passed `isValidKind()` above and then fell
             // through to the `default` below and went out on the wire as

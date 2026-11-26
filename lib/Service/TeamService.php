@@ -1680,24 +1680,33 @@ class TeamService {
         $delegatedApps = [];
         try {
             $qb = $db->getQueryBuilder();
-            $res = $qb->select('app_id', 'resource_id')
+            // v4.20.37 — pending and ignored rows too: the team's access to a
+            // resource it never accepted is taken away and the row dropped.
+            // ResourceService releases a non-active row and never destroys
+            // the resource behind it, so the teams that did accept keep it.
+            $res = $qb->select('app_id', 'resource_id', 'status')
                 ->from('teamhub_team_app_resources')
                 ->where($qb->expr()->eq('team_id', $qb->createNamedParameter($teamId)))
-                ->andWhere($qb->expr()->eq('status', $qb->createNamedParameter('active')))
+                ->andWhere($qb->expr()->in('status', $qb->createNamedParameter(
+                    ['active', 'pending', 'ignored'],
+                    \OCP\DB\QueryBuilder\IQueryBuilder::PARAM_STR_ARRAY,
+                )))
                 ->executeQuery();
             while ($row = $res->fetch()) {
                 $app = (string)($row['app_id'] ?? '');
                 $rid = (string)($row['resource_id'] ?? '');
                 if ($app === '' || $rid === '') continue;
-                $delegatedApps[$app] = true;
+                if (($row['status'] ?? '') === 'active') {
+                    // Only an active resource hands the app over from the
+                    // legacy per-app pass below.
+                    $delegatedApps[$app] = true;
+                }
                 try {
-                    // v4.0.4 — safety check: only destroy the underlying NC
-                    // resource when this team is the last team connected to it.
-                    // Multi-team shares fall back to removing this team's ACL
-                    // access so surviving teams keep working. Individual user
-                    // shares don't preserve the resource — see docblock on
-                    // ResourceService::destroyOrDetachOnTeamDelete.
-                    $result = $this->resourceService->destroyOrDetachOnTeamDelete($teamId, $app, $rid);
+                    // v4.20.38 — the same decision as the /delete route and
+                    // deleteTeamResource(): status, other teams, origin, and
+                    // only then destroy. See the docblock on
+                    // ResourceService::deleteSpecificResource.
+                    $result = $this->resourceService->deleteSpecificResource($teamId, $app, $rid);
                     $this->logger->debug('[TeamHub][TeamService] deleteTeam: resource processed', [
                         'teamId' => $teamId, 'app' => $app, 'resourceId' => $rid,
                         'result' => $result, 'class' => Application::APP_ID,
@@ -1712,6 +1721,16 @@ class TeamService {
             $res->closeCursor();
         } catch (\Throwable $e) {
             $this->logger->warning('[TeamHub][TeamService] deleteTeam: could not read teamhub_team_app_resources', [
+                'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
+            ]);
+        }
+
+        // v4.20.48 — folders another app manages: our rows go, the folders and
+        // their shares stay with that app.
+        try {
+            $this->resourceService->forgetManagedResources($teamId);
+        } catch (\Throwable $e) {
+            $this->logger->warning('[TeamHub][TeamService] deleteTeam: managed folder rows could not be removed', [
                 'teamId' => $teamId, 'error' => $e->getMessage(), 'app' => Application::APP_ID,
             ]);
         }
@@ -2664,6 +2683,13 @@ class TeamService {
                 \OCA\TeamHub\Service\ServiceTeam\ServiceTeamService::CONFIG_ENABLED,
                 '0',
             ) === '1',
+            // v4.20.62 — whether a service may send email. Default OFF; key
+            // and default live in ServiceTeamService.
+            'serviceTeamsEmailEnabled' => $config->getAppValue(
+                Application::APP_ID,
+                \OCA\TeamHub\Service\ServiceTeam\ServiceTeamService::CONFIG_EMAIL,
+                '0',
+            ) === '1',
             // Sub-teams module — licensed, and **default ON** (v4.12.3,
             // Justin 2026-10-12). The other two licensed modules default off
             // because each needs something else first: OpenProject needs an
@@ -3066,6 +3092,14 @@ class TeamService {
                 Application::APP_ID,
                 \OCA\TeamHub\Service\ServiceTeam\ServiceTeamService::CONFIG_ENABLED,
                 $settings['serviceTeamsModuleEnabled'] ? '1' : '0'
+            );
+        }
+        // v4.20.62 — whether a service may send email.
+        if (isset($settings['serviceTeamsEmailEnabled'])) {
+            $config->setAppValue(
+                Application::APP_ID,
+                \OCA\TeamHub\Service\ServiceTeam\ServiceTeamService::CONFIG_EMAIL,
+                $settings['serviceTeamsEmailEnabled'] ? '1' : '0'
             );
         }
         // v4.12.3 — the sub-teams module's switch. `array_key_exists` and not

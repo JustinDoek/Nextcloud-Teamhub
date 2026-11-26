@@ -366,6 +366,13 @@ function appIdOf(pathname) {
  * @return {string|null} null when nothing may be done in place
  */
 function routingContextOf(pathname) {
+    // v4.20.22 — Talk's conversation URLs are `/call/{token}`, not under
+    // /apps/. They boot the same Talk as /apps/spreed/, and Talk's router
+    // moves between them (and to `?threadId=`) itself. Routing in place is
+    // what keeps a running call alive when a thread is opened.
+    if (/\/call\/[^/]+/.test(String(pathname || ''))) {
+        return 'spreed'
+    }
     const app = appIdOf(pathname)
     if (!app) {
         return null
@@ -727,7 +734,7 @@ export default {
     // embedded apps one after another instead of all at once: same-origin
     // frames share the parent's main thread, so four NC apps booting together
     // is four times slower for the one the user is looking at.
-    emits: ['action', 'select', 'toggle', 'menu-toggle', 'open-target', 'reload', 'loaded'],
+    emits: ['action', 'select', 'toggle', 'menu-toggle', 'open-target', 'reload', 'loaded', 'navigate'],
 
     data() {
         return {
@@ -883,6 +890,17 @@ export default {
             // src and cause the very reload we avoided).
             this.iframeSrc = this.url
             this.reloadKey++
+        },
+
+        /**
+         * Put the frame back on `url` after the embedded app has navigated
+         * itself away from it. Setting the same `url` prop again changes
+         * nothing, so the watcher cannot do this.
+         */
+        returnToUrl() {
+            if (!this.tryInPlaceNavigation(this.url)) {
+                this.reload()
+            }
         },
 
         onLoad() {
@@ -1135,6 +1153,11 @@ export default {
                         return
                     }
                     logger.debug('AppEmbed: in-place navigation had no effect — reloading the frame')
+                    // The frame may have booted on this very URL and routed
+                    // away in place since; the same src would not reload it.
+                    if (this.iframeSrc === newUrl) {
+                        this.reloadKey++
+                    }
                     this.iframeSrc = newUrl
                     this.loading = true
                     this.stopObserver()

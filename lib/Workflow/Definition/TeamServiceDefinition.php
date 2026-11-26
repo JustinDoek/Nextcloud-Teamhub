@@ -4,9 +4,13 @@ declare(strict_types=1);
 namespace OCA\TeamHub\Workflow\Definition;
 
 use OCA\TeamHub\Exception\ValidationException;
+use OCA\TeamHub\Exception\WorkflowTransitionException;
+use OCA\TeamHub\Service\ServiceTeam\ApproverResolver;
+use OCA\TeamHub\Service\ServiceTeam\RequestForm;
 use OCA\TeamHub\Service\ServiceTeam\ServiceTeamService;
 use OCA\TeamHub\Service\Workflow\WorkflowActorResolver;
 use OCA\TeamHub\Service\Workflow\WorkflowShareService;
+use OCA\TeamHub\Workflow\IWorkflowApprovals;
 use OCA\TeamHub\Workflow\IWorkflowClosableByDesk;
 use OCA\TeamHub\Workflow\IWorkflowDefinition;
 use OCA\TeamHub\Workflow\IWorkflowDefinitionSource;
@@ -38,6 +42,13 @@ use OCP\IL10N;
  *                     desk continues.
  *   3. `confirm`  — the requester confirms. An admin of the service team
  *                   may close it in their place (`IWorkflowClosableByDesk`).
+ *                   Since v4.20.54 the service says how (`confirm.mode`): by
+ *                   the requester, by itself after a number of days, or not
+ *                   at all — then there is no such step and the request ends
+ *                   when the team's last step is done.
+ *
+ *                   An **approval** (v4.20.58, § 14.4) is a third kind: somebody
+ *                   the service names approves or rejects.
  *
  * Unplanned back-and-forth needs nothing here: every desk step can already
  * ask the requester for information (the engine's *request information*).
@@ -57,6 +68,11 @@ use OCP\IL10N;
  * needs a team, and the service team is the only one the request belongs
  * to — and anybody may make one. The view says `personal: true`.
  *
+ * **The request form** (v4.20.54, § 14.3) is the service's own: its fields
+ * are the document's `request`, checked by `RequestForm`. A request keeps a
+ * copy of what was answered, with the labels it was asked under
+ * (`data.form`); one made before that has `data.details` instead.
+ *
  * **Tasks** (v4.10.37, `docs/service-builder.md` § 4). A step of the
  * document holds one or more tasks; each becomes a step definition of its
  * own, grouped into the step by `stage`, so the engine makes one row per
@@ -72,7 +88,7 @@ use OCP\IL10N;
  * does.
  */
 class TeamServiceDefinition implements IWorkflowDefinition,
-    IWorkflowDefinitionSource, IWorkflowClosableByDesk {
+    IWorkflowDefinitionSource, IWorkflowClosableByDesk, IWorkflowApprovals {
 
     public const KEY_PREFIX = 'team_service_';
 
@@ -81,9 +97,21 @@ class TeamServiceDefinition implements IWorkflowDefinition,
 
     public const KIND_DESK      = 'desk';
     public const KIND_REQUESTER = 'requester';
+    public const KIND_APPROVAL  = 'approval';
+    public const KINDS          = [self::KIND_DESK, self::KIND_REQUESTER, self::KIND_APPROVAL];
 
-    public const MAX_SUMMARY = 255;
-    public const MAX_DETAILS = 1000;
+    /** What an approver's rejection does to the request (v4.20.58). */
+    public const REJECT_ENDS      = 'end';
+    public const REJECT_CARRIES_ON = 'continue';
+    public const REJECT_OUTCOMES  = [self::REJECT_ENDS, self::REJECT_CARRIES_ON];
+
+    /** Who confirms the result (v4.20.54, `docs/service-builder.md` § 14.3). */
+    public const CONFIRM_REQUESTER = 'requester';
+    public const CONFIRM_AUTO      = 'auto';
+    public const CONFIRM_NONE      = 'none';
+    public const CONFIRM_MODES     = [self::CONFIRM_REQUESTER, self::CONFIRM_AUTO, self::CONFIRM_NONE];
+    public const CONFIRM_DAYS      = 14;
+    public const MAX_CONFIRM_DAYS  = 90;
 
     /**
      * @param array<string, mixed> $document the row's published document, as `TeamServiceBuilder::normalise()` wrote it
@@ -96,6 +124,10 @@ class TeamServiceDefinition implements IWorkflowDefinition,
         private int                $version,
         private bool               $listed,
         private array              $document,
+        /** v4.20.54 — checks what a requester filled in. */
+        private RequestForm        $form,
+        /** v4.20.58 — who approves. */
+        private ApproverResolver   $approvers,
     ) {
     }
 
@@ -144,6 +176,11 @@ class TeamServiceDefinition implements IWorkflowDefinition,
     }
 
     public function getDescription(IL10N $l, array $data): string {
+        // v4.20.54 — built from the answers the request kept. A request made
+        // before the form was the service's own has its one description.
+        if (is_array($data['form'] ?? null)) {
+            return RequestForm::asText($l, $data['form'], (string)($data['titleField'] ?? ''));
+        }
         return (string)($data['details'] ?? '');
     }
 
@@ -156,6 +193,14 @@ class TeamServiceDefinition implements IWorkflowDefinition,
             $n++;
             $stepLabel = trim((string)($step['label'] ?? '')) ?: ('Step ' . $n);
             $requester = ($step['kind'] ?? '') === self::KIND_REQUESTER;
+            if (($step['kind'] ?? '') === self::KIND_APPROVAL) {
+                $steps[] = new WorkflowStepDefinition(
+                    'step_' . $n, $stepLabel, WorkflowActor::approverPlaceholder(),
+                    type: WorkflowStepDefinition::TYPE_APPROVAL,
+                    config: (is_array($step['approval'] ?? null) ? $step['approval'] : []) + self::rowConfigOf($step),
+                );
+                continue;
+            }
             $tasks     = self::tasksOf($step);
             $several   = count($tasks) > 1;
             $m = 0;
@@ -173,11 +218,50 @@ class TeamServiceDefinition implements IWorkflowDefinition,
                     'step_' . $n,
                     $several || $taskLabel !== '' ? $stepLabel : '',
                     !$requester && !empty($task['nonBlocking']),
+                    // v4.20.62 — a step's notices, once: on its first task.
+                    // v4.20.71 — and each task's own fields.
+                    config: ($m === 1 ? self::rowConfigOf($step) : [])
+                        + (array_filter((array)($task['fields'] ?? []), 'is_array') !== [] ? ['fields' => array_values(array_filter((array)$task['fields'], 'is_array'))] : []),
                 );
             }
         }
-        $steps[] = new WorkflowStepDefinition(self::STEP_CONFIRM, 'Requester confirms', WorkflowActor::initiator());
+        // v4.20.54 — a service may need no confirmation at all.
+        if (self::confirmOf($this->document)['mode'] !== self::CONFIRM_NONE) {
+            $steps[] = new WorkflowStepDefinition(self::STEP_CONFIRM, 'Requester confirms', WorkflowActor::initiator());
+        }
         return $steps;
+    }
+
+    /**
+     * How a service's requests are confirmed (v4.20.54). A document saved
+     * before it could say is confirmed by the requester, as it always was.
+     *
+     * @param array<string, mixed> $document
+     * @return array{mode: string, days: int}
+     */
+    public static function confirmOf(array $document): array {
+        $raw  = is_array($document['confirm'] ?? null) ? $document['confirm'] : [];
+        $mode = (string)($raw['mode'] ?? '');
+        $days = (int)($raw['days'] ?? 0);
+        return [
+            'mode' => in_array($mode, self::CONFIRM_MODES, true) ? $mode : self::CONFIRM_REQUESTER,
+            'days' => $days >= 1 && $days <= self::MAX_CONFIRM_DAYS ? $days : self::CONFIRM_DAYS,
+        ];
+    }
+
+    /**
+     * What a step row keeps of its step: its notices (v4.20.62) and its
+     * condition (v4.20.66) and its deadline (v4.20.68).
+     *
+     * @param array<string, mixed> $step
+     * @return array{notify?: list<array<string, mixed>>, when?: array<string, mixed>}
+     */
+    private static function rowConfigOf(array $step): array {
+        $notify = array_values(array_filter((array)($step['notify'] ?? []), 'is_array'));
+        return ($notify === [] ? [] : ['notify' => $notify])
+            + (is_array($step['when'] ?? null) ? ['when' => $step['when']] : [])
+            // v4.20.68 — within so many working days.
+            + ((int)($step['dueDays'] ?? 0) > 0 ? ['dueDays' => (int)$step['dueDays']] : []);
     }
 
     /**
@@ -218,6 +302,15 @@ class TeamServiceDefinition implements IWorkflowDefinition,
             : null;
     }
 
+    /** v4.20.58 — never the requester; see `ApproverResolver`. */
+    public function resolveApprover(WorkflowStepDefinition $step, string $requesterUid, array $data): ?WorkflowActor {
+        return $this->approvers->resolve(
+            (array)($step->config['approver'] ?? []),
+            $requesterUid,
+            is_array($data['form'] ?? null) ? $data['form'] : [],
+        );
+    }
+
     /**
      * v4.11.41 — the My Work source chip these requests appear under.
      * No group, for the same reason as the catalogue services: a service a
@@ -240,24 +333,40 @@ class TeamServiceDefinition implements IWorkflowDefinition,
         if (!$this->isStartable() || $uid === '') {
             return false;
         }
-        return $teamId === $this->serviceTeamId || $resolver->isEffectiveMember($uid, $teamId);
+        if ($teamId === $this->serviceTeamId) {
+            return true;
+        }
+        // v4.20.54 — a service that does not ask for a team takes personal
+        // requests only.
+        return RequestForm::of($this->document)['askTeam'] && $resolver->isEffectiveMember($uid, $teamId);
     }
 
+    /**
+     * Check the answers against the published form. The client sends them as
+     * `answers` (field key → value) with the `version` of the service it drew
+     * the form from; a page loaded before v4.20.54 sends `summary` and
+     * `details` bare, which are the standard form's own keys.
+     */
     public function validateStart(array $data): array {
-        $summary = trim((string)($data['summary'] ?? ''));
-        $details = trim((string)($data['details'] ?? ''));
-        if ($summary === '' || mb_strlen($summary) > self::MAX_SUMMARY) {
-            throw new ValidationException('A one-line summary of at most 255 characters is required.');
+        $version = $data['version'] ?? null;
+        if ($version !== null && (int)$version !== $this->version) {
+            // The form was published again while somebody was filling it in.
+            throw new WorkflowTransitionException($this->form->changedMessage());
         }
-        if (preg_match('/[\x00-\x1F\x7F]/', $summary)) {
-            throw new ValidationException('The summary contains characters that are not allowed.');
+        $answers = $data['answers'] ?? $data;
+        if (!is_array($answers)) {
+            throw new ValidationException($this->form->unreadableMessage());
         }
-        if ($details === '') {
-            throw new ValidationException('Describe what you need.');
-        }
+        $request = RequestForm::of($this->document);
+        $form    = $this->form->answers($request, $answers);
         return [
-            'summary'      => $summary,
-            'details'      => mb_substr($details, 0, self::MAX_DETAILS),
+            // The answer that names the request; '' when none does.
+            'summary'      => RequestForm::titleOf($form, $request['titleField']),
+            'titleField'   => $request['titleField'],
+            // v4.20.54 — what was asked and answered, in the form's order.
+            'form'         => $form,
+            // How this request is confirmed, as the service said at the start.
+            'confirm'      => self::confirmOf($this->document),
             'serviceKey'   => $this->getKey(),
             // The title as it was when the request was made (see the class docblock).
             'serviceTitle' => $this->serviceTitle(),

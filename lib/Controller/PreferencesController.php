@@ -39,6 +39,18 @@ class PreferencesController extends Controller {
      */
     public const PREF_GETTING_STARTED = 'getting_started_hint';
 
+    /**
+     * v4.20.15 — let the people on my teams see my busy times on the team
+     * calendar. '1' = shown (the default), '0' = left out. Read by
+     * `TeamBusyService`, which leaves a member who switched it off out of the
+     * list the team calendar asks Nextcloud's free/busy about. It is not a
+     * security boundary and is not described as one: Nextcloud answers the
+     * same free/busy question to any user who adds this person to an event in
+     * Calendar. What it controls is whether TeamHub puts the blocks on a
+     * shared screen without being asked. DESIGN §2.267.
+     */
+    public const PREF_SHOW_BUSY = 'busy_on_team_calendars';
+
     public function __construct(
         string $appName,
         IRequest $request,
@@ -51,7 +63,7 @@ class PreferencesController extends Controller {
     /**
      * GET /api/v1/preferences
      *
-     * @return JSONResponse{gettingStartedHint: bool}
+     * @return JSONResponse{gettingStartedHint: bool, showBusyOnTeamCalendars: bool}
      */
     #[NoAdminRequired]
     public function getPreferences(): JSONResponse {
@@ -60,14 +72,7 @@ class PreferencesController extends Controller {
             return new JSONResponse(['error' => 'Not authenticated'], Http::STATUS_UNAUTHORIZED);
         }
 
-        return new JSONResponse([
-            'gettingStartedHint' => $this->config->getUserValue(
-                $uid,
-                Application::APP_ID,
-                self::PREF_GETTING_STARTED,
-                '1',
-            ) === '1',
-        ]);
+        return new JSONResponse($this->currentPreferences($uid));
     }
 
     /**
@@ -108,7 +113,7 @@ class PreferencesController extends Controller {
 
     /**
      * PUT /api/v1/preferences
-     * Body: { gettingStartedHint: bool }
+     * Body: { gettingStartedHint?: bool, showBusyOnTeamCalendars?: bool }
      *
      * Only keys present in the body are written, so a future preference can
      * be added without every caller having to send the whole set.
@@ -116,7 +121,7 @@ class PreferencesController extends Controller {
      * CSRF-protected (no #[NoCSRFRequired]) — this is a state-changing
      * request and @nextcloud/axios sends the request token automatically.
      *
-     * @return JSONResponse{gettingStartedHint: bool}
+     * @return JSONResponse{gettingStartedHint: bool, showBusyOnTeamCalendars: bool}
      */
     #[NoAdminRequired]
     public function savePreferences(): JSONResponse {
@@ -147,13 +152,45 @@ class PreferencesController extends Controller {
             );
         }
 
-        return new JSONResponse([
+        if (array_key_exists('showBusyOnTeamCalendars', $body)) {
+            $val = filter_var($body['showBusyOnTeamCalendars'], FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+            if ($val === null) {
+                return new JSONResponse(
+                    ['error' => 'showBusyOnTeamCalendars must be a boolean'],
+                    Http::STATUS_BAD_REQUEST,
+                );
+            }
+            $this->config->setUserValue(
+                $uid,
+                Application::APP_ID,
+                self::PREF_SHOW_BUSY,
+                $val ? '1' : '0',
+            );
+        }
+
+        return new JSONResponse($this->currentPreferences($uid));
+    }
+
+    /**
+     * Every preference this controller owns, read for one user. One place, so
+     * GET and PUT cannot answer different shapes.
+     *
+     * @return array{gettingStartedHint: bool, showBusyOnTeamCalendars: bool}
+     */
+    private function currentPreferences(string $uid): array {
+        return [
             'gettingStartedHint' => $this->config->getUserValue(
                 $uid,
                 Application::APP_ID,
                 self::PREF_GETTING_STARTED,
                 '1',
             ) === '1',
-        ]);
+            'showBusyOnTeamCalendars' => $this->config->getUserValue(
+                $uid,
+                Application::APP_ID,
+                self::PREF_SHOW_BUSY,
+                '1',
+            ) !== '0',
+        ];
     }
 }

@@ -56,38 +56,136 @@
                             }}
                         </a>
                     </div>
+                    <!-- v4.20.8 — second line: the times (the date is already in
+                         the badge), who accepted, the room. v4.20.19: no
+                         source chips; a click on the row opens the calendar. -->
                     <div class="th-cal__meta">
-                        <span>{{ formatTimeRange(event.start, event.end, event.allDay) }}</span>
-                        <span v-if="locationText(event)" class="th-cal__meta-sep">
+                        <span>{{ formatTimes(event) }}</span>
+                        <span v-if="event.recurring" class="th-cal__icon-text" :title="t('teamhub', 'Repeats')">
+                            <RepeatIcon :size="ICON_INLINE" />
+                            <span class="hidden-visually">{{ t('teamhub', 'Repeats') }}</span>
+                        </span>
+
+                        <!-- Who accepted (licensed: the server only sends
+                             `attendance` to a licensed instance). -->
+                        <!-- Escape is handled here, on the trigger and in the panel:
+                             NcPopover 9.8.0 passes `fallBackFocus` (sic) to
+                             focus-trap, so a panel with nothing focusable in it
+                             never takes focus and never sees Escape. -->
+                        <NcPopover
+                            v-if="event.attendance && event.attendance.total > 0"
+                            popup-role="dialog"
+                            :shown="openPopover === `att:${event.id}`"
+                            @update:shown="v => setPopover(`att:${event.id}`, v)">
+                            <template #trigger>
+                                <!-- v4.20.19 — soft red while your own reply is
+                                     owed, soft green when nothing is asked of
+                                     you (DESIGN §2.270). The accessible name
+                                     says the same, so it never rests on colour. -->
+                                <NcButton
+                                    size="small"
+                                    variant="secondary"
+                                    class="th-cal__pill"
+                                    :class="replyOwed(event) ? 'th-cal__pill--owed' : 'th-cal__pill--settled'"
+                                    :aria-label="attendanceLabel(event)"
+                                    :title="attendanceLabel(event)"
+                                    @keydown.esc="closePopover">
+                                    <template #icon>
+                                        <AccountCheckIcon :size="ICON_INLINE" />
+                                    </template>
+                                    <!-- v4.20.10 — the icon says "accepted"; the
+                                         words are in the accessible name. -->
+                                    {{ event.attendance.accepted }}/{{ event.attendance.total }}
+                                </NcButton>
+                            </template>
+                            <div class="th-cal__popover" @keydown.esc="closePopover">
+                                <!-- v4.20.10 — your answer, when you are invited. -->
+                                <div v-if="event.attendance.canReply && event.uid" class="th-cal__reply">
+                                    <p class="th-cal__popover-title">{{ t('teamhub', 'Your reply') }}</p>
+                                    <div class="th-cal__reply-buttons" role="group" :aria-label="t('teamhub', 'Your reply')">
+                                        <NcButton
+                                            v-for="option in replyOptions"
+                                            :key="option.status"
+                                            size="small"
+                                            :pressed="event.attendance.myStatus === option.status"
+                                            :disabled="replying !== ''"
+                                            @click="sendReply(event, option.status)">
+                                            <template #icon>
+                                                <NcLoadingIcon v-if="replying === `${event.id}:${option.status}`" :size="ICON_INLINE" />
+                                            </template>
+                                            {{ option.label }}
+                                        </NcButton>
+                                    </div>
+                                </div>
+                                <p class="th-cal__popover-title">{{ t('teamhub', 'Attendees') }}</p>
+                                <ul class="th-cal__attendees">
+                                    <li v-for="(person, i) in event.attendance.attendees" :key="`att-${i}`" class="th-cal__attendee">
+                                        <CheckCircleIcon v-if="person.status === 'accepted'" :size="ICON_INLINE" class="th-cal__status th-cal__status--accepted" />
+                                        <HelpCircleIcon v-else-if="person.status === 'tentative'" :size="ICON_INLINE" class="th-cal__status th-cal__status--tentative" />
+                                        <CloseCircleIcon v-else-if="person.status === 'declined'" :size="ICON_INLINE" class="th-cal__status th-cal__status--declined" />
+                                        <ClockOutlineIcon v-else :size="ICON_INLINE" class="th-cal__status" />
+                                        <span class="th-cal__attendee-name">{{ person.name }}</span>
+                                        <span v-if="person.organizer" class="th-cal__attendee-note">{{ t('teamhub', 'Organizer') }}</span>
+                                        <span class="th-cal__attendee-note th-cal__attendee-status">{{ replyLabel(person.status) }}</span>
+                                    </li>
+                                </ul>
+                            </div>
+                        </NcPopover>
+
+                        <!-- The room: its details on click (licensed), its
+                             name otherwise. -->
+                        <template v-if="event.room">
+                            <NcPopover
+                                v-if="licensed && roomFor(event)"
+                                popup-role="dialog"
+                                :shown="openPopover === `room:${event.id}`"
+                                @update:shown="v => setPopover(`room:${event.id}`, v)">
+                                <template #trigger>
+                                    <NcButton
+                                        size="small"
+                                        variant="tertiary"
+                                        class="th-cal__pill"
+                                        :aria-label="t('teamhub', 'Details of {room}', { room: event.room.name })"
+                                        @keydown.esc="closePopover">
+                                        <template #icon>
+                                            <MapMarkerIcon :size="ICON_INLINE" />
+                                        </template>
+                                        {{ event.room.name }}
+                                    </NcButton>
+                                </template>
+                                <div class="th-cal__popover th-cal__popover--compact" @keydown.esc="closePopover">
+                                    <p class="th-cal__popover-title">{{ roomFor(event).displayName }}</p>
+                                    <dl class="th-cal__room">
+                                        <template v-if="roomFor(event).building">
+                                            <dt>{{ t('teamhub', 'Building') }}</dt>
+                                            <dd>{{ roomFor(event).building }}</dd>
+                                        </template>
+                                        <template v-if="roomFor(event).floor">
+                                            <dt>{{ t('teamhub', 'Floor') }}</dt>
+                                            <dd>{{ roomFor(event).floor }}</dd>
+                                        </template>
+                                        <template v-if="roomFor(event).roomNumber">
+                                            <dt>{{ t('teamhub', 'Room number') }}</dt>
+                                            <dd>{{ roomFor(event).roomNumber }}</dd>
+                                        </template>
+                                        <template v-if="roomFor(event).capacity">
+                                            <dt>{{ t('teamhub', 'Seats') }}</dt>
+                                            <dd>{{ roomFor(event).capacity }}</dd>
+                                        </template>
+                                        <template v-if="(roomFor(event).features || []).length">
+                                            <dt>{{ t('teamhub', 'Equipment') }}</dt>
+                                            <dd>{{ roomFor(event).features.map(featureLabel).join(', ') }}</dd>
+                                        </template>
+                                    </dl>
+                                </div>
+                            </NcPopover>
+                            <span v-else class="th-cal__meta-sep">
+                                <MapMarkerIcon :size="ICON_INLINE" />{{ event.room.name }}
+                            </span>
+                        </template>
+                        <span v-else-if="locationText(event)" class="th-cal__meta-sep">
                             <MapMarkerIcon :size="ICON_INLINE" />{{ locationText(event) }}
                         </span>
-                        <!-- Source pills: calendar name + app label.
-                             Use shared outline pill vocabulary. -->
-                        <NcChip
-                            v-if="event.calendarName && resources.calendar && resources.calendar.length > 1"
-                            no-close
-                            variant="tertiary"
-                            class="th-cal__calname"
-                            :title="event.calendarName">
-                            {{ truncate(event.calendarName, 20) }}
-                        </NcChip>
-                        <NcChip no-close variant="tertiary"
-                            v-if="event.source === 'openproject'"
-                            :title="t('teamhub', 'A meeting scheduled in OpenProject')">
-                            {{ t('teamhub', 'OpenProject') }}
-                        </NcChip>
-                        <template v-else>
-                            <NcChip no-close variant="secondary">
-                                {{ t('teamhub', 'Calendar') }}
-                            </NcChip>
-                            <!-- v4.9.10 — a copy the OpenProject meeting sync wrote
-                                 into the team calendar: both pills, one row. -->
-                            <NcChip no-close variant="tertiary"
-                                v-if="event.openProjectMeetingId"
-                                :title="t('teamhub', 'A meeting scheduled in OpenProject, copied into the team calendar')">
-                                {{ t('teamhub', 'OpenProject') }}
-                            </NcChip>
-                        </template>
                     </div>
                 </div>
             </li>
@@ -102,20 +200,41 @@
 
 <script>
 import { mapState } from 'vuex'
-import { translate as t } from '@nextcloud/l10n'
-import { formatTime, formatIsoDate, zonedIsoDate, todayIso, shiftIsoDate } from '../lib/localDate.js'
+import { translate as t, translatePlural as n } from '@nextcloud/l10n'
+import { formatTime, formatIsoDate, zonedIsoDate } from '../lib/localDate.js'
 import { generateUrl } from '@nextcloud/router'
 import { isPlainClick } from '../lib/internalLinks.js'
+import { featureLabel } from '../lib/roomFeatureLabels.js'
 import axios from '@nextcloud/axios'
-import { NcLoadingIcon, NcChip } from '@nextcloud/vue'
+import { showError, showSuccess } from '@nextcloud/dialogs'
+import { NcButton, NcLoadingIcon, NcPopover } from '@nextcloud/vue'
+import AccountCheckIcon from 'vue-material-design-icons/AccountCheck.vue'
 import CalendarIcon  from 'vue-material-design-icons/Calendar.vue'
+import CheckCircleIcon from 'vue-material-design-icons/CheckCircle.vue'
+import ClockOutlineIcon from 'vue-material-design-icons/ClockOutline.vue'
+import CloseCircleIcon from 'vue-material-design-icons/CloseCircle.vue'
+import HelpCircleIcon from 'vue-material-design-icons/HelpCircle.vue'
 import MapMarkerIcon from 'vue-material-design-icons/MapMarker.vue'
+import RepeatIcon from 'vue-material-design-icons/Repeat.vue'
 import VideoIcon     from 'vue-material-design-icons/Video.vue'
 import { ICON_BODY, ICON_INLINE } from '../constants/uiTokens.js'
 
 export default {
     name: 'CalendarWidget',
-    components: {  NcChip, NcLoadingIcon, CalendarIcon, MapMarkerIcon, VideoIcon },
+    components: {
+        NcButton,
+        NcLoadingIcon,
+        NcPopover,
+        AccountCheckIcon,
+        CalendarIcon,
+        CheckCircleIcon,
+        ClockOutlineIcon,
+        CloseCircleIcon,
+        HelpCircleIcon,
+        MapMarkerIcon,
+        RepeatIcon,
+        VideoIcon,
+    },
     data() {
         return {
             ICON_BODY,
@@ -129,10 +248,30 @@ export default {
              * info widget carries the OpenProject state for the team home.
              */
             opMeetings: [],
+            /**
+             * v4.20.8 — the team's room catalogue (`/rooms`), for the room
+             * details on a row. Fetched once per team, and only on a licensed
+             * instance with a room on screen; null until then.
+             */
+            roomCatalogue: null,
+            roomCatalogueTeam: '',
+            /** v4.20.8 — which row popover is open (`att:<id>` / `room:<id>`), or ''. */
+            openPopover: '',
+            /** v4.20.10 — the reply being sent (`<event id>:<status>`), or ''. */
+            replying: '',
         }
     },
     computed: {
-        ...mapState(['currentTeamId', 'resources', 'widgetRefreshNonce', 'openProjectConfig']),
+        ...mapState(['currentTeamId', 'resources', 'widgetRefreshNonce', 'openProjectConfig', 'licensed']),
+
+        /** v4.20.10 — the three answers to an invitation, as Calendar offers them. */
+        replyOptions() {
+            return [
+                { status: 'accepted', label: t('teamhub', 'Accept') },
+                { status: 'tentative', label: t('teamhub', 'Maybe') },
+                { status: 'declined', label: t('teamhub', 'Decline') },
+            ]
+        },
 
         /** v4.9.7 — the team is linked to an OpenProject project. */
         openProjectLinked() {
@@ -171,9 +310,24 @@ export default {
         // the home view — the widget stays mounted behind v-show, so without
         // the nonce it would keep showing whatever it fetched hours ago.
         reloadKey: { immediate: true, handler() { this.loadEvents() } },
+        // v4.20.10 — Escape closes an open row popover wherever focus is. The
+        // handlers on the trigger and the panel miss one case: after a click
+        // on a reply button, focus can rest on the popover's own frame, which
+        // NcPopover stops Escape on before our panel hears it.
+        openPopover(value) {
+            if (value) {
+                window.addEventListener('keydown', this.onWindowKeydown, true)
+            } else {
+                window.removeEventListener('keydown', this.onWindowKeydown, true)
+            }
+        },
+    },
+    beforeUnmount() {
+        window.removeEventListener('keydown', this.onWindowKeydown, true)
     },
     methods: {
         t,
+        n,
 
         /**
          * Absolute URL for an event. The backend hands us a root-relative path
@@ -205,11 +359,6 @@ export default {
             })
         },
 
-        truncate(str, max) {
-            if (!str) return ''
-            return str.length > max ? str.slice(0, max) + '…' : str
-        },
-
         /**
          * @param {boolean} withMeetings false for the one reload the
          *   meeting sync asks for — the meetings were just fetched.
@@ -227,6 +376,7 @@ export default {
             } finally {
                 this.loading = false
             }
+            this.loadRoomCatalogue()
             // Behind the calendar's own rows, never ahead of them: the widget
             // renders the events as soon as they are in.
             if (withMeetings) {
@@ -314,31 +464,135 @@ export default {
             return formatIsoDate(this.eventIsoDay(start, allDay), { day: 'numeric' })
         },
 
-        formatTimeRange(start, end, allDay) {
-            if (!start) return ''
-            const iso = this.eventIsoDay(start, allDay)
-            const today = todayIso()
-
-            let dateLabel = ''
-            if (iso === today) {
-                dateLabel = t('teamhub', 'Today')
-            } else if (iso === shiftIsoDate(today, { days: 1 })) {
-                dateLabel = t('teamhub', 'Tomorrow')
-            } else {
-                dateLabel = formatIsoDate(iso, { weekday: 'short', month: 'short', day: 'numeric' })
-            }
-
-            if (allDay) return dateLabel
-
+        /**
+         * v4.20.8 — the row's times. The date is in the badge beside it, so
+         * only an event that ends on another day names that day.
+         */
+        formatTimes(event) {
+            if (!event.start) return ''
+            if (event.allDay) return t('teamhub', 'All day')
             const timeOpts = { hour: '2-digit', minute: '2-digit' }
-            const startStr = formatTime(start, timeOpts)
-
-            if (end) {
-                const endStr = formatTime(end, timeOpts)
-                return `${dateLabel}  ${startStr} – ${endStr}`
+            const startStr = formatTime(event.start, timeOpts)
+            if (!event.end) return startStr
+            let endStr = formatTime(event.end, timeOpts)
+            if (zonedIsoDate(event.end) !== zonedIsoDate(event.start)) {
+                endStr = `${formatIsoDate(zonedIsoDate(event.end), { month: 'short', day: 'numeric' })} ${endStr}`
             }
+            return `${startStr} - ${endStr}`
+        },
 
-            return `${dateLabel}  ${startStr}`
+        /**
+         * v4.20.10 — answer an invitation from the attendee list. The server
+         * records it through Nextcloud's own iTIP broker and reads it back;
+         * the row is updated from the answer only once that succeeded. A
+         * series is answered as a whole, so every row of it changes.
+         */
+        async sendReply(event, status) {
+            if (this.replying) return
+            this.replying = `${event.id}:${status}`
+            try {
+                await axios.post(
+                    generateUrl('/apps/teamhub/api/v1/teams/{teamId}/meetings/reply', { teamId: this.currentTeamId }),
+                    { uid: event.uid, status },
+                )
+                for (const row of this.events) {
+                    if (row.uid !== event.uid || !row.attendance) continue
+                    const attendees = row.attendance.attendees.map(a => (a.self && !a.organizer ? { ...a, status } : a))
+                    row.attendance = {
+                        ...row.attendance,
+                        myStatus: status,
+                        attendees,
+                        accepted: attendees.filter(a => a.status === 'accepted').length,
+                    }
+                }
+                showSuccess({
+                    accepted: t('teamhub', 'You accepted the meeting.'),
+                    tentative: t('teamhub', 'You answered maybe.'),
+                    declined: t('teamhub', 'You declined the meeting.'),
+                }[status])
+            } catch (e) {
+                showError(t('teamhub', 'Your reply could not be saved. Try again, or reply in Calendar.'))
+            } finally {
+                this.replying = ''
+            }
+        },
+
+        /** v4.20.8 — one row popover open at a time. */
+        setPopover(key, shown) {
+            if (shown) {
+                this.openPopover = key
+            } else if (this.openPopover === key) {
+                this.openPopover = ''
+            }
+        },
+
+        closePopover() {
+            this.openPopover = ''
+        },
+
+        onWindowKeydown(event) {
+            if (event.key === 'Escape' && this.openPopover) {
+                this.closePopover()
+            }
+        },
+
+        /** v4.20.8 — "2 of 5 accepted". */
+        attendanceLabel(event) {
+            const { accepted, total } = event.attendance
+            if (this.replyOwed(event)) {
+                // TRANSLATORS: replies to a meeting invitation the viewer has not answered yet, e.g. "2 of 5 accepted, your reply is needed"
+                return n('teamhub', '%n of {total} accepted, your reply is needed', '%n of {total} accepted, your reply is needed', accepted, { n: accepted, total })
+            }
+            // TRANSLATORS: replies to a meeting invitation, e.g. "2 of 5 accepted"
+            return n('teamhub', '%n of {total} accepted', '%n of {total} accepted', accepted, { n: accepted, total })
+        },
+
+        /** v4.20.19 — the viewer is invited and has not answered. */
+        replyOwed(event) {
+            return !!event.attendance?.canReply && event.attendance.myStatus === 'needs-action'
+        },
+
+        replyLabel(status) {
+            switch (status) {
+            case 'accepted': return t('teamhub', 'Accepted')
+            case 'declined': return t('teamhub', 'Declined')
+            case 'tentative': return t('teamhub', 'Maybe')
+            default: return t('teamhub', 'No reply')
+            }
+        },
+
+        /**
+         * v4.20.8 — the catalogue entry of the event's room, matched on its
+         * address, or null when the room is not (or no longer) bookable here.
+         */
+        roomFor(event) {
+            if (!event.room || !Array.isArray(this.roomCatalogue)) return null
+            const email = (event.room.email || '').toLowerCase()
+            return this.roomCatalogue.find(r => (r.email || '').toLowerCase() === email) || null
+        },
+
+        /** The features Nextcloud's room metadata defines, in words. */
+        featureLabel,
+
+        async loadRoomCatalogue() {
+            const teamId = this.currentTeamId
+            if (!this.licensed || !teamId || !this.events.some(e => e.room)) return
+            if (this.roomCatalogueTeam === teamId && this.roomCatalogue !== null) return
+            try {
+                const { data } = await axios.get(generateUrl('/apps/teamhub/api/v1/teams/{teamId}/rooms', { teamId }))
+                if (this.currentTeamId !== teamId) return
+                this.roomCatalogue = Array.isArray(data?.rooms) ? data.rooms : []
+                this.roomCatalogueTeam = teamId
+            } catch (e) {
+                // Silent: the row keeps the room's name, without details.
+                this.roomCatalogue = []
+                this.roomCatalogueTeam = teamId
+            }
+        },
+
+        /** The parts of LOCATION: TeamHub writes "Room | Talk link". */
+        locationParts(event) {
+            return String(event.location || '').split(' | ').map(p => p.trim()).filter(Boolean)
         },
 
         /**
@@ -346,7 +600,7 @@ export default {
          * otherwise null. Checks for https:// URLs in location or description.
          */
         joinUrl(event) {
-            const candidates = [event.location, event.description]
+            const candidates = [...this.locationParts(event), event.description]
             for (const candidate of candidates) {
                 if (candidate && /^https?:\/\//i.test(candidate.trim())) {
                     return candidate.trim()
@@ -360,10 +614,9 @@ export default {
          * (it becomes the join button instead).
          */
         locationText(event) {
-            const loc = event.location
-            if (!loc) return null
-            if (/^https?:\/\//i.test(loc.trim())) return null
-            return loc
+            // v4.20.8 — "Room | https://…" shows the room; the link is the Join button.
+            const text = this.locationParts(event).filter(p => !/^https?:\/\//i.test(p)).join(' | ')
+            return text || null
         },
     },
 }
@@ -438,6 +691,34 @@ export default {
     flex-wrap: wrap;
 }
 
+/* v4.20.19 — the acceptance pill: soft red while your reply is owed, soft
+   green otherwise. NC's state tints and their inks (ui-standards).
+   v4.20.21 — the class is doubled on purpose: NcButton's own
+   `.button-vue--secondary` weighs the same as a single class and its
+   stylesheet loads after ours, so a single class left the pill blue. The
+   border is NcButton's too and takes the tint's hover shade. */
+.th-cal__pill.th-cal__pill--owed {
+    background-color: var(--color-error);
+    border-color: var(--color-error-hover);
+    color: var(--color-error-text);
+}
+
+.th-cal__pill.th-cal__pill--owed:hover:not(:disabled) {
+    background-color: var(--color-error-hover);
+    color: var(--color-error-text);
+}
+
+.th-cal__pill.th-cal__pill--settled {
+    background-color: var(--color-success);
+    border-color: var(--color-success-hover);
+    color: var(--color-success-text);
+}
+
+.th-cal__pill.th-cal__pill--settled:hover:not(:disabled) {
+    background-color: var(--color-success-hover);
+    color: var(--color-success-text);
+}
+
 .th-cal__meta-sep {
     display: inline-flex;
     align-items: center;
@@ -465,6 +746,116 @@ export default {
     transition: opacity var(--animation-quick);
 }
 .th-cal__join-btn:hover { opacity: 0.85; }
+
+/* v4.20.8 — the acceptance and room buttons sit in the meta line. */
+.th-cal__icon-text {
+    display: inline-flex;
+    align-items: center;
+}
+
+.th-cal__popover {
+    display: flex;
+    flex-direction: column;
+    gap: var(--th-space-sm);
+    max-width: calc(var(--th-space-xxl) * 10);
+    padding: var(--th-space-sm) var(--th-space-md);
+}
+
+/* v4.20.10 — the room details: a few short lines, so no padding of their own
+   beyond keeping the text off the popover's edge. */
+.th-cal__popover--compact {
+    gap: var(--th-space-xs);
+    padding: var(--th-space-xs) var(--th-space-sm);
+}
+
+.th-cal__popover--compact .th-cal__room {
+    row-gap: 0;
+}
+
+.th-cal__popover-title {
+    margin: 0;
+    font-weight: var(--th-font-weight-semibold);
+}
+
+.th-cal__reply {
+    display: flex;
+    flex-direction: column;
+    gap: var(--th-space-xs);
+    padding-block-end: var(--th-space-sm);
+    border-block-end: 1px solid var(--color-border);
+}
+
+.th-cal__reply-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--th-space-xs);
+}
+
+.th-cal__attendees {
+    display: flex;
+    flex-direction: column;
+    gap: var(--th-space-xs);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.th-cal__attendee {
+    display: flex;
+    align-items: center;
+    gap: var(--th-space-sm);
+}
+
+.th-cal__attendee-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.th-cal__attendee-note {
+    font-size: var(--th-font-meta);
+    color: var(--color-text-maxcontrast);
+}
+
+.th-cal__status {
+    flex: 0 0 auto;
+    color: var(--color-text-maxcontrast);
+}
+
+.th-cal__status--accepted {
+    color: var(--color-element-success);
+}
+
+.th-cal__status--tentative {
+    color: var(--color-element-warning);
+}
+
+.th-cal__status--declined {
+    color: var(--color-element-error);
+}
+
+.th-cal__room {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: var(--th-space-xs) var(--th-space-md);
+    margin: 0;
+    /* Nextcloud's server CSS pads every dl (12px block) and every dt/dd
+       (12px on three sides); that, not our own padding, made the room
+       details tall (found on claudius, v4.20.10). */
+    padding: 0;
+}
+
+.th-cal__room dt {
+    padding: 0;
+    color: var(--color-text-maxcontrast);
+}
+
+.th-cal__room dd {
+    margin: 0;
+    padding: 0;
+}
 
 /* Constrain calendar-name outline pill width */
 .th-cal__calname {

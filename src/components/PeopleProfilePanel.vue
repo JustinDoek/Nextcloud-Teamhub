@@ -10,7 +10,7 @@
 
         <NcLoadingIcon v-if="loading" :size="24" />
         <p v-else-if="loadError" role="alert" class="th-people-profile__error">{{ loadError }}</p>
-        <form v-else class="th-people-profile__form" @submit.prevent="saveProfile">
+        <form v-else class="th-people-profile__form" @submit.prevent="saver.now()">
             <div class="th-people-profile__row">
                 <div class="th-people-profile__field">
                     <label for="th-people-department">{{ t('teamhub', 'Default department') }}</label>
@@ -30,13 +30,14 @@
                     <label for="th-people-room">{{ t('teamhub', 'Usual workplace') }}</label>
                     <NcSelect
                         id="th-people-room"
-                        v-model="form.roomId"
+                        :model-value="form.roomId"
                         :options="roomOptions"
                         :reduce="option => option.id"
                         :placeholder="t('teamhub', 'Choose a room')"
                         :aria-label-combobox="t('teamhub', 'Usual workplace')"
                         label-outside
-                        :clearable="true" />
+                        :clearable="true"
+                        @update:model-value="setField('roomId', $event ?? null)" />
                     <small>{{ t('teamhub', 'Rooms are grouped by building and floor. Your scheduled presence may differ.') }}</small>
                 </div>
             </div>
@@ -44,21 +45,21 @@
             <div class="th-people-profile__row">
                 <div class="th-people-profile__field">
                     <label for="th-people-expertise">{{ t('teamhub', 'Expertise and skills') }}</label>
-                    <NcTextArea id="th-people-expertise" v-model="form.expertise" :maxlength="500" :rows="2" />
+                    <NcTextArea id="th-people-expertise" :model-value="form.expertise" :maxlength="500" :rows="2" @update:model-value="setText('expertise', $event)" />
                 </div>
                 <div class="th-people-profile__field">
                     <label for="th-people-ask">{{ t('teamhub', 'Ask me about') }}</label>
-                    <NcTextArea id="th-people-ask" v-model="form.askMeAbout" :maxlength="500" :rows="2" />
+                    <NcTextArea id="th-people-ask" :model-value="form.askMeAbout" :maxlength="500" :rows="2" @update:model-value="setText('askMeAbout', $event)" />
                 </div>
             </div>
             <div class="th-people-profile__row">
                 <div class="th-people-profile__field">
                     <label for="th-people-hobbies">{{ t('teamhub', 'Hobbies and interests') }}</label>
-                    <NcTextArea id="th-people-hobbies" v-model="form.hobbies" :maxlength="500" :rows="2" />
+                    <NcTextArea id="th-people-hobbies" :model-value="form.hobbies" :maxlength="500" :rows="2" @update:model-value="setText('hobbies', $event)" />
                 </div>
                 <div class="th-people-profile__field">
                     <label for="th-people-languages">{{ t('teamhub', 'Languages') }}</label>
-                    <NcTextField id="th-people-languages" v-model="form.languages" :maxlength="200" />
+                    <NcTextField id="th-people-languages" :model-value="form.languages" :maxlength="200" @update:model-value="setText('languages', $event)" />
                 </div>
             </div>
             <div class="th-people-profile__row">
@@ -77,7 +78,7 @@
                 </div>
                 <div class="th-people-profile__field">
                     <label for="th-people-fun">{{ t('teamhub', 'A fun fact about me') }}</label>
-                    <NcTextField id="th-people-fun" v-model="form.funFact" :maxlength="300" />
+                    <NcTextField id="th-people-fun" :model-value="form.funFact" :maxlength="300" @update:model-value="setText('funFact', $event)" />
                 </div>
             </div>
             <div class="th-people-profile__row">
@@ -95,21 +96,24 @@
             <fieldset class="th-people-profile__privacy">
                 <legend>{{ t('teamhub', 'People and celebrations privacy') }}</legend>
                 <p class="th-people-profile__hint">{{ t('teamhub', 'Birthday and anniversary sharing control personal celebrations. People-directory sharing will be used by future features.') }}</p>
-                <NcCheckboxRadioSwitch v-model="form.shareBirthday" type="switch">
+                <NcCheckboxRadioSwitch :model-value="form.shareBirthday" type="switch" @update:model-value="setField('shareBirthday', $event)">
                     {{ t('teamhub', 'Allow my birthday in a department birthday widget') }}
                 </NcCheckboxRadioSwitch>
-                <NcCheckboxRadioSwitch v-model="form.shareAnniversary" type="switch">
+                <NcCheckboxRadioSwitch :model-value="form.shareAnniversary" type="switch" @update:model-value="setField('shareAnniversary', $event)">
                     {{ t('teamhub', 'Allow my work anniversary celebration') }}
                 </NcCheckboxRadioSwitch>
-                <NcCheckboxRadioSwitch v-model="form.shareHobbies" type="switch">
+                <NcCheckboxRadioSwitch :model-value="form.shareHobbies" type="switch" @update:model-value="setField('shareHobbies', $event)">
                     {{ t('teamhub', 'Allow colleagues to see my interests in a future people directory') }}
                 </NcCheckboxRadioSwitch>
             </fieldset>
-            <p v-if="saveError" role="alert" class="th-people-profile__error">{{ saveError }}</p>
-            <p v-if="saved" role="status" class="th-people-profile__success">{{ t('teamhub', 'Collaboration profile saved') }}</p>
-            <NcButton variant="primary" :disabled="saving" @click="saveProfile">
-                {{ saving ? t('teamhub', 'Saving…') : t('teamhub', 'Save collaboration profile') }}
-            </NcButton>
+            <!-- v4.20.12 (DESIGN §2.265) — no Save button: every field
+                 writes itself, a text field once typing pauses, everything
+                 else at once. -->
+            <AutosaveStatus
+                :saving="saving"
+                :saved="saved"
+                :error="saveError"
+                @retry="saver.now()" />
         </form>
     </section>
 </template>
@@ -118,7 +122,9 @@
 import axios from '@nextcloud/axios'
 import { generateUrl } from '@nextcloud/router'
 import { translate as t } from '@nextcloud/l10n'
-import { NcButton, NcCheckboxRadioSwitch, NcLoadingIcon, NcSelect, NcTextArea, NcTextField } from '@nextcloud/vue'
+import { NcCheckboxRadioSwitch, NcLoadingIcon, NcSelect, NcTextArea, NcTextField } from '@nextcloud/vue'
+import { createAutosaver } from '../lib/autosave.js'
+import AutosaveStatus from './AutosaveStatus.vue'
 
 const emptyProfile = () => ({
     departmentTeamId: '', roomId: null, expertise: '', askMeAbout: '',
@@ -129,11 +135,17 @@ const emptyProfile = () => ({
 
 export default {
     name: 'PeopleProfilePanel',
-    components: { NcButton, NcCheckboxRadioSwitch, NcLoadingIcon, NcSelect, NcTextArea, NcTextField },
+    components: { AutosaveStatus, NcCheckboxRadioSwitch, NcLoadingIcon, NcSelect, NcTextArea, NcTextField },
     data() {
         return {
             loading: true, loadError: '', saving: false, saveError: '', saved: false,
             form: emptyProfile(), departments: [], locations: [],
+            // Bumped on every local edit. A save response is applied whole
+            // only when nothing changed while it was in flight; otherwise it
+            // would put back the text typed after the request left.
+            revision: 0,
+            saver: null,
+            savedTimer: null,
         }
     },
     computed: {
@@ -160,8 +172,15 @@ export default {
             return options
         },
     },
+    created() {
+        this.saver = createAutosaver({ save: () => this.saveProfile(), delay: 800 })
+    },
     mounted() {
         this.loadProfile()
+    },
+    beforeUnmount() {
+        this.saver.flush()
+        clearTimeout(this.savedTimer)
     },
     methods: {
         t,
@@ -178,19 +197,31 @@ export default {
                 this.loading = false
             }
         },
+        /** A discrete choice (select, switch, checkbox): write at once. */
+        setField(key, value) {
+            this.form[key] = value
+            this.revision++
+            this.saved = false
+            this.saver.now()
+        },
+        /** Typing: write once the person pauses. */
+        setText(key, value) {
+            this.form[key] = value
+            this.revision++
+            this.saved = false
+            this.saver.schedule()
+        },
         changeDepartment(value) {
-            this.form.departmentTeamId = value || ''
             // Date is server-owned and fetched for the selected membership.
             this.form.departmentStartDate = ''
             if (value) this.refreshDepartmentStartDate(value)
-            this.saved = false
+            this.setField('departmentTeamId', value || '')
         },
         toggleContactMethod(method, checked) {
             const next = new Set(this.form.contactMethods)
             if (checked) next.add(method)
             else next.delete(method)
-            this.form.contactMethods = [...next]
-            this.saved = false
+            this.setField('contactMethods', [...next])
         },
         async refreshDepartmentStartDate(departmentId) {
             try {
@@ -203,16 +234,27 @@ export default {
                 // Not available is safer than showing a stale membership date.
             }
         },
+        /** Called by the autosaver only; reads the form when it runs. */
         async saveProfile() {
+            const sentRevision = this.revision
             this.saving = true
             this.saveError = ''
             this.saved = false
             try {
-                const { data } = await axios.put(generateUrl('/apps/teamhub/api/v1/people/profile'), { profile: this.form })
-                this.form = { ...emptyProfile(), ...data.profile }
+                const { data } = await axios.put(generateUrl('/apps/teamhub/api/v1/people/profile'), { profile: { ...this.form } })
+                if (this.revision === sentRevision) {
+                    this.form = { ...emptyProfile(), ...data.profile }
+                } else {
+                    // Edited while saving: keep what is on screen, take only
+                    // the dates the server owns. The follow-up save sends the
+                    // rest.
+                    this.form.companyStartDate = data.profile?.companyStartDate || ''
+                }
                 this.departments = data.departments || []
                 this.locations = data.locations || []
                 this.saved = true
+                clearTimeout(this.savedTimer)
+                this.savedTimer = setTimeout(() => { this.saved = false }, 2000)
             } catch (error) {
                 this.saveError = error?.response?.data?.error || t('teamhub', 'Could not save the collaboration profile. Try again.')
             } finally {

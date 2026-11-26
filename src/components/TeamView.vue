@@ -12,6 +12,7 @@
             :can-edit-enforced="canSetTeamDefault"
             :has-team-layout="hasTeamLayout"
             :layout-action-busy="teamLayoutActionBusy"
+            :page-link="quickTaskLink"
             @reset-team-layout="resetTeamLayoutToTemplate"
             @tab-reorder="onTabReorder"
             @manage-links="showManageLinks = true"
@@ -27,7 +28,10 @@
              fixed-height column, and anything stacked above MobileWidgetView
              pushes its icon bar and FAB off-screen — the same lesson the
              project phase stepper and the Compass panel below already carry. -->
-        <TeamBanner v-if="!isMobile" :compact="isTablet" />
+        <TeamBanner
+            v-if="!isMobile"
+            :compact="isTablet"
+            :work-view="currentView !== 'msgstream'" />
 
         <!-- ── Standing notices ── -->
         <!-- v4.13.1 — expiry, resources needing review and unfinished
@@ -153,6 +157,7 @@
                 @schedule-meeting="showAddEvent = true"
                 @add-event="showAddEvent = true"
                 @add-meeting="showAddMeeting = true"
+                @free-room-now="showFreeRoomNow = true"
                 @add-deck-task="showAddTask = true"
                 @add-personal-task="showAddPersonalTask = true"
                 @add-openproject-work-package="openOpenProjectWorkPackage(0)"
@@ -163,6 +168,7 @@
                 @pages-loaded="onPagesLoaded"
                 @collective-loaded="onCollectiveLoaded"
                 @set-view="setView"
+                @start-call="startTeamCall"
                 @widget-actions-loaded="onWidgetActionsLoaded"
                 @leave-team="onLeaveTeam"
                 @set-as-default="setAsDefault"
@@ -180,6 +186,7 @@
             <AppEmbed
                 v-if="(preloadedViews.has('talk') || currentView === 'talk') && resources.talk"
                 v-show="currentView === 'talk'"
+                :key="'talk-embed-' + talkCallNonce"
                 :url="talkUrl"
                 :show-bar="false"
                 :intercept-file-links="true"
@@ -194,8 +201,10 @@
                 :show-bar="false"
                 :collab-sidebar="!isMobile"
                 :intercept-file-links="true"
+                :track-location="currentView === 'files'"
                 link-self-type="file"
                 :label="t('teamhub', 'Files')"
+                @navigate="embedFrameUrls.files = $event"
                 @loaded="onEmbedLoaded('files')"
                 @open-target="onEmbedOpenTarget" />
             <!--
@@ -231,8 +240,10 @@
                 :url="deckUrl"
                 :show-bar="false"
                 :intercept-file-links="true"
+                :track-location="currentView === 'deck'"
                 link-self-type="deck"
                 :label="t('teamhub', 'Deck')"
+                @navigate="embedFrameUrls.deck = $event"
                 @loaded="onEmbedLoaded('deck')"
                 @open-target="onEmbedOpenTarget" />
 
@@ -256,6 +267,7 @@
                     @open="onCollectivePageOpen"
                     @create="openCreateWikiPage" />
                 <AppEmbed
+                    ref="collectivesEmbed"
                     :url="collectivesUrl"
                     :show-bar="false"
                     :intercept-file-links="true"
@@ -514,12 +526,20 @@
             :calendars="resources.calendar || []"
             @close="showAddEvent = false; $refs.widgetGrid?.refreshCalendar(); $refs.calendarEmbed?.reload()" />
 
-        <SuggestMeetingWizard v-if="showAddMeeting || showSuggestMeeting"
+        <!-- v4.20.12 — licensed: every route here is hidden unlicensed, and
+             POST /meetings refuses it; the guard covers a stale menu. -->
+        <SuggestMeetingWizard v-if="licensed && (showAddMeeting || showSuggestMeeting)"
             :team-id="currentTeamId"
             :calendars="resources.calendar || []"
             :resources="resources"
             @created="$refs.widgetGrid?.refreshCalendar(); $refs.calendarEmbed?.reload()"
             @close="showAddMeeting = false; showSuggestMeeting = false" />
+
+        <!-- v4.20.8 — Free room now (licensed), from the Upcoming events menu. -->
+        <FreeRoomNowModal v-if="showFreeRoomNow"
+            :team-id="currentTeamId"
+            @booked="$refs.widgetGrid?.refreshCalendar(); $refs.calendarEmbed?.reload()"
+            @close="showFreeRoomNow = false" />
 
         <DeleteEventsModal v-if="showDeleteEvents"
             :team-id="currentTeamId"
@@ -572,7 +592,8 @@ import { ICON_BODY } from '../constants/uiTokens.js'
 import { mapState, mapGetters, mapActions, mapMutations } from 'vuex'
 import { translate as t } from '@nextcloud/l10n'
 import { formatIsoDate, toIsoDate } from '../lib/localDate.js'
-import { generateUrl } from '@nextcloud/router'
+import { generateUrl, getRootUrl } from '@nextcloud/router'
+import { buildPageLink, embedPathFor } from '../lib/pageLink.js'
 import axios from '@nextcloud/axios'
 import { showError, showSuccess, showWarning, showConfirmation } from '@nextcloud/dialogs'
 import { getCurrentUser } from '@nextcloud/auth'
@@ -606,6 +627,7 @@ import ManageLinksModal from './ManageLinksModal.vue'
 import InviteMemberModal from './InviteMemberModal.vue'
 import AddEventModal from './AddEventModal.vue'
 import SuggestMeetingWizard from './SuggestMeetingWizard.vue'
+import FreeRoomNowModal from './FreeRoomNowModal.vue'
 import DeleteEventsModal from './DeleteEventsModal.vue'
 import AddTaskModal from './AddTaskModal.vue'
 import AddOpenProjectWorkPackageModal from './AddOpenProjectWorkPackageModal.vue'
@@ -619,6 +641,7 @@ import TeamPresenceView   from './TeamPresenceView.vue'
 import TeamRosterView    from './TeamRosterView.vue'
 import TeamDecisionsView  from './TeamDecisionsView.vue'
 import { debounce } from '../lib/debounce.js'
+import { talkConversationPath, talkMessageHash } from '../lib/talkChat.js'
 import ServicesWidget     from './ServicesWidget.vue'
 import ServiceTeamTabView from './services/ServiceTeamTabView.vue'
 import ComposeDecisionModal from './ComposeDecisionModal.vue'
@@ -677,6 +700,11 @@ const PRELOAD_SETTLE_MS = 600
 const PRELOAD_LOAD_TIMEOUT_MS = 10000
 const PRELOAD_NATIVE_GAP_MS = 300
 
+// v4.20.2 — how often the Chat tab's unread badge asks Talk for the room's
+// state while the page is visible. A minute: a badge is a nudge, not a live
+// feed, and Talk's own tab does the live part once opened.
+const TALK_STATUS_REFRESH_MS = 60000
+
 /**
  * The date a pinned calendar event falls on, from the URL the backend built
  * for it (v4.6.20).
@@ -709,7 +737,7 @@ export default {
         CalendarIcon, GavelIcon, CardTextIcon, FilterVariant, Printer,
         TeamTabBar, TeamBanner, TeamNotices, TeamWidgetGrid, CollectivesPageRail,
         ActivityFeedView, ManageLinksModal, InviteMemberModal,
-        AddEventModal, SuggestMeetingWizard, DeleteEventsModal, AddTaskModal, AddPersonalTaskModal, AddOpenProjectWorkPackageModal, AppEmbed, TeamCalendarGrid, ProjectSwimlaneView, ProjectBudgetView, ProjectTimeView,
+        AddEventModal, SuggestMeetingWizard, FreeRoomNowModal, DeleteEventsModal, AddTaskModal, AddPersonalTaskModal, AddOpenProjectWorkPackageModal, AppEmbed, TeamCalendarGrid, ProjectSwimlaneView, ProjectBudgetView, ProjectTimeView,
         TeamPresenceView,
         TeamRosterView,
         TeamDecisionsView,
@@ -787,6 +815,10 @@ export default {
             // including a page reached by a link inside the page body, which
             // is navigation we never issued and would otherwise not see.
             collectivesFrameUrl: '',
+            // v4.20.29 — where the Files and Deck frames are, the same way, so
+            // a quick task made on one of those tabs links to the folder or
+            // card on screen rather than to the tab's starting page.
+            embedFrameUrls: { files: '', deck: '' },
             showCreateWikiPage: false,
             newWikiPageTitle:   '',
             creatingWikiPage:   false,
@@ -798,6 +830,7 @@ export default {
             // Both render the same SuggestMeetingWizard component.
             showSuggestMeeting:  false,
             showAddMeeting:      false,
+            showFreeRoomNow:     false,
             showDeleteEvents:    false,
             calendarView:        'dayGridMonth',  // current calendar view mode
             calendarDate:        new Date(),      // current navigation date for the calendar iframe
@@ -864,6 +897,10 @@ export default {
             // Once a view is in this set the AppEmbed is kept in the DOM
             // (v-show) rather than destroyed, so tab switches are instant.
             preloadedViews: new Set(),
+            // v4.20.5 — bumped by Meet now / Join call (startTeamCall). It is
+            // the Talk frame's key and adds `#direct-call` to its URL, so the
+            // frame loads afresh and Talk joins the call on arrival.
+            talkCallNonce: 0,
             // Pending preload timers, cleared on re-schedule and on unmount.
             // The queue itself (`_preloadQueue`), the frames that have loaded
             // (`_loadedEmbeds`) and the view being waited on
@@ -886,12 +923,14 @@ export default {
 
         ...mapState([
             'currentTeamId', 'currentView', 'resources', 'webLinks', 'filesEmbedFileUrl', 'collectivesEmbedPageUrl',
-            'calendarEmbedEvent', 'deckEmbedCardUrl',
+            'calendarEmbedEvent', 'deckEmbedCardUrl', 'talkEmbedTarget',
             'members', 'loading', 'intravoxAvailable', 'teamWidgets', 'teamMenuItems',
             // v4.13.23 — the package model's tabs. A separate array from
             // teamMenuItems on purpose: see the store's own comment.
             'packageTabs',
             'selectedDeckBoard', 'presenceConfig', 'presenceModuleEnabled',
+            // v4.20.12 — Add meeting is licensed.
+            'licensed',
             'decisionsConfig', 'decisionsModuleEnabled',
             // v4.11.42 — { body, nonce } | null, set by the propose deep link.
             'decisionsComposePrefill',
@@ -963,8 +1002,44 @@ export default {
             // Trailing slash on the no-token fallback for the same reason as
             // filesUrl below (GitHub #74) — a bare app root redirects, and a
             // redirected document is what Chromium blocks in an iframe.
-            return token ? generateUrl('/call/' + token) : generateUrl('/apps/spreed/')
+            if (!token) {
+                return generateUrl('/apps/spreed/')
+            }
+            // v4.20.5 — `#direct-call` is Talk's own "join the call on
+            // arrival" (checked in Talk 25.0.8: MainView reads it once, when
+            // the conversation view mounts, joins the call, starting one if
+            // none runs, and clears the hash; its own event cards use it). Only
+            // a fresh load reads it, which is why startTeamCall() also changes
+            // the frame's key.
+            // v4.20.22 — a thread row in the Communication widget opens that
+            // thread (`?threadId=`); cleared again on leaving the tab.
+            // v4.20.23 — a pinned message opens at the message
+            // (`#message_{id}`, Talk's own quote links), which replaces the
+            // call hash: the frame then routes in place, where Talk does not
+            // read `#direct-call` anyway.
+            const target = this.talkEmbedTarget
+            const hash = target?.messageId
+                ? talkMessageHash(target.messageId)
+                : (this.talkCallNonce > 0 ? '#direct-call' : '')
+            return generateUrl(talkConversationPath(token, target?.threadId)) + hash
         },
+        /**
+         * v4.20.29 — the address of what is on screen, for the quick task at
+         * the end of the tab bar: the team, the tab, and for an embedded app
+         * the page inside it. `embedPathFor` keeps only a path inside the app
+         * that tab hosts; anything else falls back to the tab itself.
+         */
+        quickTaskLink() {
+            const view = this.currentView
+            const frame = view === 'collectives' ? this.collectivesFrameUrl : this.embedFrameUrls[view]
+            return buildPageLink(generateUrl('/apps/teamhub/'), {
+                view: 'team',
+                teamId: this.currentTeamId,
+                tab: view,
+                embedPath: embedPathFor(view, frame, getRootUrl()) || '',
+            })
+        },
+
         filesUrl() {
             // A file widget may have requested a specific file be embedded
             // (opened in-app rather than a new tab). When set, that wins; it is
@@ -1080,7 +1155,8 @@ export default {
                     shortLabel: t('teamhub', 'Remove'),
                     icon:       CalendarRemove,
                 },
-                ...(this.presenceModuleEnabled && this.presenceConfig.presence_enabled
+                // v4.20.12 — opens the full Add meeting wizard, which is licensed.
+                ...(this.licensed && this.presenceModuleEnabled && this.presenceConfig.presence_enabled
                     ? [{
                         id:         'suggest-meeting',
                         // TRANSLATORS: tooltip / accessible name for the suggest-meeting-times button in the calendar toolbar
@@ -1453,6 +1529,33 @@ export default {
 
     watch: {
         /**
+         * v4.20.2 — the team conversation's unread count and call state, for
+         * the Chat tab's badge and the Home view's Chat widget. Read when the
+         * team's room becomes known (team open, team switch) and refreshed by
+         * the timer started in mounted().
+         */
+        'resources.talk.token': {
+            immediate: true,
+            handler() {
+                // A call asked for in the previous team must not follow the
+                // viewer into this one: the Talk frame goes back to its plain
+                // URL (v4.20.5).
+                this.talkCallNonce = 0
+                this.$store.dispatch('fetchTalkStatus')
+            },
+        },
+
+        /**
+         * Leaving the Chat tab is when the viewer has just read the
+         * conversation in the iframe, so the badge is stale exactly then.
+         */
+        currentView(next, prev) {
+            if (prev === 'talk' && next !== 'talk') {
+                this.$store.dispatch('fetchTalkStatus')
+            }
+        },
+
+        /**
          * v4.11.42 — somebody outside this view asked for the proposal
          * composer, with its Context field already written: today the
          * *Propose a decision* entry in the Files ⋯ menu, which arrives as
@@ -1501,6 +1604,8 @@ export default {
                 this.teamLayoutDraftTabOrderSnapshot = null
                 this.teamLayoutDraftWasDefault = false
                 this.skipNextPersonalLayoutSave = false
+                // v4.20.29 — the last team's folder is not this team's page.
+                this.embedFrameUrls = { files: '', deck: '' }
                 this.gridLayout = []
                 this.orderedTabs = []
                 this.layoutLoaded = false
@@ -1706,6 +1811,7 @@ export default {
     },
 
     async mounted() {
+        this.startTalkStatusRefresh()
         if (typeof window !== 'undefined' && window.matchMedia) {
             // Mobile: phone portrait/landscape (≤768px) OR tablet portrait (≤1024px portrait)
             const mobileQuery = '(max-width: 768px), (max-width: 1024px) and (orientation: portrait)'
@@ -1788,9 +1894,45 @@ export default {
             window.removeEventListener('message', this._onTimelineMessage)
             this._onTimelineMessage = null
         }
+        this.stopTalkStatusRefresh()
     },
 
     methods: {
+        /**
+         * v4.20.2 — keep `talkStatus` current while the team is open: once a
+         * minute while the page is visible, and at once when it becomes
+         * visible again. A hidden tab asks nothing, so a team left open in a
+         * background tab all day costs Talk no requests. One room request
+         * per refresh; the widget fetches messages only when the room's last
+         * message id changes.
+         */
+        startTalkStatusRefresh() {
+            if (typeof document === 'undefined') return
+            this._talkStatusTimer = setInterval(() => {
+                if (document.visibilityState === 'visible') {
+                    this.$store.dispatch('fetchTalkStatus')
+                }
+            }, TALK_STATUS_REFRESH_MS)
+            this._onTalkVisibility = () => {
+                if (document.visibilityState === 'visible') {
+                    this.$store.dispatch('fetchTalkStatus')
+                }
+            }
+            document.addEventListener('visibilitychange', this._onTalkVisibility)
+        },
+
+        stopTalkStatusRefresh() {
+            clearTimeout(this._talkCallRefresh)
+            if (this._talkStatusTimer) {
+                clearInterval(this._talkStatusTimer)
+                this._talkStatusTimer = null
+            }
+            if (this._onTalkVisibility) {
+                document.removeEventListener('visibilitychange', this._onTalkVisibility)
+                this._onTalkVisibility = null
+            }
+        },
+
         t,
         ...mapActions(['selectTeam']),
         // v4.6.15 — the layout bundle's commits moved to the store's
@@ -1800,6 +1942,26 @@ export default {
         ...mapMutations(['SET_VIEW', 'SET_PRESENCE_CONFIG', 'SET_DECISIONS_CONFIG', 'SET_DECISIONS_TARGET', 'SET_DECISIONS_COMPOSE_PREFILL', 'SET_PROJECT', 'SET_PROJECT_TAB_FOCUS']),
 
         setView(view) { this.SET_VIEW(view) },
+
+        /**
+         * v4.20.5 — Meet now / Join call from the Communication widget: open
+         * the Chat tab with Talk joining the call (starting one when none
+         * runs). A viewer already in the call only gets the tab: reloading
+         * the frame would drop them from the call they are in.
+         */
+        startTeamCall() {
+            if (!this.resources.talk?.token) {
+                return
+            }
+            if (!this.$store.state.talkStatus?.inCall) {
+                this.talkCallNonce += 1
+                // The badge and the widget learn about the call without
+                // waiting for the minute timer.
+                clearTimeout(this._talkCallRefresh)
+                this._talkCallRefresh = setTimeout(() => this.$store.dispatch('fetchTalkStatus'), 15000)
+            }
+            this.SET_VIEW('talk')
+        },
 
         /**
          * v4.13.9 — open the OpenProject work-package modal. `0` creates;
@@ -2972,9 +3134,18 @@ export default {
          * we are already on the Collectives view, so SET_VIEW would be a
          * no-op, and the store's clear-on-leave only fires for a view that
          * is not this one. AppEmbed routes the frame in place from there.
+         *
+         * v4.20.50: when that resolves to the URL AppEmbed already has (the
+         * page was opened before and a link inside it was followed since, or
+         * it is the landing page), its watcher never fires, so the frame has
+         * to be told directly.
          */
         onCollectivePageOpen(url) {
+            const before = this.collectivesUrl
             this.$store.commit('SET_COLLECTIVES_EMBED_PAGE_URL', url)
+            if (this.collectivesUrl === before) {
+                this.$refs.collectivesEmbed?.returnToUrl()
+            }
         },
 
         openCreateWikiPage() { this.newWikiPageTitle = ''; this.showCreateWikiPage = true },
@@ -3220,6 +3391,25 @@ export default {
 .th-collectives-tab__frame {
     flex: 1 1 auto;
     min-width: 0;
+}
+
+/* Narrow: the rail is a bar above the frame, and its panel is positioned
+   against this tab. KEEP IN SYNC with COMPACT_QUERY in CollectivesPageRail. */
+@media only screen and (max-width: 1024px) {
+    .th-collectives-tab {
+        position: relative;
+        flex-direction: column;
+        isolation: isolate;
+    }
+
+    /* v4.20.51: AppEmbed's iframe and loading skeleton carry z-index 1 and 2
+       inside a viewport that is no stacking context, so they painted over the
+       open page list and the Pages button looked dead. Isolated here, they
+       stay below it whatever their numbers. */
+    .th-collectives-tab__frame {
+        min-height: 0;
+        isolation: isolate;
+    }
 }
 
 .teamhub-page-delete-list {

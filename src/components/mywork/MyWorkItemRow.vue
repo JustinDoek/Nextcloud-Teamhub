@@ -70,6 +70,19 @@
 						<OpenInNew :size="iconInline" aria-hidden="true" />
 						{{ opensIn }}
 					</span>
+					<!-- v4.20.29 — the page a quick task was made on. The row's
+					     title opens the task; this opens what the task is about,
+					     so whoever picks it up lands where the problem was.
+					     Generic on `metadata.sourceUrl`; the server only sends
+					     one that points into this instance. -->
+					<a
+						v-if="sourceUrl"
+						class="mywork-row__flag mywork-row__flag--page"
+						:href="sourceUrl"
+						:title="t('teamhub', 'Open the page this task was made on')">
+						<LinkVariant :size="iconInline" aria-hidden="true" />
+						{{ t('teamhub', 'Open page') }}
+					</a>
 					<!-- v4.8.19 — who has answered, on any row whose source
 					     sends a roster. The provider has always put it in
 					     metadata; until now nothing rendered it, so "waiting
@@ -337,6 +350,7 @@ import BriefcaseOutline from 'vue-material-design-icons/BriefcaseOutline.vue'
 // v4.9.7 — an OpenProject milestone's glyph.
 import FlagOutline from 'vue-material-design-icons/FlagOutline.vue'
 import ArchiveCheckOutline from 'vue-material-design-icons/ArchiveCheckOutline.vue'
+import HelpCircleOutline from 'vue-material-design-icons/HelpCircleOutline.vue'
 // v4.10.20 — the workflow chip's glyph, the same one WorkflowItemRow
 // carries, so one mark means one thing across both kinds of row.
 import SourceBranch from 'vue-material-design-icons/SourceBranch.vue'
@@ -345,6 +359,7 @@ import ChevronDown from 'vue-material-design-icons/ChevronDown.vue'
 import ChevronUp from 'vue-material-design-icons/ChevronUp.vue'
 import InformationOutline from 'vue-material-design-icons/InformationOutline.vue'
 import OpenInNew from 'vue-material-design-icons/OpenInNew.vue'
+import LinkVariant from 'vue-material-design-icons/LinkVariant.vue'
 import VideoOutline from 'vue-material-design-icons/VideoOutline.vue'
 import FileDocumentOutline from 'vue-material-design-icons/FileDocumentOutline.vue'
 // v4.6.16 — the Email owner action on an expiring-team row.
@@ -396,6 +411,7 @@ import { ICON_INLINE, ICON_BODY, ICON_TOOLBAR, ICON_NAV, AVATAR_SM } from '../..
 export default {
 	name: 'MyWorkItemRow',
 	components: {
+		LinkVariant,
 		NcButton, NcActions, NcActionButton, NcActionSeparator, NcActionCaption, NcAvatar, NcChip,
 		AlarmSnooze, AlarmOff, AlertCircleOutline,
 		Check, CheckCircleOutline,
@@ -403,7 +419,7 @@ export default {
 		InformationOutline, OpenInNew, VideoOutline, FileDocumentOutline, EmailOutline,
 		CardText, Folder, FolderAccountOutline, Gavel, Calendar, CheckboxMarkedOutline, Puzzle, ShieldAccountOutline, CalendarClock,
 		AccountCheckOutline,
-		AccountPlusOutline, FileEyeOutline, ArchiveCheckOutline, BriefcaseOutline, FlagOutline,
+		AccountPlusOutline, FileEyeOutline, ArchiveCheckOutline, BriefcaseOutline, FlagOutline, HelpCircleOutline,
 		ChevronDown, ChevronUp, SourceBranch,
 	},
 	props: {
@@ -485,6 +501,19 @@ export default {
 		},
 
 		isSnoozed() { return !!this.item.metadata?.snoozed },
+
+		/**
+		 * v4.20.29 — the page a task was made on. Checked again here, not
+		 * only on the server: an `href` is the one place a bad value would
+		 * do harm, and it must be on this origin.
+		 */
+		sourceUrl() {
+			const url = this.item.metadata?.sourceUrl
+			if (typeof url !== 'string' || !url.startsWith(window.location.origin + '/')) {
+				return ''
+			}
+			return url
+		},
 
 		/** v4.9.7 — the name of the app a row opens in, when it is not TeamHub. */
 		opensIn() {
@@ -1099,6 +1128,22 @@ export default {
 	align-items: center;
 	gap: 4px;
 	flex: 0 0 auto;
+}
+
+/* v4.20.29 — "Open page": a link, so it reads as one, with a focus ring. */
+.mywork-row__flag--page {
+	color: var(--color-main-text);
+	text-decoration: underline;
+	border-radius: var(--border-radius-small);
+}
+
+.mywork-row__flag--page:hover {
+	color: var(--color-primary-element);
+}
+
+.mywork-row__flag--page:focus-visible {
+	outline: 2px solid var(--color-primary-element);
+	outline-offset: 2px;
 }
 
 /* v4.9.7 — "opens in OpenProject": quiet, bordered, the same weight as the

@@ -4,6 +4,9 @@ declare(strict_types=1);
 namespace OCA\TeamHub\Controller;
 
 use OCA\TeamHub\AppInfo\Application;
+use OCA\TeamHub\Exception\LicenseGateException;
+use OCA\TeamHub\Service\LicenseService;
+use OCA\TeamHub\Service\MeetingReplyService;
 use OCA\TeamHub\Service\MeetingService;
 use OCA\TeamHub\Service\MemberService;
 use OCP\AppFramework\Controller;
@@ -29,6 +32,11 @@ use Psr\Log\LoggerInterface;
  * PUT  /api/v1/teams/{teamId}/meetings/settings
  *   Save the meeting_min_level for this team.
  *   Auth: team admin.
+ *
+ * POST /api/v1/teams/{teamId}/meetings/reply   (v4.20.10, licensed)
+ *   Accept, tentatively accept or decline a meeting on the team calendar.
+ *   Body: { uid, status: accepted|tentative|declined }.
+ *   Auth: team member, and an attendee of that meeting (MeetingReplyService).
  */
 class MeetingController extends Controller {
     use ExceptionResponseTrait;
@@ -38,6 +46,8 @@ class MeetingController extends Controller {
         IRequest                $request,
         private MeetingService  $meetingService,
         private MemberService   $memberService,
+        private MeetingReplyService $meetingReplies,
+        private LicenseService  $licenseService,
         private IUserSession    $userSession,
         private LoggerInterface $logger,
     ) {
@@ -55,6 +65,17 @@ class MeetingController extends Controller {
         ]);
 
         try {
+            // v4.20.12 — Add meeting is licensed. Membership first, so a
+            // non-member learns nothing about the instance's licence; the
+            // service still applies the team's own minimum level after this.
+            $this->memberService->requireMemberLevel($teamId);
+            if (!$this->licenseService->isLicensed()) {
+                throw new LicenseGateException(
+                    $this->licenseService->getEnforcementLevel(),
+                    'Adding a meeting requires an active TeamHub licence.',
+                );
+            }
+
             $title       = trim((string)$this->request->getParam('title',       ''));
             $date        = trim((string)$this->request->getParam('date',         ''));
             $startTime   = trim((string)$this->request->getParam('startTime',    ''));
@@ -161,6 +182,12 @@ class MeetingController extends Controller {
                 includeUnscheduledTasks: $includeUnscheduledTasks,
                 includeProposals:        $includeProposals,
                 proposalCategories:      $proposalCategories,
+                // v4.20.8 — the repeat setting, raw; the service validates it
+                // and refuses it on an unlicensed instance.
+                recurrence:              $this->request->getParam('recurrence', null),
+                // v4.20.10 — for a series: how many days before each date its
+                // notes are made and the team chat is reminded (1 to 7).
+                reminderDays:            max(1, min(7, (int)$this->request->getParam('reminderDays', 2))),
             );
 
             $this->logger->debug('[TeamHub][MeetingController] createTeamMeeting — success', [
@@ -172,6 +199,43 @@ class MeetingController extends Controller {
 
         } catch (\Throwable $e) {
             return $this->exceptionResponse($e, 'Failed to create meeting', [
+                'teamId' => $teamId,
+            ]);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // POST /api/v1/teams/{teamId}/meetings/reply
+    // -------------------------------------------------------------------------
+
+    /**
+     * Answer an invitation from the Upcoming events widget (v4.20.10).
+     *
+     * Licensed, like the attendee list it sits in. Membership first, so a
+     * non-member learns nothing about the meeting; then the licence; then the
+     * service, which only lets the signed-in attendee answer for themself and
+     * reads the event back to confirm Nextcloud recorded it.
+     */
+    #[NoAdminRequired]
+    public function replyToMeeting(string $teamId): JSONResponse {
+        try {
+            $this->memberService->requireMemberLevel($teamId);
+            if (!$this->licenseService->isLicensed()) {
+                throw new LicenseGateException(
+                    $this->licenseService->getEnforcementLevel(),
+                    'Replying from TeamHub requires an active TeamHub licence.',
+                );
+            }
+            $uid = $this->userSession->getUser()?->getUID() ?? '';
+            $result = $this->meetingReplies->reply(
+                $teamId,
+                $uid,
+                (string)$this->request->getParam('uid', ''),
+                (string)$this->request->getParam('status', ''),
+            );
+            return new JSONResponse($result);
+        } catch (\Throwable $e) {
+            return $this->exceptionResponse($e, 'Could not save your reply', [
                 'teamId' => $teamId,
             ]);
         }

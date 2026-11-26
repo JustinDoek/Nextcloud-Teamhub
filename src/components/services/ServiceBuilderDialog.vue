@@ -2,8 +2,9 @@
 	<!-- v4.10.34 — the service builder (`docs/service-builder.md` § 2): a
 	     large dialog, opened from the Services widget on the service team's
 	     home. It edits the draft; publishing makes the draft the version
-	     requests start from. The first and last steps are fixed — the
-	     engine adds them — so they are shown, not edited. -->
+	     requests start from. The first and last steps have a fixed place —
+	     the engine adds them — and, since v4.20.54, their own settings: the
+	     request form and the confirmation. -->
 	<!-- v4.10.41 — `inline`: the same builder on the Services tab, using the
 	     whole tab instead of a modal (Justin, 2026-09-25). -->
 	<component
@@ -18,6 +19,24 @@
 			<NcNoteCard v-if="service && service.version > 0" type="info">
 				{{ t('teamhub', 'Requests already made keep the version they started on. Changes reach the service catalog when you publish them.') }}
 			</NcNoteCard>
+
+			<!-- v4.20.58 — what a new service begins with: its steps and its
+			     form, to change from there. The name and the rest stay. -->
+			<div v-if="!service" class="svc-builder__field">
+				<span id="service-builder-starter">{{ t('teamhub', 'Start from') }}</span>
+				<div class="svc-builder__kind" role="group" aria-labelledby="service-builder-starter">
+					<NcButton
+						v-for="option in starters"
+						:key="option.id"
+						size="small"
+						variant="tertiary"
+						:pressed="starter === option.id"
+						:disabled="busy"
+						@click="startFrom(option.id)">
+						{{ option.label }}
+					</NcButton>
+				</div>
+			</div>
 
 			<label class="svc-builder__field">
 				<span>{{ t('teamhub', 'Name') }}</span>
@@ -115,274 +134,31 @@
 					:force-fallback="true"
 					:disabled="busy">
 					<template #header>
-						<!-- Fixed: the engine completes it when the request is sent. -->
-						<li class="svc-builder__step svc-builder__step--fixed svc-builder__step--requester">
-							<AccountOutline :size="ICON_BODY" class="svc-builder__glyph" aria-hidden="true" />
-							<div class="svc-builder__fixed">
-								<span class="svc-builder__fixed-label">{{ t('teamhub', 'Request submitted') }}</span>
-								<span class="svc-builder__hint">{{ t('teamhub', 'The requester fills in the form.') }}</span>
-							</div>
-						</li>
+						<!-- Its place is fixed: the engine completes it when the request
+						     is sent. v4.20.54 — what it asks is the service's own. -->
+						<RequestFormEditor :model-value="form.request" :limits="limits" :busy="busy" />
 					</template>
 
 					<template #item="{ element: step, index }">
-					<li
-						class="svc-builder__step"
-						:class="step.kind === STEP_KIND.DESK ? 'svc-builder__step--team' : 'svc-builder__step--requester'"
-						:data-step-key="step.key">
-						<component
-							:is="step.kind === STEP_KIND.DESK ? 'AccountGroupOutline' : 'AccountOutline'"
-							:size="ICON_BODY"
-							class="svc-builder__glyph"
-							aria-hidden="true" />
-
-						<div class="svc-builder__step-body">
-							<!-- v4.10.42 — the step's header, always shown: its name,
-							     who does it and how many tasks. Pressing it folds or
-							     unfolds the step (Justin, 2026-09-25: a step unfolded
-							     is too tall to drag past another). -->
-							<div class="svc-builder__step-head">
-								<NcButton
-									variant="tertiary"
-									class="svc-builder__step-toggle"
-									:aria-expanded="step.open ? 'true' : 'false'"
-									:title="step.open ? t('teamhub', 'Fold step') : t('teamhub', 'Unfold step')"
-									@click="step.open = !step.open">
-									<template #icon>
-										<ChevronDown v-if="step.open" :size="ICON_BODY" />
-										<ChevronRight v-else :size="ICON_BODY" />
-									</template>
-									{{ step.label.trim() || t('teamhub', 'Step {n}', { n: index + 1 }) }}
-								</NcButton>
-								<span class="svc-builder__step-summary">
-									<span>{{ step.kind === STEP_KIND.DESK ? t('teamhub', 'The team') : t('teamhub', 'The requester') }}</span>
-									<span>{{ n('teamhub', '{n} task', '{n} tasks', step.tasks.length, { n: step.tasks.length }) }}</span>
-								</span>
-							</div>
-
-							<template v-if="step.open">
-							<!-- Who does it: a toggle pair, NcButton :pressed. -->
-							<div class="svc-builder__kind" role="group" :aria-label="t('teamhub', 'Who does step {n}', { n: index + 1 })">
-								<NcButton
-									size="small"
-									variant="tertiary"
-									:pressed="step.kind === STEP_KIND.DESK"
-									:disabled="busy"
-									@click="step.kind = STEP_KIND.DESK">
-									{{ t('teamhub', 'The team') }}
-								</NcButton>
-								<NcButton
-									size="small"
-									variant="tertiary"
-									:pressed="step.kind === STEP_KIND.REQUESTER"
-									:disabled="busy"
-									@click="step.kind = STEP_KIND.REQUESTER">
-									{{ t('teamhub', 'The requester') }}
-								</NcButton>
-							</div>
-
-							<label class="svc-builder__field">
-								<span>{{ t('teamhub', 'Step name') }}</span>
-								<NcTextField
-									v-model="step.label"
-									label-outside
-									:maxlength="limits.stepLabel || 100"
-									:aria-label="t('teamhub', 'Name of step {n}', { n: index + 1 })"
-									:disabled="busy" />
-							</label>
-							<span v-if="step.kind === STEP_KIND.REQUESTER" class="svc-builder__hint">
-								{{ t('teamhub', 'Something the requester does before the team continues, such as filling in a form. A task with a link is done when the requester opens the link.') }}
-							</span>
-
-							<!-- v4.10.37 — the step's tasks (`docs/service-builder.md`
-							     § 4): done at the same time, each claimed on its own.
-							     One task may go without a name: it borrows the step's. -->
-							<ul class="svc-builder__task-list" :aria-label="t('teamhub', 'Tasks of step {n}', { n: index + 1 })">
-								<li v-for="(task, ti) in step.tasks" :key="task.key" class="svc-builder__task">
-									<div class="svc-builder__row">
-										<label class="svc-builder__field svc-builder__field--grow">
-											<span>{{ step.tasks.length > 1 ? t('teamhub', 'Task name') : t('teamhub', 'Task name (optional)') }}</span>
-											<NcTextField
-												v-model="task.label"
-												label-outside
-												:maxlength="limits.stepLabel || 100"
-												:placeholder="step.tasks.length > 1 ? '' : t('teamhub', 'The step\'s name')"
-												:aria-label="t('teamhub', 'Name of task {t} of step {n}', { t: ti + 1, n: index + 1 })"
-												:disabled="busy" />
-										</label>
-										<label v-if="step.kind === STEP_KIND.DESK" class="svc-builder__field svc-builder__field--grow">
-											<span>{{ t('teamhub', 'Role (optional)') }}</span>
-											<NcTextField
-												v-model="task.role"
-												label-outside
-												:maxlength="limits.role || 64"
-												:placeholder="t('teamhub', 'For example: Privacy officer')"
-												:aria-label="t('teamhub', 'Role for task {t} of step {n}', { t: ti + 1, n: index + 1 })"
-												:disabled="busy" />
-										</label>
-										<NcButton
-											v-if="step.tasks.length > 1"
-											variant="tertiary"
-											class="svc-builder__link-remove"
-											:disabled="busy"
-											:aria-label="t('teamhub', 'Remove task {t} of step {n}', { t: ti + 1, n: index + 1 })"
-											:title="t('teamhub', 'Remove task')"
-											@click="step.tasks.splice(ti, 1)">
-											<template #icon><TrashCanOutline :size="ICON_BODY" /></template>
-										</NcButton>
-									</div>
-									<NcCheckboxRadioSwitch
-										v-if="step.kind === STEP_KIND.DESK && step.tasks.length > 1"
-										v-model="task.nonBlocking"
-										type="checkbox"
-										:disabled="busy">
-										{{ t('teamhub', 'The request may move on while this task is open') }}
-									</NcCheckboxRadioSwitch>
-
-									<!-- v4.10.36 — links on the task (§ 6.1). -->
-									<div class="svc-builder__links">
-										<span class="svc-builder__hint">
-											{{ step.kind === STEP_KIND.DESK
-												? t('teamhub', 'Links for the team, such as work instructions or the system to go to. Only the team sees them.')
-												: t('teamhub', 'Links the requester opens for this task, such as a form to fill in. Opening one marks the task done.') }}
-										</span>
-										<ul v-if="task.links.length" class="svc-builder__link-list">
-											<li v-for="(link, li) in task.links" :key="link.key" class="svc-builder__link">
-												<div class="svc-builder__kind" role="group" :aria-label="t('teamhub', 'What link {n} of step {step} opens', { n: li + 1, step: index + 1 })">
-													<NcButton
-														size="small"
-														variant="tertiary"
-														:pressed="link.kind === LINK_KIND.LINK"
-														:disabled="busy"
-														@click="link.kind = LINK_KIND.LINK">
-														{{ t('teamhub', 'Page') }}
-													</NcButton>
-													<NcButton
-														size="small"
-														variant="tertiary"
-														:pressed="link.kind === LINK_KIND.FORM"
-														:disabled="busy"
-														@click="link.kind = LINK_KIND.FORM">
-														{{ t('teamhub', 'Form') }}
-													</NcButton>
-												</div>
-												<div class="svc-builder__row">
-													<label class="svc-builder__field svc-builder__field--grow">
-														<span>{{ t('teamhub', 'Link name') }}</span>
-														<NcTextField
-															v-model="link.label"
-															label-outside
-															:maxlength="limits.linkLabel || 100"
-															:placeholder="t('teamhub', 'For example: Intake form')"
-															:aria-label="t('teamhub', 'Name of link {n} of step {step}', { n: li + 1, step: index + 1 })"
-															:disabled="busy" />
-													</label>
-													<label class="svc-builder__field svc-builder__field--grow">
-														<span>{{ t('teamhub', 'Address') }}</span>
-														<NcTextField
-															v-model="link.url"
-															type="url"
-															label-outside
-															:maxlength="limits.url || 2000"
-															placeholder="https://"
-															:error="!urlOk(link.url)"
-															:helper-text="urlOk(link.url) ? '' : t('teamhub', 'An address starts with https:// and has no spaces.')"
-															:aria-label="t('teamhub', 'Address of link {n} of step {step}', { n: li + 1, step: index + 1 })"
-															:disabled="busy" />
-													</label>
-													<NcButton
-														variant="tertiary"
-														class="svc-builder__link-remove"
-														:disabled="busy"
-														:aria-label="t('teamhub', 'Remove link {n} of step {step}', { n: li + 1, step: index + 1 })"
-														:title="t('teamhub', 'Remove link')"
-														@click="task.links.splice(li, 1)">
-														<template #icon><Close :size="ICON_BODY" /></template>
-													</NcButton>
-												</div>
-											</li>
-										</ul>
-										<div>
-											<NcButton
-												variant="tertiary"
-												size="small"
-												:disabled="busy || task.links.length >= maxLinks"
-												@click="task.links.push(newLink())">
-												<template #icon><LinkVariantPlus :size="ICON_BODY" /></template>
-												{{ t('teamhub', 'Add link') }}
-											</NcButton>
-										</div>
-									</div>
-								</li>
-							</ul>
-							<div>
-								<NcButton
-									variant="secondary"
-									size="small"
-									:disabled="busy || step.tasks.length >= maxTasks"
-									@click="step.tasks.push(newTask())">
-									<template #icon><Plus :size="ICON_BODY" /></template>
-									{{ t('teamhub', 'Add task') }}
-								</NcButton>
-							</div>
-							</template>
-						</div>
-
-						<div class="svc-builder__step-tools">
-							<!-- The handle: drag it, or press arrow up / down on it. -->
-							<NcButton
-								variant="tertiary"
-								class="svc-builder__drag"
-								:disabled="busy"
-								:aria-label="t('teamhub', 'Move step {n}: drag it, or press the up and down arrow keys', { n: index + 1 })"
-								:title="t('teamhub', 'Drag to move')"
-								@keydown.up.prevent="moveByKey(index, -1)"
-								@keydown.down.prevent="moveByKey(index, 1)">
-								<template #icon><DragVertical :size="ICON_BODY" /></template>
-							</NcButton>
-							<!-- v4.11.0 — WCAG 2.5.7: moving a step without dragging,
-							     for a pointer that cannot drag. Focus follows the step,
-							     which is what the 4.10.39 buttons lacked. -->
-							<NcButton
-								variant="tertiary"
-								class="svc-builder__move-up"
-								:disabled="busy || index === 0"
-								:aria-label="t('teamhub', 'Move step {n} up', { n: index + 1 })"
-								:title="t('teamhub', 'Move step {n} up', { n: index + 1 })"
-								@click="moveByButton(index, -1)">
-								<template #icon><ArrowUp :size="ICON_BODY" /></template>
-							</NcButton>
-							<NcButton
-								variant="tertiary"
-								class="svc-builder__move-down"
-								:disabled="busy || index === form.steps.length - 1"
-								:aria-label="t('teamhub', 'Move step {n} down', { n: index + 1 })"
-								:title="t('teamhub', 'Move step {n} down', { n: index + 1 })"
-								@click="moveByButton(index, 1)">
-								<template #icon><ArrowDown :size="ICON_BODY" /></template>
-							</NcButton>
-							<NcButton
-								variant="tertiary"
-								:disabled="busy"
-								:aria-label="t('teamhub', 'Remove step {n}', { n: index + 1 })"
-								:title="t('teamhub', 'Remove step')"
-								@click="remove(index)">
-								<template #icon><TrashCanOutline :size="ICON_BODY" /></template>
-							</NcButton>
-						</div>
-					</li>
+						<ServiceStepCard
+							:model-value="step"
+							:index="index"
+							:count="form.steps.length"
+							:person-fields="personFieldOptions"
+							:form-fields="formFieldOptions"
+							:condition-fields="fieldsBefore(form, index)"
+							:limits="limits"
+							:busy="busy"
+							@move-by-key="moveByKey(index, $event)"
+							@move-by-button="moveByButton(index, $event)"
+							@remove="remove(index)" />
 					</template>
 
 					<template #footer>
-						<!-- Fixed: the requester confirms; an admin of the team may
-						     close it in their place. -->
-						<li class="svc-builder__step svc-builder__step--fixed svc-builder__step--requester">
-							<AccountOutline :size="ICON_BODY" class="svc-builder__glyph" aria-hidden="true" />
-							<div class="svc-builder__fixed">
-								<span class="svc-builder__fixed-label">{{ t('teamhub', 'Requester confirms') }}</span>
-								<span class="svc-builder__hint">{{ t('teamhub', 'The requester confirms the result. An admin of the team can close the request instead.') }}</span>
-							</div>
-						</li>
+						<!-- v4.20.54 — the requester confirms, it confirms itself, or
+						     there is nothing to confirm. An admin of the team may close
+						     a request in the requester's place. -->
+						<ConfirmEditor :model-value="form.confirm" :limits="limits" :busy="busy" />
 					</template>
 				</draggable>
 
@@ -394,6 +170,11 @@
 					<NcButton variant="secondary" :disabled="busy || atMaxSteps" @click="add(STEP_KIND.REQUESTER)">
 						<template #icon><Plus :size="ICON_BODY" /></template>
 						{{ t('teamhub', 'Add requester step') }}
+					</NcButton>
+					<!-- v4.20.58 — somebody outside the team approves. -->
+					<NcButton variant="secondary" :disabled="busy || atMaxSteps" @click="add(STEP_KIND.APPROVAL)">
+						<template #icon><Plus :size="ICON_BODY" /></template>
+						{{ t('teamhub', 'Add approval step') }}
 					</NcButton>
 					<span v-if="atMaxSteps" class="svc-builder__hint">
 						{{ n('teamhub', 'A service has at most %n step.', 'A service has at most %n steps.', maxSteps) }}
@@ -460,36 +241,31 @@
 <script>
 import { translate as t, translatePlural as n } from '@nextcloud/l10n'
 import { NcButton, NcCheckboxRadioSwitch, NcLoadingIcon, NcModal, NcNoteCard, NcSelect, NcTextArea, NcTextField } from '@nextcloud/vue'
-import AccountGroupOutline from 'vue-material-design-icons/AccountGroupOutline.vue'
-import AccountOutline from 'vue-material-design-icons/AccountOutline.vue'
-import ArrowDown from 'vue-material-design-icons/ArrowDown.vue'
-import ArrowUp from 'vue-material-design-icons/ArrowUp.vue'
-import ChevronDown from 'vue-material-design-icons/ChevronDown.vue'
-import ChevronRight from 'vue-material-design-icons/ChevronRight.vue'
-import DragVertical from 'vue-material-design-icons/DragVertical.vue'
 import UnfoldLessHorizontal from 'vue-material-design-icons/UnfoldLessHorizontal.vue'
 import UnfoldMoreHorizontal from 'vue-material-design-icons/UnfoldMoreHorizontal.vue'
 import draggable from 'vuedraggable'
-import Close from 'vue-material-design-icons/Close.vue'
-import LinkVariantPlus from 'vue-material-design-icons/LinkVariantPlus.vue'
 import Plus from 'vue-material-design-icons/Plus.vue'
-import TrashCanOutline from 'vue-material-design-icons/TrashCanOutline.vue'
 import { ICON_BODY } from '../../constants/uiTokens.js'
+import ConfirmEditor from './ConfirmEditor.vue'
+import RequestFormEditor from './RequestFormEditor.vue'
 import ServiceIconPicker from './ServiceIconPicker.vue'
+import ServiceStepCard from './ServiceStepCard.vue'
 import {
-	LINK_KIND,
 	STEP_KIND,
 	documentFromForm,
 	fileDaysValid,
 	formFromService,
+	dueDaysValid,
+	fieldsBefore,
 	isHttpsUrl,
 	leadDaysValid,
 	moveStep,
-	newLink,
 	newStep,
-	newTask,
+	personFields,
 	publishProblems,
 } from '../../constants/serviceBuilder.js'
+import { STARTER, starterDocument, starterLabel } from '../../constants/approvals.js'
+import { confirmDaysValid, fieldLabel, optionsValid } from '../../constants/requestForm.js'
 
 /**
  * The service builder's form (v4.10.34). It owns the form and nothing else:
@@ -503,8 +279,8 @@ export default {
 
 	components: {
 		NcButton, NcCheckboxRadioSwitch, NcLoadingIcon, NcModal, NcNoteCard, NcSelect, NcTextArea, NcTextField,
-		AccountGroupOutline, AccountOutline, ArrowDown, ArrowUp, ChevronDown, ChevronRight, Close, DragVertical, LinkVariantPlus, Plus,
-		TrashCanOutline, UnfoldLessHorizontal, UnfoldMoreHorizontal, draggable, ServiceIconPicker,
+		ConfirmEditor, Plus, RequestFormEditor, ServiceIconPicker, ServiceStepCard,
+		UnfoldLessHorizontal, UnfoldMoreHorizontal, draggable,
 	},
 
 	props: {
@@ -526,9 +302,10 @@ export default {
 	data() {
 		return {
 			ICON_BODY,
-			LINK_KIND,
 			STEP_KIND,
 			form: this.initialForm(),
+			/** v4.20.58 — what a new service started from. */
+			starter: STARTER.ISSUE,
 			/** Which button is working: 'save' or 'publish'. */
 			pending: '',
 		}
@@ -539,16 +316,29 @@ export default {
 			return this.categories.map(c => ({ id: c.key, label: c.label }))
 		},
 
+		/** v4.20.58 — what a new service may start from. */
+		starters() {
+			return Object.values(STARTER).map(id => ({ id, label: starterLabel(id) }))
+		},
+
+		/** v4.20.58 — the person fields an approval may take its approver from. */
+		personFieldOptions() {
+			return personFields(this.form).map(field => ({ id: field.key, label: fieldLabel(field) || t('teamhub', 'Person') }))
+		},
+
+		/** v4.20.62 — the answers a notice may carry. */
+		formFieldOptions() {
+			return this.form.request.fields.map(field => ({
+				id: field.key,
+				label: fieldLabel(field) || t('teamhub', 'A field without a name'),
+				// v4.20.66 — what a condition can compare it with.
+				type: field.type,
+				options: String(field.optionsText || '').split('\n').map(o => o.trim()).filter(Boolean),
+			}))
+		},
+
 		maxSteps() {
 			return this.limits.steps || 10
-		},
-
-		maxLinks() {
-			return this.limits.links || 5
-		},
-
-		maxTasks() {
-			return this.limits.tasks || 10
 		},
 
 		/** v4.10.42 — every step unfolded. */
@@ -574,12 +364,24 @@ export default {
 		},
 
 		problems() {
-			return publishProblems(this.form)
+			return publishProblems(this.form, this.limits.noticeEmail === true)
 		},
 
 		/** A draft needs a name and a lead time the server accepts; the rest may wait. */
 		canSave() {
 			return this.form.title.trim() !== '' && this.leadTimeOk && this.urlsOk && this.fileDaysOk
+				&& this.confirmOk && this.optionsOk
+				&& this.form.steps.every(step => dueDaysValid(step.dueDays, this.limits.dueDays || 60))
+		},
+
+		/** v4.20.54 — only checked while the service confirms by itself. */
+		confirmOk() {
+			return confirmDaysValid(this.form.confirm, this.limits.confirmDays || 90)
+		},
+
+		/** v4.20.54 — no field has more or longer options than the server takes. */
+		optionsOk() {
+			return this.form.request.fields.every(field => optionsValid(field, this.limits.options || 20))
 		},
 
 		/** v4.10.38 — only checked while files are allowed; off, the number is kept as it was. */
@@ -605,6 +407,11 @@ export default {
 		 */
 		initialForm() {
 			const form = formFromService(this.service)
+			if (!this.service) {
+				// v4.20.59 — the starter it shows as chosen, not a nameless step.
+				Object.assign(form, { steps: formFromService({ draft: starterDocument(STARTER.ISSUE) }).steps })
+				form.steps.forEach(step => { step.open = true })
+			}
 			if (this.categories.length && !this.categories.some(c => c.key === form.category)) {
 				form.category = this.categories[0].key
 			}
@@ -613,9 +420,7 @@ export default {
 
 		t,
 		n,
-
-		newLink,
-		newTask,
+		fieldsBefore,
 
 		/** v4.10.42 — fold or unfold every step at once. */
 		setAllOpen(open) {
@@ -625,6 +430,15 @@ export default {
 		/** Empty, or an address the server accepts. */
 		urlOk(value) {
 			return String(value ?? '').trim() === '' || isHttpsUrl(value)
+		},
+
+		/** v4.20.58 — the steps and the request form of a starter; what was typed above stays. */
+		startFrom(starter) {
+			this.starter = starter
+			const start = formFromService({ draft: { ...documentFromForm(this.form), request: undefined, ...starterDocument(starter) } })
+			start.steps.forEach(step => { step.open = true })
+			this.form.steps = start.steps
+			this.form.request = start.request
 		},
 
 		add(kind) {
@@ -685,242 +499,4 @@ export default {
 }
 </script>
 
-<style scoped lang="scss">
-.svc-builder {
-	display: flex;
-	flex-direction: column;
-	gap: var(--th-space-md, 12px);
-	padding: var(--th-space-lg, 16px) var(--th-space-xl, 24px);
-}
-
-/* v4.10.41 — on the Services tab the tab already has its padding. */
-.svc-builder-page .svc-builder {
-	padding: 0;
-}
-
-.svc-builder__title {
-	margin: 0;
-	font-size: var(--th-font-heading-lg, 20px);
-	font-weight: var(--th-font-weight-semibold, 600);
-}
-
-.svc-builder__subtitle {
-	margin: 0;
-	font-size: var(--th-font-heading, 16px);
-	font-weight: var(--th-font-weight-semibold, 600);
-}
-
-.svc-builder__hint {
-	margin: 0;
-	color: var(--color-text-maxcontrast);
-	font-size: var(--th-font-meta, 13px);
-}
-
-.svc-builder__field {
-	display: flex;
-	flex-direction: column;
-	gap: var(--th-space-xs, 4px);
-	min-width: 0;
-}
-
-.svc-builder__field--grow {
-	flex: 1 1 var(--th-space-xxl, 32px);
-}
-
-.svc-builder__row {
-	display: flex;
-	flex-wrap: wrap;
-	gap: var(--th-space-md, 12px);
-	align-items: flex-start;
-}
-
-.svc-builder__steps {
-	display: flex;
-	flex-direction: column;
-	gap: var(--th-space-sm, 8px);
-}
-
-.svc-builder__list {
-	display: flex;
-	flex-direction: column;
-	gap: var(--th-space-sm, 8px);
-	margin: 0;
-	padding: 0;
-	list-style: none;
-}
-
-.svc-builder__step {
-	display: flex;
-	align-items: flex-start;
-	gap: var(--th-space-md, 12px);
-	padding: var(--th-space-md, 12px);
-	border: 1px solid var(--color-border);
-	border-radius: var(--border-radius-container);
-	background: var(--color-main-background);
-}
-
-.svc-builder__step--fixed {
-	align-items: center;
-}
-
-/* v4.10.39 — the team's steps and the requester's read apart at a glance.
-   v4.10.42 — found on the instance: NC's light primary and the neutral
-   background-dark were two near-identical greys (rgb 230,233,237 against
-   237,237,237). Now the team's step is the primary tint with a primary rail,
-   the requester's the plain canvas with a neutral rail. */
-.svc-builder__step--team {
-	background: var(--color-primary-element-light);
-	color: var(--color-primary-element-light-text);
-	border-inline-start: var(--th-accent-border, 3px) solid var(--color-primary-element);
-}
-
-.svc-builder__step--requester {
-	background: var(--color-main-background);
-	border-inline-start: var(--th-accent-border, 3px) solid var(--color-border-maxcontrast);
-}
-
-.svc-builder__step-head {
-	display: flex;
-	flex-wrap: wrap;
-	align-items: center;
-	gap: var(--th-space-xs, 4px) var(--th-space-md, 12px);
-}
-
-.svc-builder__step-toggle {
-	max-width: 100%;
-	font-weight: var(--th-font-weight-semibold, 600);
-}
-
-.svc-builder__step-summary {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 0 var(--th-space-sm, 8px);
-	color: var(--color-text-maxcontrast);
-	font-size: var(--th-font-meta, 13px);
-}
-
-.svc-builder__fold-all {
-	display: flex;
-	justify-content: flex-end;
-}
-
-.svc-builder__step--ghost {
-	opacity: 0.5;
-}
-
-.svc-builder__drag {
-	cursor: grab;
-}
-
-.svc-builder__glyph {
-	flex: 0 0 auto;
-	color: var(--color-text-maxcontrast);
-	margin-block-start: var(--th-space-xs, 4px);
-}
-
-.svc-builder__fixed {
-	display: flex;
-	flex-direction: column;
-}
-
-.svc-builder__fixed-label {
-	font-weight: var(--th-font-weight-semibold, 600);
-}
-
-.svc-builder__step-body {
-	display: flex;
-	flex: 1 1 auto;
-	flex-direction: column;
-	gap: var(--th-space-sm, 8px);
-	min-width: 0;
-}
-
-.svc-builder__kind {
-	display: flex;
-	flex-wrap: wrap;
-	gap: var(--th-space-xs, 4px);
-}
-
-.svc-builder__files {
-	display: flex;
-	flex-direction: column;
-	gap: var(--th-space-sm, 8px);
-}
-
-.svc-builder__task-list {
-	display: flex;
-	flex-direction: column;
-	gap: var(--th-space-md, 12px);
-	margin: 0;
-	padding: 0;
-	list-style: none;
-}
-
-.svc-builder__task {
-	display: flex;
-	flex-direction: column;
-	gap: var(--th-space-sm, 8px);
-	padding: var(--th-space-sm, 8px);
-	border: 1px solid var(--color-border);
-	border-radius: var(--border-radius-element);
-}
-
-.svc-builder__links {
-	display: flex;
-	flex-direction: column;
-	gap: var(--th-space-xs, 4px);
-}
-
-.svc-builder__link-list {
-	display: flex;
-	flex-direction: column;
-	gap: var(--th-space-sm, 8px);
-	margin: 0;
-	padding: 0;
-	list-style: none;
-}
-
-.svc-builder__link {
-	display: flex;
-	flex-direction: column;
-	gap: var(--th-space-xs, 4px);
-	padding-inline-start: var(--th-space-sm, 8px);
-	border-inline-start: 1px solid var(--color-border);
-}
-
-.svc-builder__link-remove {
-	align-self: flex-end;
-}
-
-.svc-builder__step-tools {
-	display: flex;
-	flex: 0 0 auto;
-	gap: var(--th-space-xs, 4px);
-}
-
-.svc-builder__add {
-	display: flex;
-	flex-wrap: wrap;
-	align-items: center;
-	gap: var(--th-space-sm, 8px);
-}
-
-.svc-builder__problems-title {
-	margin: 0;
-	font-weight: var(--th-font-weight-semibold, 600);
-}
-
-.svc-builder__problems {
-	margin: 0;
-	padding-inline-start: var(--th-space-lg, 16px);
-	list-style: disc;
-}
-
-.svc-builder__actions {
-	display: flex;
-	flex-wrap: wrap;
-	justify-content: flex-end;
-	gap: var(--th-space-sm, 8px);
-	margin-block-start: var(--th-space-sm, 8px);
-}
-</style>
+<style scoped lang="scss" src="./serviceBuilder.scss"></style>

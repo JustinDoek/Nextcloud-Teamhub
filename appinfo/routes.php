@@ -83,9 +83,20 @@ return [
         ['name' => 'team#getTeamCalendarEvents',  'url' => '/api/v1/teams/{teamId}/calendar/events',         'verb' => 'GET'],
         ['name' => 'team#createCalendarEvent',    'url' => '/api/v1/teams/{teamId}/calendar/events',         'verb' => 'POST'],
         ['name' => 'team#listRooms',              'url' => '/api/v1/teams/{teamId}/rooms',                   'verb' => 'GET'],
+        // v4.20.0 — free/busy per room for the room finder.
+        ['name' => 'team#getRoomAvailability',    'url' => '/api/v1/teams/{teamId}/rooms/availability',      'verb' => 'GET'],
+        ['name' => 'team#getFreeRoomsNow',        'url' => '/api/v1/teams/{teamId}/rooms/free-now',          'verb' => 'GET'],
         ['name' => 'team#getCalendarEventsForWeek', 'url' => '/api/v1/teams/{teamId}/calendar/events/week',  'verb' => 'GET'],
         // v4.6.20 — arbitrary-window reader behind the team calendar grid.
         ['name' => 'team#getCalendarEventsInRange', 'url' => '/api/v1/teams/{teamId}/calendar/events/range', 'verb' => 'GET'],
+        // v4.20.15 — whose busy times the grid may ask Nextcloud's free/busy
+        // about (DESIGN §2.267). The busy times never pass through TeamHub.
+        ['name' => 'teamBusy#getBusyPeople',      'url' => '/api/v1/teams/{teamId}/calendar/busy-people',    'verb' => 'GET'],
+        // v4.20.39 — the "Shared with team" card: other apps' team resources, read-only.
+        ['name' => 'teamSharedResource#getSharedResources', 'url' => '/api/v1/teams/{teamId}/shared-resources', 'verb' => 'GET'],
+        // v4.20.19 — meeting wrap-up (DESIGN §2.271).
+        ['name' => 'meetingWrapUp#getWrapUp',      'url' => '/api/v1/teams/{teamId}/meetings/wrap-up/{objectId}/{start}', 'verb' => 'GET'],
+        ['name' => 'meetingWrapUp#completeWrapUp', 'url' => '/api/v1/teams/{teamId}/meetings/wrap-up/{objectId}/{start}', 'verb' => 'POST'],
         ['name' => 'team#deleteCalendarEvents',   'url' => '/api/v1/teams/{teamId}/calendar/events',         'verb' => 'DELETE'],
 
         // Files widgets — favourite files and recently modified files
@@ -246,6 +257,8 @@ return [
         ['name' => 'workflow#requestInformation', 'url' => '/api/v1/workflows/{id}/request-information',         'verb' => 'POST', 'requirements' => ['id' => '\d+']],
         ['name' => 'workflow#provideInformation', 'url' => '/api/v1/workflows/{id}/provide-information',         'verb' => 'POST', 'requirements' => ['id' => '\d+']],
         ['name' => 'workflow#message',            'url' => '/api/v1/workflows/{id}/message',                     'verb' => 'POST', 'requirements' => ['id' => '\d+']],        // v4.11.0
+        ['name' => 'workflow#requestApproval',    'url' => '/api/v1/workflows/{id}/approval',                    'verb' => 'POST', 'requirements' => ['id' => '\d+']],        // v4.20.58
+        ['name' => 'workflow#delegateApproval',   'url' => '/api/v1/workflows/{id}/approval/delegate',           'verb' => 'POST', 'requirements' => ['id' => '\d+']],        // v4.20.58
         ['name' => 'workflow#cancel',            'url' => '/api/v1/workflows/{id}/cancel',                      'verb' => 'POST', 'requirements' => ['id' => '\d+']],
         ['name' => 'workflow#requestStatus',      'url' => '/api/v1/workflows/{id}/status-request',              'verb' => 'POST', 'requirements' => ['id' => '\d+']],
 
@@ -502,6 +515,16 @@ return [
         ['name' => 'messageSubscription#unsubscribe', 'url' => '/api/v1/messages/{messageId}/subscription',  'verb' => 'DELETE'],
 
         // ----------------------------------------------------------------
+        // v4.20.27 — emoji reactions on messages and comments. The emoji
+        // travels as a parameter (body on POST, query on DELETE), never in
+        // the path. Each write answers with the target's reactions.
+        // ----------------------------------------------------------------
+        ['name' => 'reaction#addMessageReaction',    'url' => '/api/v1/messages/{messageId}/reactions', 'verb' => 'POST',   'requirements' => ['messageId' => '\d+']],
+        ['name' => 'reaction#removeMessageReaction', 'url' => '/api/v1/messages/{messageId}/reactions', 'verb' => 'DELETE', 'requirements' => ['messageId' => '\d+']],
+        ['name' => 'reaction#addCommentReaction',    'url' => '/api/v1/comments/{commentId}/reactions', 'verb' => 'POST',   'requirements' => ['commentId' => '\d+']],
+        ['name' => 'reaction#removeCommentReaction', 'url' => '/api/v1/comments/{commentId}/reactions', 'verb' => 'DELETE', 'requirements' => ['commentId' => '\d+']],
+
+        // ----------------------------------------------------------------
         // v4.5.26 — "What's new" Talk interaction. Reply inside a thread and
         // vote on a poll without leaving the feed.
         //
@@ -546,6 +569,7 @@ return [
         // Team meeting action — notes file + calendar event + Talk room
         // ----------------------------------------------------------------
         ['name' => 'meeting#createTeamMeeting',  'url' => '/api/v1/teams/{teamId}/meetings',          'verb' => 'POST'],
+        ['name' => 'meeting#replyToMeeting',     'url' => '/api/v1/teams/{teamId}/meetings/reply',    'verb' => 'POST'],
         ['name' => 'meeting#getMeetingSettings', 'url' => '/api/v1/teams/{teamId}/meetings/settings', 'verb' => 'GET'],
         ['name' => 'meeting#saveMeetingSettings','url' => '/api/v1/teams/{teamId}/meetings/settings', 'verb' => 'PUT'],
 
@@ -659,6 +683,12 @@ return [
         // #[AuthorizedAdminSetting] and its service re-checks
         // IGroupManager::isAdmin, following PolicyController verbatim.
         // ----------------------------------------------------------------
+        // v4.20.40 — per-provider switch for the Shared with team card (admin only).
+        ['name' => 'sharedResourceAdmin#listProviders',      'url' => '/api/v1/admin/shared-resources/providers',              'verb' => 'GET'],
+        ['name' => 'sharedResourceAdmin#setProviderEnabled', 'url' => '/api/v1/admin/shared-resources/providers/{providerId}', 'verb' => 'PUT'],
+        // v4.20.48 — which apps may claim Team folders as their own (admin only).
+        ['name' => 'managedFolderAdmin#listApps',      'url' => '/api/v1/admin/managed-folders/apps',               'verb' => 'GET'],
+        ['name' => 'managedFolderAdmin#setAppEnabled', 'url' => '/api/v1/admin/managed-folders/apps/{claimingApp}', 'verb' => 'PUT'],
         ['name' => 'integrationAdmin#index',           'url' => '/api/v1/admin/integrations',                              'verb' => 'GET'],
         ['name' => 'integrationAdmin#templates',       'url' => '/api/v1/admin/integrations/templates',                    'verb' => 'GET'],
         ['name' => 'integrationAdmin#disablePreview',  'url' => '/api/v1/admin/integrations/{pkgId}/disable-preview',      'verb' => 'GET'],

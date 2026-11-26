@@ -63,6 +63,10 @@ export function layoutWidgetLabels() {
         'widget-service-stats':    t('teamhub', 'Statistics'),
         // TRANSLATORS: dashboard widget name — the grid where teams made outside TeamHub are accepted or declined
         'widget-team-adoption':    t('teamhub', 'Teams made outside TeamHub'),
+        // TRANSLATORS: dashboard widget name: the team's Talk threads, open polls, and a call to start or join
+        'widget-talk':             t('teamhub', 'Communication'),
+        // TRANSLATORS: dashboard widget name: links to what other Nextcloud apps (Deck, Polls, Tables and so on) have shared with the team
+        'widget-shared':           t('teamhub', 'Shared with team'),
     }
 }
 
@@ -101,6 +105,8 @@ const WIDGET_REQUIREMENTS = {
     'widget-calendar':     { app: 'calendar' },
     'widget-deck':         { app: 'deck' },
     'widget-files-center': { app: 'files' },
+    'widget-talk':         { app: 'talk' },
+    'widget-shared':       true,
     'widget-decisions':    { module: 'decisions' },
     // Either provider: `pages` is Intravox, `wiki` is Collectives, and the
     // unified Pages widget renders when one of them is on (v4.3.7).

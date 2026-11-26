@@ -52,6 +52,7 @@ class PresenceTeamService {
         private MemberService            $memberService,
         private IUserStatusManager       $userStatusManager,
         private LoggerInterface          $logger,
+        private PresenceDefaultService   $presenceDefaults,
     ) {}
 
     // -------------------------------------------------------------------------
@@ -200,6 +201,10 @@ class PresenceTeamService {
 
         foreach ($userIds as $uid) {
             $userSlots = $this->slotMapper->findByUserAndRange($uid, $fromDate, $toDate);
+            // A member who never saved a template shows at the office,
+            // Monday to Friday (v4.20.12, DESIGN §2.265): the reason to set
+            // it is that colleagues plan around it.
+            $userSlots = $this->presenceDefaults->withDefaultSlots($uid, $userSlots, $fromDate, $toDate);
             $slotsByUser[$uid] = [];
             foreach ($userSlots as $slot) {
                 $key = $slot->getSlotDate() . '_' . $slot->getHalfDay();

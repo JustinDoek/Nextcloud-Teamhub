@@ -38,6 +38,7 @@ class PresenceSlotService {
         private HolidayMapper           $holidayMapper,
         private IJobList                $jobList,
         private LoggerInterface         $logger,
+        private PresenceDefaultService  $defaults,
     ) {}
 
     // -------------------------------------------------------------------------
@@ -56,6 +57,9 @@ class PresenceSlotService {
         $this->assertIsoDate($toDate);
 
         $slots = $this->slotMapper->findByUserAndRange($userId, $fromDate, $toDate);
+        // A user who never saved a template reads as the office, Monday to
+        // Friday (v4.20.12, DESIGN §2.265). Holidays below still overlay it.
+        $slots = $this->defaults->withDefaultSlots($userId, $slots, $fromDate, $toDate);
 
         $types = [];
         foreach ($this->typeMapper->findAll() as $t) {

@@ -178,9 +178,6 @@
     --th-space-lg:  calc(4 * var(--default-grid-baseline));
     --th-space-xl:  calc(6 * var(--default-grid-baseline));
     --th-space-xxl: calc(8 * var(--default-grid-baseline));
-    /* The state-coloured left edge every cockpit tile carries (v4.9.3;
-       ProjectHealthWidget wrote it as a raw 3px). */
-    --th-accent-border: 3px;
     /* v4.10.43 — the readable width of a page of forms inside a team tab
        (the Services tab and its builder): wide enough for two fields side
        by side, narrow enough that a line of help text stays readable. */
@@ -212,6 +209,10 @@
      */
     --th-banner-height:         calc(56 * var(--default-grid-baseline));   /* 224px */
     --th-banner-height-compact: calc(40 * var(--default-grid-baseline));   /* 160px — narrow viewports */
+    /* v4.20.1 — the collapsed strip: the team's name on a sliver of the
+     * picture, for tabs where the content below needs the height (an
+     * embedded app). One NC clickable area plus a baseline of air. */
+    --th-banner-height-collapsed: calc(12 * var(--default-grid-baseline)); /* 48px */
 
     /* The scrim and its ink are NOT theme colours and must not be swapped
      * for `--color-*` tokens: they sit on top of a photograph the team
@@ -281,7 +282,7 @@
 }
 
 /* Generic row item — icon + primary text + (optional) trailing meta.
-   Widgets with richer row structure (Decisions accent bar + meta line)
+   Widgets with richer row structure (Decisions, with its meta line)
    compose their own layout but use the typography tokens below. */
 .th-widget__row {
     display: flex;

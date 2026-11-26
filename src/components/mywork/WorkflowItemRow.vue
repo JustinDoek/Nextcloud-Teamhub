@@ -86,9 +86,8 @@
 				<span v-if="workflow.updatedAt" class="wf-row__updated" :title="formatAbsolute(workflow.updatedAt)">
 					{{ t('teamhub', 'Updated {time}', { time: formatRecent(workflow.updatedAt) }) }}
 				</span>
-				<span v-if="workflow.dueAt" class="wf-row__due" :title="formatAbsolute(workflow.dueAt)">
-					{{ t('teamhub', 'Due {time}', { time: formatRecent(workflow.dueAt) }) }}
-				</span>
+				<!-- v4.20.68 — the deadline of the task this row is about. -->
+				<span v-if="due" :class="{ 'wf-row__due': due.overdue }" :title="formatAbsolute(workflow.dueAt)">{{ due.text }}</span>
 			</div>
 
 			<!-- v4.10.36 — the current step's links: the form to fill in, the
@@ -155,6 +154,8 @@ import Check from 'vue-material-design-icons/Check.vue'
 import Close from 'vue-material-design-icons/Close.vue'
 import HelpCircleOutline from 'vue-material-design-icons/HelpCircleOutline.vue'
 import CommentOutline from 'vue-material-design-icons/CommentOutline.vue'
+import AccountArrowRightOutline from 'vue-material-design-icons/AccountArrowRightOutline.vue'
+import AccountCheckOutline from 'vue-material-design-icons/AccountCheckOutline.vue'
 import AccountClockOutline from 'vue-material-design-icons/AccountClockOutline.vue'
 import CloseCircleOutline from 'vue-material-design-icons/CloseCircleOutline.vue'
 import ArchiveCheckOutline from 'vue-material-design-icons/ArchiveCheckOutline.vue'
@@ -167,11 +168,13 @@ import {
 	responsibleActor,
 	actionLabel,
 	availableActions,
+	primaryAction,
 	progressLabel,
 	statusLabel,
 	formatRecent,
 	formatAbsolute,
 	isServiceRequest,
+	dueState,
 } from '../../constants/workflows.js'
 import { ICON_INLINE, ICON_BODY, AVATAR_SM } from '../../constants/uiTokens.js'
 import { AGENT_ACTION, agentActionLabel } from '../../constants/serviceTeams.js'
@@ -185,6 +188,9 @@ const ACTION_ICONS = {
 	[WORKFLOW_ACTION.CANCEL]: CloseCircleOutline,
 	// v4.10.32 — the glyph My Work's own Close uses (constants/myWork.js).
 	[WORKFLOW_ACTION.CLOSE]: ArchiveCheckOutline,
+	// v4.20.58 — approvals.
+	[WORKFLOW_ACTION.REQUEST_APPROVAL]: AccountCheckOutline,
+	[WORKFLOW_ACTION.DELEGATE_APPROVAL]: AccountArrowRightOutline,
 }
 
 export default {
@@ -222,11 +228,14 @@ export default {
 		 * a team task's links are material to read, never a completion.
 		 */
 		completesByLink() {
-			return !!this.step?.canAct && this.step?.actor?.type === 'user'
+			// v4.20.71 — a task with fields is completed by filling them in.
+			return !!this.step?.canAct && this.step?.actor?.type === 'user' && !(this.step?.fields || []).length
 		},
 		/** Shown on both tiers: the server sends `responsible` even when it sends no steps. */
 		actor() { return actorDescription(responsibleActor(this.workflow)) },
 		progressText() { return progressLabel(this.workflow) },
+		/** v4.20.68 — *Due …* or, past it, *Overdue since …*. */
+		due() { return dueState(this.workflow.dueAt, Date.now() / 1000, this.workflow.dueDate) },
 		actions() { return availableActions(this.workflow) },
 		/** v4.10.44 — handled by a service team: a *Service* row. */
 		isService() { return isServiceRequest(this.workflow) },
@@ -234,8 +243,8 @@ export default {
 		claimable() { return !!this.workflow.internal?.claimable && !['completed', 'rejected', 'cancelled'].includes(this.workflow.status) },
 		claimLabel() { return agentActionLabel(AGENT_ACTION.CLAIM) },
 		/** The first available action is the row's button; the rest go in the menu. */
-		primary() { return this.actions[0] || null },
-		secondary() { return this.actions.slice(1) },
+		primary() { return primaryAction(this.actions) || null },
+		secondary() { return this.actions.filter(a => a !== this.primary) },
 	},
 	methods: {
 		t,

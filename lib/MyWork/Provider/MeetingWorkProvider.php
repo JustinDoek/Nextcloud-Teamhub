@@ -50,15 +50,29 @@ use Psr\Log\LoggerInterface;
  * meeting is not something you completed, and putting it under Completed would
  * inflate a number that is supposed to mean "you got this done".
  *
- * ## Read-only, deliberately
+ * ## Answering from the row (v4.20.10)
  *
- * The obvious next feature is Accept/Decline from the row, and it is
- * deliberately absent. Responding to an invitation means writing an iTIP REPLY
- * through the scheduling stack, and HANDOFF's Issue #41 is a live record of how
- * badly that path behaves when it is driven from outside NC Calendar's own UI.
- * Until that is settled, the row says a reply is owed and Open takes you to the
- * place where replying works. Saying "you have not responded" and then failing
- * to record the response would be worse than not offering it.
+ * Until v4.20.10 this section was "Read-only, deliberately": replying means an
+ * iTIP REPLY, and HANDOFF's Issue #41 records how badly hand-made scheduling
+ * writes behaved. Justin's report on 2026-11-16 was the price: an invitation
+ * owed in My Work with no way to pay it here. Accept, Maybe and Decline now go
+ * through `MeetingReplyService`, which hands a METHOD:REPLY to the organiser's
+ * calendar through Nextcloud's public `IHandleImipMessage` (the Mail app's
+ * door for emailed replies), so Nextcloud's own broker writes the answer, and
+ * which reads the event back and fails loudly when the answer did not land.
+ * The original worry, a "you have not responded" that cannot record the
+ * response, is answered by that read-back rather than by hiding the buttons.
+ *
+ * ## Wrapping up (v4.20.19)
+ *
+ * A meeting made with Add meeting (its DESCRIPTION carries `Meeting notes:`)
+ * that has ended, organised by the viewer, in the last `WRAP_UP_DAYS` days,
+ * is a wrap-up owed: **Action required**, opening the wrap-up dialog. Once
+ * wrapped up (or marked as needing none) it is a record under **Completed**
+ * for the same days. The item id is `wrapup:{objectId}:{start}`, so it never
+ * collides with the upcoming row of the same occurrence. What a wrap-up does
+ * is `MeetingWrapUpService`'s; this provider only reads whether it was done
+ * (`MeetingWrapUpMapper`) and records a "no wrap-up needed". DESIGN §2.271.
  *
  * ## The window
  *
@@ -91,6 +105,16 @@ class MeetingWorkProvider implements IWorkProvider {
      */
     public const STATUS_TEAM_EVENT = 'meeting_team_event';
 
+    /** v4.20.19 — a finished meeting you organised, not wrapped up yet. */
+    public const STATUS_WRAP_UP = 'meeting_wrap_up';
+    /** v4.20.19 — wrapped up, or marked as needing no wrap-up. */
+    public const STATUS_WRAPPED = 'meeting_wrapped';
+
+    /** How long after a meeting its wrap-up is asked for, and then kept as a record. */
+    public const WRAP_UP_DAYS = 7;
+
+    private const WRAP_UP_PREFIX = 'wrapup:';
+
     /** Talk call links are `…/call/{token}`; that substring is the marker. */
     private const TALK_URL_MARKER = '/call/';
 
@@ -108,6 +132,10 @@ class MeetingWorkProvider implements IWorkProvider {
         // behaviour is unchanged; there is simply one copy of it now.
         private CalendarIdentityService $identity,
         private TeamCalendarLocator $calendars,
+        // v4.20.10 — Accept / Maybe / Decline from the row.
+        private \OCA\TeamHub\Service\MeetingReplyService $replies,
+        // v4.20.19 — whether a finished meeting was wrapped up.
+        private \OCA\TeamHub\Db\MeetingWrapUpMapper $wrapUps,
         private IL10N $l,
         private LoggerInterface $logger,
     ) {
@@ -131,7 +159,7 @@ class MeetingWorkProvider implements IWorkProvider {
 
     public function getCapabilities(): array {
         return [
-            'actions'       => [ActionType::OPEN, ActionType::JOIN, ActionType::AGENDA],
+            'actions'       => [ActionType::OPEN, ActionType::ACCEPT, ActionType::TENTATIVE, ActionType::DECLINE, ActionType::JOIN, ActionType::AGENDA, ActionType::COMPLETE],
             'resourceTypes' => [self::RESOURCE_TYPE],
             'statuses'      => [
                 self::STATUS_INVITED,
@@ -139,10 +167,13 @@ class MeetingWorkProvider implements IWorkProvider {
                 self::STATUS_ACCEPTED,
                 self::STATUS_ORGANISER,
                 self::STATUS_TEAM_EVENT,
+                self::STATUS_WRAP_UP,
+                self::STATUS_WRAPPED,
             ],
             'categories' => [
                 Category::ACTION_REQUIRED,
                 Category::UPCOMING,
+                Category::COMPLETED,
             ],
             'pagination'  => false,
             'incremental' => false,
@@ -281,12 +312,43 @@ class MeetingWorkProvider implements IWorkProvider {
             }
         }
 
+        // v4.20.19 — the meetings that are over and owe (or had) a wrap-up.
+        foreach ($this->teamCalendars($query->teamIds) as $calendar) {
+            if (count($items) >= $budget) {
+                $truncated = true;
+                break;
+            }
+            try {
+                foreach ($this->eventsInWindow($calendar, $query->now - (self::WRAP_UP_DAYS * 86400), $query->now, $budget) as $event) {
+                    if (count($items) >= $budget) {
+                        $truncated = true;
+                        break;
+                    }
+                    $item = $this->buildWrapUpItem($query, $calendar, $event);
+                    if ($item !== null) {
+                        $items[] = $item;
+                    }
+                }
+            } catch (\Throwable $e) {
+                $this->logger->warning('[TeamHub][MyWork][Meetings] Calendar read failed (wrap-up)', [
+                    'calendarId' => $calendar['id'], 'error' => $e->getMessage(),
+                    'app' => Application::APP_ID,
+                ]);
+            }
+        }
+
         return new WorkItemPage($items, count($items), $truncated);
     }
 
     public function getItem(string $userId, string $providerItemId, array $allowedTeamIds): ?WorkItem {
         if (!$this->isAvailable() || $allowedTeamIds === []) {
             return null;
+        }
+
+        // v4.20.19 — a wrap-up row.
+        $wrapUp = str_starts_with($providerItemId, self::WRAP_UP_PREFIX);
+        if ($wrapUp) {
+            $providerItemId = substr($providerItemId, strlen(self::WRAP_UP_PREFIX));
         }
 
         // "{calendarObjectId}:{occurrenceStart}" — the occurrence is part of
@@ -328,7 +390,9 @@ class MeetingWorkProvider implements IWorkProvider {
                 if ($startTs > 0 && (int)$event['start'] !== $startTs) {
                     continue;
                 }
-                return $this->buildItem($query, $calendar, $event);
+                return $wrapUp
+                    ? $this->buildWrapUpItem($query, $calendar, $event)
+                    : $this->buildItem($query, $calendar, $event);
             }
         }
 
@@ -352,6 +416,31 @@ class MeetingWorkProvider implements IWorkProvider {
     public function getAvailableActions(string $userId, WorkItem $item): array {
         $actions = [ActionType::OPEN];
 
+        // v4.20.19 — a wrap-up opens its dialog, or is marked as not needed.
+        if ($item->status === self::STATUS_WRAP_UP) {
+            return [ActionType::OPEN, ActionType::COMPLETE];
+        }
+        if ($item->status === self::STATUS_WRAPPED) {
+            return [ActionType::OPEN];
+        }
+
+        // v4.20.10 — an invited attendee answers here; the answer they already
+        // gave is not offered again. Organisers and team diary entries have
+        // nothing to answer.
+        $partstat = $item->metadata['partstat'] ?? null;
+        if (!($item->metadata['isOrganiser'] ?? false) && is_string($partstat) && ($item->metadata['eventUid'] ?? '') !== ''
+            && ($item->metadata['canReply'] ?? false)) {
+            foreach ([
+                ActionType::ACCEPT    => 'ACCEPTED',
+                ActionType::TENTATIVE => 'TENTATIVE',
+                ActionType::DECLINE   => 'DECLINED',
+            ] as $verb => $answer) {
+                if ($partstat !== $answer) {
+                    $actions[] = $verb;
+                }
+            }
+        }
+
         if (($item->metadata['talkUrl'] ?? null) !== null) {
             $actions[] = ActionType::JOIN;
         }
@@ -365,6 +454,50 @@ class MeetingWorkProvider implements IWorkProvider {
     public function executeAction(string $userId, WorkItem $item, string $action, array $params): ActionResult {
         if ($action === ActionType::OPEN) {
             return ActionResult::success($this->l->t('Opening the meeting.'));
+        }
+        // v4.20.19 — "No wrap-up needed". Only the organiser has this row,
+        // and getItem() rebuilt it from the calendar, so the check below is
+        // against the event as it is now, not as the client remembers it.
+        if ($action === ActionType::COMPLETE && $item->status === self::STATUS_WRAP_UP) {
+            if (!($item->metadata['isOrganiser'] ?? false)) {
+                return ActionResult::failure($this->l->t('Only the organiser can wrap up this meeting.'));
+            }
+            try {
+                $this->wrapUps->insert(
+                    (string)$item->teamId,
+                    (string)($item->metadata['eventUid'] ?? ''),
+                    (int)($item->metadata['startsAt'] ?? 0),
+                    $userId,
+                    \OCA\TeamHub\Db\MeetingWrapUpMapper::STATUS_SKIPPED,
+                    0,
+                    0,
+                );
+            } catch (\Throwable $e) {
+                // The unique index: it was wrapped up a moment ago, elsewhere.
+                return ActionResult::failure($this->l->t('This meeting was already wrapped up.'));
+            }
+            return ActionResult::success($this->l->t('Marked as needing no wrap-up.'));
+        }
+        $status = match ($action) {
+            ActionType::ACCEPT    => 'accepted',
+            ActionType::TENTATIVE => 'tentative',
+            ActionType::DECLINE   => 'declined',
+            default               => null,
+        };
+        if ($status !== null) {
+            try {
+                $this->replies->reply((string)$item->teamId, $userId, (string)($item->metadata['eventUid'] ?? ''), $status);
+            } catch (\Throwable $e) {
+                $this->logger->info('[TeamHub][MeetingWorkProvider] reply failed', [
+                    'exception' => get_class($e), 'app' => \OCA\TeamHub\AppInfo\Application::APP_ID,
+                ]);
+                return ActionResult::failure($this->l->t('Your reply could not be saved. Try again, or reply in Calendar.'));
+            }
+            return ActionResult::success(match ($status) {
+                'accepted'  => $this->l->t('You accepted the meeting.'),
+                'tentative' => $this->l->t('You answered maybe.'),
+                default     => $this->l->t('You declined the meeting.'),
+            });
         }
         // Join and Agenda never reach here — the frontend opens their URLs
         // directly. If one does arrive it means a client posted a navigation
@@ -532,6 +665,8 @@ class MeetingWorkProvider implements IWorkProvider {
             'end'       => $end,
             'allDay'    => !$vevent->DTSTART->hasTime(),
             'title'     => trim((string)($vevent->SUMMARY ?? '')),
+            // v4.20.10 — the reply names the event by UID.
+            'uid'       => (string)($vevent->UID ?? ''),
             'location'  => isset($vevent->LOCATION) ? (string)$vevent->LOCATION : '',
             'description' => isset($vevent->DESCRIPTION) ? (string)$vevent->DESCRIPTION : '',
             'organizer' => isset($vevent->ORGANIZER) ? (string)$vevent->ORGANIZER : '',
@@ -605,12 +740,15 @@ class MeetingWorkProvider implements IWorkProvider {
             && in_array(self::normaliseAddress((string)$event['organizer']), $self, true);
 
         $partstat = null;
+        $canReply = false;
         foreach ($event['attendees'] as $attendee) {
             if ($attendee['cutype'] === 'ROOM' || $attendee['cutype'] === 'RESOURCE') {
                 continue;
             }
             if (in_array(self::normaliseAddress($attendee['address']), $self, true)) {
                 $partstat = $attendee['partstat'];
+                // v4.20.10 — see MeetingReplyService::canReplyAs().
+                $canReply = $attendee['address'] === strtolower($attendee['address']);
                 break;
             }
         }
@@ -679,6 +817,8 @@ class MeetingWorkProvider implements IWorkProvider {
                 'allDay'        => (bool)$event['allDay'],
                 'isOrganiser'   => $isOrganiser,
                 'partstat'      => $partstat,
+                'eventUid'      => (string)($event['uid'] ?? ''),
+                'canReply'      => $canReply,
                 // A team diary entry is something that is happening, not
                 // something owed — so the shared lead-time rule leaves it in
                 // Upcoming instead of promoting it to Action required as the
@@ -692,6 +832,94 @@ class MeetingWorkProvider implements IWorkProvider {
                 'agendaUrl'     => $agendaUrl,
                 'organiserName' => (string)$event['organizerName'],
                 'attendeeCount' => count($event['attendees']),
+            ],
+            'permissions'    => [
+                'canOpen' => true,
+            ],
+        ]);
+    }
+
+    /**
+     * v4.20.19 — the wrap-up row of a finished meeting the viewer organised
+     * with Add meeting, or null when this event owes none.
+     *
+     * @param array{id:int,teamId:string,name:string,owner:string,slug:string} $calendar
+     * @param array<string,mixed> $event
+     */
+    private function buildWrapUpItem(WorkQuery $query, array $calendar, array $event): ?WorkItem {
+        if ((int)$event['end'] > $query->now || (bool)$event['allDay'] || (string)($event['uid'] ?? '') === '') {
+            return null;
+        }
+        $agendaUrl = $this->agendaUrl((string)($event['description'] ?? ''));
+        if ($agendaUrl === null || $event['organizer'] === ''
+            || !in_array(self::normaliseAddress((string)$event['organizer']), $this->selfAddresses($query->userId), true)) {
+            return null;
+        }
+
+        $record = $this->wrapUps->find((string)$calendar['teamId'], (string)$event['uid'], (int)$event['start']);
+        $done   = $record !== null;
+        $title  = $event['title'] !== '' ? (string)$event['title'] : $this->l->t('Untitled meeting');
+        $wrapUpLabel = $this->l->t('Wrap up');
+
+        if (!$done) {
+            $reason = $this->l->t('The meeting is over. Hand out the action items and link the proposals you discussed.');
+        } elseif ($record['status'] === \OCA\TeamHub\Db\MeetingWrapUpMapper::STATUS_SKIPPED) {
+            $reason = $this->l->t('Marked as needing no wrap-up');
+        } else {
+            $reason = $this->l->n('Wrapped up with %n task', 'Wrapped up with %n tasks', $record['task_count']);
+        }
+
+        return WorkItem::make([
+            'providerId'     => self::ID,
+            'providerItemId' => self::WRAP_UP_PREFIX . $event['objectId'] . ':' . $event['start'],
+            'teamId'         => $calendar['teamId'],
+            'teamName'       => $query->teamName((string)$calendar['teamId']),
+            'category'       => $done ? Category::COMPLETED : Category::ACTION_REQUIRED,
+            'title'          => $this->l->t('Wrap up %1$s', [$title]),
+            'subtitle'       => (string)$calendar['name'],
+            'resourceType'   => self::RESOURCE_TYPE,
+            'resourceId'     => (string)$event['objectId'],
+            'resourceUrl'    => $this->eventUrl($calendar, $event),
+            'openTarget'     => OpenTarget::meetingWrapUp((int)$event['objectId'], (int)$event['start']),
+            'priority'       => $done ? Priority::LOW : Priority::NORMAL,
+            'status'         => $done ? self::STATUS_WRAPPED : self::STATUS_WRAP_UP,
+            'reason'         => $reason,
+            'createdAt'      => (int)$event['end'],
+            'updatedAt'      => null,
+            'dueAt'          => null,
+            'completedAt'    => $done ? $record['created_at'] : null,
+            'assignee'       => null,
+            'waitingFor'     => null,
+            'availableActions' => [],
+            'metadata'       => [
+                'calendarId'   => (int)$calendar['id'],
+                'calendarName' => (string)$calendar['name'],
+                'startsAt'     => (int)$event['start'],
+                'endsAt'       => (int)$event['end'],
+                'allDay'       => false,
+                'isOrganiser'  => true,
+                'eventUid'     => (string)$event['uid'],
+                'agendaUrl'    => $agendaUrl,
+                'wrapUp'       => true,
+                'meetingTitle' => $title,
+                'actionLabels' => [
+                    ActionType::OPEN     => $wrapUpLabel,
+                    ActionType::COMPLETE => $this->l->t('No wrap-up needed'),
+                ],
+                'confirm' => [
+                    ActionType::COMPLETE => [
+                        'title' => $this->l->t('No wrap-up needed'),
+                        'body'  => $this->l->t('No tasks are handed out and no proposals are linked to the notes. You can still do that by hand.'),
+                    ],
+                ],
+                'workflow' => [
+                    'steps' => [
+                        ['label' => $this->l->t('Meeting held'), 'state' => 'done', 'actor' => null, 'at' => (int)$event['end']],
+                        ['label' => $this->l->t('Organiser wraps up'), 'state' => $done ? 'done' : 'current', 'actor' => null, 'at' => $done ? $record['created_at'] : null],
+                        ['label' => $this->l->t('Tasks are with the people named'), 'state' => $done ? 'done' : 'pending', 'actor' => null, 'at' => null],
+                    ],
+                    'current' => $done ? 3 : 2,
+                ],
             ],
             'permissions'    => [
                 'canOpen' => true,

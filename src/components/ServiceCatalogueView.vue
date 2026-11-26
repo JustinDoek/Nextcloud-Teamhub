@@ -440,10 +440,10 @@ export default {
 		 * dialog (pressed its link, or marked it done). When none is left,
 		 * the request is with the team and the dialog closes.
 		 */
-		async completeCreatedTask({ workflow, step }) {
+		async completeCreatedTask({ workflow, step, answers = null }) {
 			this.requestError = ''
 			try {
-				const updated = await this.$store.dispatch('workflows/act', { id: workflow.id, action: 'complete', step })
+				const updated = await this.$store.dispatch('workflows/act', { id: workflow.id, action: 'complete', step, answers })
 				if (updated && ownOpenTasks(updated).length) {
 					this.created = updated
 					return
@@ -516,13 +516,14 @@ export default {
 		 * entry behind the card, so the routing decision is the server's
 		 * catalogue and never a string this component built.
 		 */
-		async submitRequest({ teamId, summary, details, fileIds = [], templateKey = '', profileKey = '' }) {
+		async submitRequest({ teamId, summary = '', details = '', answers = null, version = 0, fileIds = [], templateKey = '', profileKey = '' }) {
 			if (!this.chosen) {
 				return
 			}
 			this.requestError = ''
 			try {
-				const data = { summary, details }
+				// v4.20.54 — a service with a form of its own sends its answers.
+				const data = answers ? { answers, version } : { summary, details }
 				// v4.10.38 — the files ride along; the server shares them
 				// with the service team and keeps them out of the data.
 				if (fileIds.length) {
@@ -559,6 +560,14 @@ export default {
 					return
 				}
 				this.requestError = e?.message || t('teamhub', 'The request could not be sent.')
+				// v4.20.54 — the service was published again in between: read
+				// the catalog again, and the dialog keeps the answers that
+				// still fit the new form.
+				if (e?.conflict && this.chosen) {
+					const key = this.chosen.definitionKey
+					await this.reload()
+					this.chosen = this.entries.find(entry => entry.definitionKey === key) || this.chosen
+				}
 			}
 		},
 	},

@@ -638,11 +638,13 @@ a.th-op__name:focus-visible {
     padding: var(--th-space-sm) var(--th-space-xs);
     border-radius: var(--th-radius-control);
     background: var(--color-background-hover);
-    border-inline-start: var(--th-accent-border) solid transparent;
 }
 
-.th-op-tile--warn  { border-inline-start-color: var(--color-warning); }
-.th-op-tile--alert { border-inline-start-color: var(--color-error); }
+/* v4.20.56 — a tinted fill with its own ink instead of a coloured edge. */
+.th-op-tile--warn  { background: var(--color-warning); color: var(--color-warning-text); }
+.th-op-tile--alert { background: var(--color-error); color: var(--color-error-text); }
+.th-op-tile--warn .th-op-tile__label,
+.th-op-tile--alert .th-op-tile__label { color: inherit; }
 
 .th-op-tile__value {
     font-size: var(--th-font-heading-lg);
@@ -663,15 +665,10 @@ a.th-op__name:focus-visible {
     padding: var(--th-space-sm);
     border-radius: var(--th-radius-control);
     background: var(--color-background-hover);
-    border-inline-start: var(--th-accent-border) solid var(--color-success);
 }
 
-.th-op__milestone--overdue {
-    border-inline-start-color: var(--color-error);
-}
 
-/* v4.13.13 — the current version. The milestone block's shape on a
-   neutral border: a version is context, not a deadline. */
+/* v4.13.13 — the current version, in the milestone block's shape. */
 .th-op__version {
     display: flex;
     align-items: flex-start;
@@ -679,7 +676,6 @@ a.th-op__name:focus-visible {
     padding: var(--th-space-sm);
     border-radius: var(--th-radius-control);
     background: var(--color-background-hover);
-    border-inline-start: var(--th-accent-border) solid var(--color-border-dark);
 }
 
 .th-op__version-icon {
@@ -700,9 +696,8 @@ a.th-op__name:focus-visible {
     color: var(--color-text-maxcontrast);
 }
 
-/* v4.9.7 — the attention strip: the same block shape as the milestone,
-   keyed on the primary colour because it is about the viewer, not the
-   project; each row tones its own glyph and never relies on colour alone. */
+/* v4.9.7 — the attention strip: the same block shape as the milestone;
+   each row tones its own glyph and never relies on colour alone. */
 .th-op__attention {
     display: flex;
     flex-direction: column;
@@ -710,7 +705,6 @@ a.th-op__name:focus-visible {
     padding: var(--th-space-sm);
     border-radius: var(--th-radius-control);
     background: var(--color-background-hover);
-    border-inline-start: var(--th-accent-border) solid var(--color-primary-element);
 }
 
 .th-op__attention-title {
@@ -746,6 +740,10 @@ a.th-op__name:focus-visible {
 .th-op__milestone-icon {
     color: var(--color-text-maxcontrast);
     flex-shrink: 0;
+}
+
+.th-op__milestone--overdue .th-op__milestone-icon {
+    color: var(--color-element-error);
 }
 
 .th-op__milestone-body {
